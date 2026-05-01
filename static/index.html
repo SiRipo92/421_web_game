@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>421 – Jeu de dés multijoueur</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  @keyframes roll {
+    0%   { transform: rotate(0deg) scale(1.2); }
+    50%  { transform: rotate(180deg) scale(0.8); }
+    100% { transform: rotate(360deg) scale(1); }
+  }
+  .dice-roll { animation: roll 0.4s ease; }
+
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%      { opacity: 0.4; transform: scale(0.75); }
+  }
+  .waiting-dot { animation: pulse-dot 1.4s ease-in-out infinite; }
+  .waiting-dot:nth-child(2) { animation-delay: 0.2s; }
+  .waiting-dot:nth-child(3) { animation-delay: 0.4s; }
+
+  @keyframes fade-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .fade-in { animation: fade-in 0.35s ease both; }
+
+  @keyframes shake {
+    0%,100% { transform: translateX(0); }
+    20%     { transform: translateX(-3px) rotate(-4deg); }
+    40%     { transform: translateX(3px) rotate(4deg); }
+    60%     { transform: translateX(-2px) rotate(-2deg); }
+    80%     { transform: translateX(2px) rotate(2deg); }
+  }
+  .die-shake { animation: shake 0.35s ease; }
+
+  .die {
+    display: grid;
+    grid-template-areas:
+      "a . c"
+      ". g ."
+      "d . f";
+    width: 4.5rem; height: 4.5rem;
+    border-radius: 0.6rem;
+    padding: 0.45rem;
+    gap: 2px;
+    cursor: pointer;
+    transition: transform 0.12s, box-shadow 0.12s;
+    position: relative;
+    user-select: none;
+  }
+  .die:hover { transform: translateY(-3px); }
+  .dot {
+    width: 0.72rem; height: 0.72rem;
+    border-radius: 50%;
+    background: currentColor;
+    justify-self: center; align-self: center;
+  }
+  .die[data-val="1"] .dot:nth-child(1) { grid-area: g; }
+  .die[data-val="2"] .dot:nth-child(1) { grid-area: a; }
+  .die[data-val="2"] .dot:nth-child(2) { grid-area: f; }
+  .die[data-val="3"] .dot:nth-child(1) { grid-area: a; }
+  .die[data-val="3"] .dot:nth-child(2) { grid-area: g; }
+  .die[data-val="3"] .dot:nth-child(3) { grid-area: f; }
+  .die[data-val="4"] .dot:nth-child(1) { grid-area: a; }
+  .die[data-val="4"] .dot:nth-child(2) { grid-area: c; }
+  .die[data-val="4"] .dot:nth-child(3) { grid-area: d; }
+  .die[data-val="4"] .dot:nth-child(4) { grid-area: f; }
+  .die[data-val="5"] .dot:nth-child(1) { grid-area: a; }
+  .die[data-val="5"] .dot:nth-child(2) { grid-area: c; }
+  .die[data-val="5"] .dot:nth-child(3) { grid-area: g; }
+  .die[data-val="5"] .dot:nth-child(4) { grid-area: d; }
+  .die[data-val="5"] .dot:nth-child(5) { grid-area: f; }
+  .die[data-val="6"] .dot:nth-child(1) { grid-area: a; }
+  .die[data-val="6"] .dot:nth-child(2) { grid-area: c; }
+  .die[data-val="6"] .dot:nth-child(3) { grid-area: d; }
+  .die[data-val="6"] .dot:nth-child(4) { grid-area: f; }
+  .die[data-val="6"] .dot:nth-child(5) { grid-area: g; grid-column: 1; }
+  .die[data-val="6"] .dot:nth-child(6) { grid-area: g; grid-column: 3; }
+
+  /* Reroll badge on selected dice */
+  .die .reroll-badge {
+    position: absolute; top: 2px; right: 3px;
+    font-size: 0.6rem; line-height: 1;
+    opacity: 0.75;
+  }
+
+  /* Small dice for strips */
+  .die-sm {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 1.5rem; height: 1.5rem;
+    border-radius: 0.25rem;
+    font-size: 0.75rem; font-weight: 800;
+    background: white; color: #111;
+    flex-shrink: 0;
+  }
+  .die-sm.dim { background: #374151; color: #9ca3af; }
+</style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen font-sans">
+
+<!-- LOBBY ───────────────────────────────────────────────────────────────── -->
+<div id="lobby" class="flex flex-col items-center justify-center min-h-screen gap-6 px-4">
+  <h1 class="text-5xl font-black tracking-tight text-yellow-400">🎲 421</h1>
+  <p class="text-gray-400 text-sm">Jeu de dés multijoueur</p>
+  <div class="bg-gray-800 rounded-2xl p-6 w-full max-w-sm flex flex-col gap-4 shadow-xl">
+    <input id="nameInput" type="text" placeholder="Votre nom" maxlength="20"
+      class="bg-gray-700 rounded-lg px-4 py-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-yellow-400"/>
+    <button onclick="createGame()"
+      class="bg-yellow-400 hover:bg-yellow-300 text-gray-900 font-bold py-2 rounded-lg transition">
+      Créer une partie
+    </button>
+    <div class="relative flex items-center gap-2 text-gray-500">
+      <div class="flex-1 border-t border-gray-600"></div>
+      <span class="text-xs">ou</span>
+      <div class="flex-1 border-t border-gray-600"></div>
+    </div>
+    <div class="flex gap-2">
+      <input id="joinInput" type="text" placeholder="Code de partie" maxlength="8"
+        class="bg-gray-700 rounded-lg px-4 py-2 flex-1 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-400 uppercase tracking-widest"/>
+      <button onclick="joinGame()"
+        class="bg-blue-500 hover:bg-blue-400 text-white font-bold px-4 rounded-lg transition">
+        Rejoindre
+      </button>
+    </div>
+    <p id="lobbyError" class="text-red-400 text-sm hidden text-center"></p>
+  </div>
+</div>
+
+<!-- WAITING ROOM ─────────────────────────────────────────────────────────── -->
+<div id="waiting" class="hidden flex-col items-center justify-center min-h-screen gap-8 px-4">
+  <h1 class="text-4xl font-black text-yellow-400">🎲 421</h1>
+  <div class="bg-gray-800 rounded-2xl p-6 w-full max-w-sm shadow-xl flex flex-col gap-5">
+    <div class="text-center">
+      <p class="text-gray-400 text-xs uppercase tracking-widest mb-2">Code de la partie</p>
+      <div class="flex items-center justify-center gap-3">
+        <span id="gameCode" class="text-4xl font-mono font-black text-yellow-400 tracking-widest"></span>
+        <button onclick="copyCode()" class="text-gray-400 hover:text-yellow-400 transition text-xl" title="Copier">📋</button>
+      </div>
+      <p id="copyFeedback" class="text-green-400 text-xs mt-1 opacity-0 transition-opacity">Copié !</p>
+    </div>
+    <div id="playerSlots" class="flex flex-col gap-3"></div>
+    <div id="waitingStatus" class="flex items-center justify-center gap-2 text-gray-400 text-sm"></div>
+  </div>
+</div>
+
+<!-- INITIAL ROLL ─────────────────────────────────────────────────────────── -->
+<div id="initial_roll" class="hidden flex-col items-center justify-center min-h-screen gap-8 px-4">
+  <h1 class="text-4xl font-black text-yellow-400">🎲 Qui commence ?</h1>
+  <p class="text-gray-400 text-sm text-center">Le joueur avec le dé le plus bas commence et donne le rythme.</p>
+  <div id="rollCards" class="flex flex-col gap-3 w-full max-w-sm"></div>
+  <button id="rollOrderBtn" onclick="rollForOrder()"
+    class="bg-yellow-400 hover:bg-yellow-300 text-gray-900 font-bold py-3 px-10 rounded-xl text-lg transition shadow-lg">
+    🎲 Lancer le dé
+  </button>
+  <p id="rollOrderStatus" class="text-gray-400 text-sm text-center min-h-5"></p>
+  <div class="bg-gray-800 px-4 py-2 rounded-xl w-full max-w-sm">
+    <div id="initLog" class="text-xs text-gray-400 flex flex-col gap-0.5"></div>
+  </div>
+</div>
+
+<!-- WAITING TO JOIN ──────────────────────────────────────────────────────── -->
+<div id="waiting_to_join" class="hidden flex-col items-center justify-center min-h-screen gap-6 px-4">
+  <h1 class="text-4xl font-black text-yellow-400">🎲 421</h1>
+  <div class="bg-gray-800 rounded-2xl p-6 w-full max-w-sm shadow-xl flex flex-col gap-4 text-center">
+    <div class="text-4xl">⏳</div>
+    <p class="text-xl font-bold">En attente de rejoindre</p>
+    <p class="text-gray-400 text-sm leading-relaxed">
+      Une partie est en cours.<br/>
+      Vous rejoindrez après qu'un joueur ait perdu <strong class="text-white">deux sets</strong>.
+    </p>
+    <div id="waitJoinProgress" class="flex flex-col gap-2 mt-2"></div>
+  </div>
+  <div class="bg-gray-800 rounded-xl px-4 py-3 w-full max-w-sm max-h-48 overflow-y-auto">
+    <p class="text-gray-500 text-xs uppercase tracking-widest mb-1">Partie en cours</p>
+    <div id="waitJoinLog" class="text-sm text-gray-300 flex flex-col-reverse gap-0.5"></div>
+  </div>
+</div>
+
+<!-- GAME BOARD ───────────────────────────────────────────────────────────── -->
+<div id="board" class="hidden min-h-screen flex flex-col">
+
+  <!-- Header -->
+  <div class="bg-gray-800 px-4 py-2 flex items-center justify-between shadow shrink-0">
+    <span class="font-black text-yellow-400 text-lg">🎲 421</span>
+    <div id="phaseTag" class="text-xs font-bold uppercase tracking-widest px-3 py-1 rounded-full bg-yellow-400 text-gray-900"></div>
+    <span id="roundTag" class="text-gray-400 text-sm"></span>
+  </div>
+
+  <!-- Players strip: last round summary -->
+  <div id="playersStrip" class="flex gap-2 overflow-x-auto px-4 py-2 bg-gray-800/60 border-b border-gray-700/60 shrink-0"></div>
+
+  <!-- Scrollable content area -->
+  <div class="flex-1 flex flex-col overflow-y-auto">
+
+    <!-- Round info bar -->
+    <div id="roundInfoBar" class="px-4 pt-3 pb-1 shrink-0"></div>
+
+    <!-- Dice area -->
+    <div class="flex flex-col items-center gap-4 px-4 py-4 shrink-0">
+      <div id="turnLabel" class="text-gray-300 text-sm font-medium"></div>
+      <div id="diceArea" class="flex gap-3 justify-center"></div>
+      <div id="diceHint" class="text-xs text-gray-500 text-center h-4"></div>
+      <div id="comboLabel" class="text-2xl font-black text-yellow-300 h-8 text-center"></div>
+      <div id="rollsLeft" class="flex items-center gap-2 text-gray-400 text-sm"></div>
+      <div id="actionButtons" class="flex gap-3"></div>
+    </div>
+
+    <!-- Visual round journal -->
+    <div class="mx-4 mb-4 bg-gray-800 rounded-2xl overflow-hidden shrink-0">
+      <div class="px-4 py-2 border-b border-gray-700 flex items-center justify-between">
+        <span class="text-xs font-bold uppercase tracking-widest text-gray-400">Ce round</span>
+        <span id="maxThrowsBadge" class="text-xs text-gray-500"></span>
+      </div>
+      <div id="roundPlays" class="flex flex-col divide-y divide-gray-700/50 min-h-12"></div>
+    </div>
+
+    <!-- Game log -->
+    <div class="mx-4 mb-4 bg-gray-800/60 rounded-xl overflow-hidden shrink-0">
+      <div class="px-4 py-1.5 border-b border-gray-700/60">
+        <span class="text-xs uppercase tracking-widest text-gray-500">Journal</span>
+      </div>
+      <div id="log" class="text-xs text-gray-400 flex flex-col-reverse gap-0.5 px-4 py-2 max-h-32 overflow-y-auto"></div>
+    </div>
+
+  </div>
+</div>
+
+<!-- FINISHED ─────────────────────────────────────────────────────────────── -->
+<div id="finished" class="hidden flex-col items-center justify-center min-h-screen gap-6 px-4">
+  <h1 class="text-5xl font-black text-yellow-400">🏆 Fin de partie</h1>
+  <div id="finalScores" class="bg-gray-800 rounded-2xl p-6 w-full max-w-sm shadow-xl"></div>
+  <button onclick="location.reload()"
+    class="bg-yellow-400 hover:bg-yellow-300 text-gray-900 font-bold py-2 px-8 rounded-lg transition">
+    Rejouer
+  </button>
+</div>
+
+<script>
+let gameId = null, playerId = null, ws = null, state = null;
+
+const ALL_SCREENS = ['lobby','waiting','initial_roll','waiting_to_join','board','finished'];
+
+function show(id) {
+  ALL_SCREENS.forEach(s => {
+    const el = document.getElementById(s);
+    el.classList.add('hidden');
+    el.classList.remove('flex');
+  });
+  const el = document.getElementById(id);
+  el.classList.remove('hidden');
+  el.classList.add('flex');
+}
+
+function lobbyError(msg) {
+  const el = document.getElementById('lobbyError');
+  el.textContent = msg;
+  el.classList.remove('hidden');
+}
+
+// ── API ───────────────────────────────────────────────────────────────────
+
+async function createGame() {
+  const name = document.getElementById('nameInput').value.trim();
+  if (!name) return lobbyError('Entrez votre nom');
+  const r = await fetch('/api/create').then(r => r.json());
+  gameId = r.game_id;
+  const j = await fetch(`/api/join/${gameId}?name=${encodeURIComponent(name)}`).then(r => r.json());
+  if (j.error) return lobbyError(j.error);
+  playerId = j.player_id;
+  enterWaiting();
+}
+
+async function joinGame() {
+  const name = document.getElementById('nameInput').value.trim();
+  const code = document.getElementById('joinInput').value.trim();
+  if (!name) return lobbyError('Entrez votre nom');
+  if (!code) return lobbyError('Entrez un code de partie');
+  const j = await fetch(`/api/join/${code}?name=${encodeURIComponent(name)}`).then(r => r.json());
+  if (j.error) return lobbyError(j.error);
+  gameId = j.game_id;
+  playerId = j.player_id;
+  if (j.status === 'waiting') show('waiting_to_join');
+  else enterWaiting();
+  connectWS();
+}
+
+function copyCode() {
+  navigator.clipboard.writeText(gameId.toUpperCase()).then(() => {
+    const fb = document.getElementById('copyFeedback');
+    fb.style.opacity = '1';
+    setTimeout(() => { fb.style.opacity = '0'; }, 1500);
+  });
+}
+
+// ── WebSocket ─────────────────────────────────────────────────────────────
+
+function enterWaiting() {
+  show('waiting');
+  document.getElementById('gameCode').textContent = gameId.toUpperCase();
+  connectWS();
+}
+
+function connectWS() {
+  ws = new WebSocket(`ws://${location.host}/ws/${gameId}/${playerId}`);
+  ws.onmessage = e => handleState(JSON.parse(e.data));
+  ws.onclose   = () => setTimeout(connectWS, 2000);
+}
+
+function send(obj) { ws && ws.readyState === 1 && ws.send(JSON.stringify(obj)); }
+
+// ── State routing ─────────────────────────────────────────────────────────
+
+function handleState(s) {
+  state = s;
+  const amWaiting = (s.waiting_players || []).some(p => p.id === playerId);
+  if (amWaiting)               { renderWaitingToJoin(s); return; }
+  if (s.phase === 'waiting')   { renderWaiting(s);       return; }
+  if (s.phase === 'initial_roll') { renderInitialRoll(s); return; }
+  if (s.phase === 'finished')  { renderFinished(s);      return; }
+  renderBoard(s);
+}
+
+// ── Waiting room ──────────────────────────────────────────────────────────
+
+function renderWaiting(s) {
+  show('waiting');
+  document.getElementById('gameCode').textContent = (gameId || s.game_id || '').toUpperCase();
+  const slots = document.getElementById('playerSlots');
+  slots.innerHTML = '';
+  s.players.forEach(p => {
+    const isMe = p.id === playerId;
+    const div = document.createElement('div');
+    div.className = 'flex items-center gap-3 bg-gray-700/60 rounded-xl px-4 py-3 fade-in';
+    div.innerHTML = `
+      <div class="w-9 h-9 rounded-full bg-yellow-400 text-gray-900 font-black flex items-center justify-center text-sm flex-shrink-0">${p.name[0].toUpperCase()}</div>
+      <span class="font-medium flex-1">${p.name}${isMe ? ' <span class="text-yellow-400 text-xs">(vous)</span>' : ''}</span>
+      <span class="w-2 h-2 rounded-full ${p.connected ? 'bg-green-400' : 'bg-gray-500'}"></span>`;
+    slots.appendChild(div);
+  });
+  for (let i = s.players.length; i < Math.min(6, Math.max(2, s.players.length + 1)); i++) {
+    const div = document.createElement('div');
+    div.className = 'flex items-center gap-3 bg-gray-700/20 border border-dashed border-gray-600 rounded-xl px-4 py-3';
+    div.innerHTML = `<div class="w-9 h-9 rounded-full border-2 border-dashed border-gray-600 flex-shrink-0"></div><span class="text-gray-600 text-sm italic">En attente d'un joueur…</span>`;
+    slots.appendChild(div);
+  }
+  const status = document.getElementById('waitingStatus');
+  if (s.players.length < 2) {
+    status.innerHTML = `<span class="waiting-dot w-2 h-2 rounded-full bg-yellow-400 inline-block"></span><span class="waiting-dot w-2 h-2 rounded-full bg-yellow-400 inline-block"></span><span class="waiting-dot w-2 h-2 rounded-full bg-yellow-400 inline-block"></span><span class="ml-1">La partie démarre dès qu'un second joueur rejoint</span>`;
+  } else {
+    status.innerHTML = `<span class="text-green-400 font-bold">Lancement imminent…</span>`;
+  }
+}
+
+// ── Initial roll ──────────────────────────────────────────────────────────
+
+function renderInitialRoll(s) {
+  show('initial_roll');
+  const me = s.players.find(p => p.id === playerId);
+  const needsRoll = me?.initial_roll == null;
+  document.getElementById('rollCards').innerHTML = s.players.map(p => {
+    const isMe = p.id === playerId;
+    const rolled = p.initial_roll != null;
+    return `<div class="flex items-center gap-3 bg-gray-800 rounded-xl px-4 py-3 ${isMe ? 'ring-2 ring-yellow-400' : ''}">
+      <div class="w-8 h-8 rounded-full bg-yellow-400 text-gray-900 font-black flex items-center justify-center text-sm">${p.name[0].toUpperCase()}</div>
+      <span class="flex-1 font-medium">${p.name}${isMe ? ' <span class="text-yellow-400 text-xs">(vous)</span>' : ''}</span>
+      ${rolled
+        ? `<span class="w-10 h-10 rounded-lg bg-white text-gray-900 font-black text-xl flex items-center justify-center shadow">${p.initial_roll}</span>`
+        : `<span class="w-10 h-10 rounded-lg bg-gray-700 border-2 border-dashed border-gray-500 flex items-center justify-center text-gray-500 text-xl">?</span>`
+      }
+    </div>`;
+  }).join('');
+  const btn = document.getElementById('rollOrderBtn');
+  btn.style.display = needsRoll ? '' : 'none';
+  const allRolled = s.players.every(p => p.initial_roll != null);
+  document.getElementById('rollOrderStatus').textContent =
+    needsRoll ? '' : allRolled ? 'Calcul de l\'ordre…' : 'En attente des autres joueurs…';
+  document.getElementById('initLog').innerHTML = s.log.slice(-5).reverse().map(l => `<div>${l}</div>`).join('');
+}
+
+function rollForOrder() {
+  send({ action: 'initial_roll' });
+  document.getElementById('rollOrderBtn').style.display = 'none';
+}
+
+// ── Waiting to join ───────────────────────────────────────────────────────
+
+function renderWaitingToJoin(s) {
+  show('waiting_to_join');
+  document.getElementById('waitJoinProgress').innerHTML = s.players.map(p =>
+    `<div class="flex items-center justify-between text-sm bg-gray-700/40 rounded-lg px-3 py-2">
+      <span>${p.name}</span>
+      <span class="text-xs text-gray-400">Sets perdus: <strong class="text-white">${p.sets_lost || 0}/2</strong></span>
+    </div>`
+  ).join('');
+  document.getElementById('waitJoinLog').innerHTML =
+    s.log.slice().reverse().map(l => `<div class="text-gray-400">${l}</div>`).join('');
+}
+
+// ── Board ─────────────────────────────────────────────────────────────────
+
+function comboLabel(combo, fiches) {
+  if (!combo) return '';
+  const special = { '421': '🎯 421!', '111': '⭐ 111!', 'nénette': '😏 Nénette' };
+  return (special[combo] ?? combo) + (fiches > 1 ? ` · ${fiches}f` : fiches === 1 ? ' · 1f' : '');
+}
+
+function renderBoard(s) {
+  show('board');
+  document.getElementById('phaseTag').textContent = s.phase === 'charge' ? 'Charge' : 'Décharge';
+  document.getElementById('roundTag').textContent  = `R${s.round} · Pool: ${s.pool} 🪙`;
+
+  // ── Players strip (last round plays) ──
+  const lastPlays = {};
+  (s.last_round_plays || []).forEach(lp => { lastPlays[lp.player_id] = lp; });
+  document.getElementById('playersStrip').innerHTML = s.players.map(p => {
+    const isActive = p.id === s.current_player_id;
+    const isMe     = p.id === playerId;
+    const lp       = lastPlays[p.id];
+    const doneIcon = p.turn?.done ? '<span class="text-green-400 text-xs">✓</span>' : '';
+    const diceRow  = lp
+      ? lp.dice.slice().sort((a,b)=>b-a).map(v => `<span class="die-sm">${v}</span>`).join('')
+      : '<span class="text-gray-600 text-xs">–</span>';
+    const comboRow = lp?.combo ? `<span class="text-xs opacity-60 truncate max-w-full">${comboLabel(lp.combo, lp.fiches)}</span>` : '';
+    return `<div class="flex flex-col items-center px-3 py-1.5 rounded-xl text-xs gap-0.5 min-w-max shrink-0
+      ${isActive ? 'bg-yellow-400 text-gray-900' : 'bg-gray-700 text-gray-300'}
+      ${isMe ? 'ring-2 ring-white' : ''}">
+      <span class="font-bold whitespace-nowrap text-xs">${p.name}${isMe ? ' (vous)' : ''} ${doneIcon}</span>
+      <div class="flex gap-0.5">${diceRow}</div>
+      ${comboRow}
+      <span class="font-black">${p.tokens} 🪙</span>
+    </div>`;
+  }).join('');
+
+  const me         = s.players.find(p => p.id === playerId);
+  const isMyTurn   = s.current_player_id === playerId;
+  const isStarter  = playerId === s.round_starter_id;
+  const myTurn     = me?.turn;
+  const rollsUsed  = myTurn ? 3 - myTurn.rolls_left : 0;
+  const hitMax     = !isStarter && rollsUsed >= s.max_throws;
+  const someSelected = myTurn?.reroll?.some(r => r) ?? false;
+
+  // ── Round info bar ──
+  const starterName  = s.players.find(p => p.id === s.round_starter_id)?.name ?? '';
+  const starterPlay  = s.current_round_plays?.find(p => p.is_starter);
+  const infoBar      = document.getElementById('roundInfoBar');
+  if (isMyTurn && myTurn && !myTurn.done) {
+    if (isStarter) {
+      infoBar.innerHTML = `<div class="text-xs text-yellow-400/80 text-center bg-yellow-400/10 rounded-lg px-3 py-2">
+        Vous donnez le rythme — votre nombre de lancers fixe le maximum pour les autres
+      </div>`;
+    } else if (starterPlay) {
+      infoBar.innerHTML = `<div class="text-xs text-center bg-blue-500/10 text-blue-300 rounded-lg px-3 py-2">
+        ${starterName} a joué <strong>${comboLabel(starterPlay.combo, starterPlay.fiches)}</strong>
+        en <strong>${starterPlay.rolls_used}</strong> lancer(s) — vous avez <strong>${s.max_throws}</strong> lancer(s) max
+      </div>`;
+    } else {
+      infoBar.innerHTML = `<div class="text-xs text-gray-500 text-center py-1">En attente du lancer de ${starterName}…</div>`;
+    }
+  } else {
+    infoBar.innerHTML = '';
+  }
+
+  // ── Turn label ──
+  const activePlayer = s.players.find(p => p.id === s.current_player_id);
+  document.getElementById('turnLabel').textContent =
+    isMyTurn ? 'Votre tour !' : `Tour de ${activePlayer?.name ?? ''}…`;
+
+  // ── Dice area ──
+  const diceArea   = document.getElementById('diceArea');
+  const activeTurn = activePlayer?.turn;
+  const displayTurn = isMyTurn ? myTurn : activeTurn;
+
+  if (displayTurn && displayTurn.dice.some(d => d > 0)) {
+    // Can toggle when: my turn, after first roll, not done, not past max
+    const canToggle = isMyTurn && !myTurn.done && myTurn.rolls_left > 0 && myTurn.rolls_left < 3 && !hitMax;
+    diceArea.innerHTML = displayTurn.dice.map((val, i) => {
+      const marked = isMyTurn && displayTurn.reroll[i];
+      const dots   = Array(val).fill('<div class="dot"></div>').join('');
+      return `<div class="die ${marked
+          ? 'bg-orange-400 text-gray-900 shadow-xl ring-4 ring-orange-500'
+          : 'bg-white text-gray-800 shadow'}"
+        data-val="${val}"
+        onclick="${canToggle ? `toggleKeep(${i})` : ''}">
+        ${marked ? '<span class="reroll-badge">↻</span>' : ''}
+        ${dots}
+      </div>`;
+    }).join('');
+  } else {
+    diceArea.innerHTML = [0,1,2].map(() =>
+      `<div class="die bg-gray-700 text-gray-600 shadow" data-val="0"><div class="dot" style="grid-area:g"></div></div>`
+    ).join('');
+  }
+
+  // ── Dice hint ──
+  const hint = document.getElementById('diceHint');
+  if (isMyTurn && myTurn && !myTurn.done) {
+    if (myTurn.rolls_left === 3) {
+      hint.textContent = '';
+    } else if (hitMax) {
+      hint.textContent = `Max ${s.max_throws} lancer(s) atteint — validez`;
+    } else {
+      const n = (myTurn.reroll || []).filter(r => r).length;
+      hint.textContent = n === 0
+        ? 'Cliquez sur les dés à relancer, ou validez pour accepter'
+        : `${n} dé(s) marqué(s) ↻ — relancez ou validez`;
+    }
+  } else {
+    hint.textContent = '';
+  }
+
+  // ── Combo label ──
+  const cl = document.getElementById('comboLabel');
+  cl.textContent = displayTurn?.combo ? comboLabel(displayTurn.combo, displayTurn.fiches ?? 0) : '';
+
+  // ── Rolls indicator ──
+  const rl = document.getElementById('rollsLeft');
+  if (isMyTurn && myTurn) {
+    const cap = isStarter ? 3 : s.max_throws;
+    rl.innerHTML = Array(3).fill(0).map((_, i) => {
+      const used = i < rollsUsed;
+      const available = !used && i < cap;
+      return `<span class="w-3 h-3 rounded-full inline-block ${used ? 'bg-yellow-400' : available ? 'bg-gray-600' : 'bg-gray-800 opacity-30'}"></span>`;
+    }).join('') + `<span class="ml-2 text-sm">${Math.max(0, (isStarter ? 3 : s.max_throws) - rollsUsed)} restant(s)</span>`;
+  } else {
+    rl.innerHTML = '';
+  }
+
+  // ── Action buttons ──
+  const btns = document.getElementById('actionButtons');
+  btns.innerHTML = '';
+  if (isMyTurn && myTurn && !myTurn.done) {
+    if (myTurn.rolls_left === 3) {
+      // First throw: always available
+      const btn = document.createElement('button');
+      btn.className = 'bg-yellow-400 hover:bg-yellow-300 text-gray-900 font-bold py-3 px-8 rounded-xl text-lg transition shadow-lg';
+      btn.textContent = '🎲 Lancer';
+      btn.onclick = rollDice;
+      btns.appendChild(btn);
+    } else {
+      // After first throw: show Relancer if dice selected AND can roll
+      if (someSelected && !hitMax && myTurn.rolls_left > 0) {
+        const btn = document.createElement('button');
+        btn.className = 'bg-orange-500 hover:bg-orange-400 text-white font-bold py-3 px-6 rounded-xl text-lg transition shadow-lg';
+        btn.textContent = '↻ Relancer';
+        btn.onclick = rollDice;
+        btns.appendChild(btn);
+      }
+      // Always show Valider after first throw
+      const btn2 = document.createElement('button');
+      btn2.className = 'bg-green-500 hover:bg-green-400 text-white font-bold py-3 px-6 rounded-xl text-lg transition shadow-lg';
+      btn2.textContent = '✓ Valider';
+      btn2.onclick = doneTurn;
+      btns.appendChild(btn2);
+    }
+  }
+
+  // ── Max throws badge ──
+  const badge = document.getElementById('maxThrowsBadge');
+  if (s.round_starter_id) {
+    const starterDone = s.current_round_plays?.some(p => p.is_starter);
+    badge.textContent = starterDone
+      ? `Max ${s.max_throws} lancer(s) ce round`
+      : `${starterName} donne le rythme…`;
+  } else {
+    badge.textContent = '';
+  }
+
+  // ── Current round plays (visual journal) ──
+  const plays = s.current_round_plays || [];
+  const roundPlays = document.getElementById('roundPlays');
+  if (plays.length === 0) {
+    roundPlays.innerHTML = `<div class="px-4 py-3 text-xs text-gray-600 italic">Les joueurs n'ont pas encore joué ce round.</div>`;
+  } else {
+    roundPlays.innerHTML = plays.map((play, idx) => {
+      const isLoser = idx === plays.indexOf(plays.reduce((a,b) => a.rank < b.rank ? a : b));
+      const diceHtml = play.dice.slice().sort((a,b)=>b-a).map(v =>
+        `<span class="die-sm">${v}</span>`
+      ).join('');
+      return `<div class="flex items-center gap-3 px-4 py-2.5 ${play.is_starter ? 'bg-yellow-400/8' : ''}">
+        <div class="flex flex-col w-28 shrink-0">
+          <span class="font-bold text-sm ${play.is_starter ? 'text-yellow-400' : 'text-gray-200'} truncate">
+            ${play.is_starter ? '▶ ' : ''}${play.name}
+          </span>
+          <span class="text-xs text-gray-500">${play.rolls_used} lancer(s)</span>
+        </div>
+        <div class="flex gap-1">${diceHtml}</div>
+        <div class="flex flex-col flex-1 ml-1">
+          <span class="font-black text-sm ${play.is_starter ? 'text-yellow-300' : 'text-white'}">${comboLabel(play.combo, play.fiches)}</span>
+        </div>
+        ${isLoser && plays.length > 1 ? '<span class="text-red-400 text-xs shrink-0">←</span>' : ''}
+      </div>`;
+    }).join('');
+  }
+
+  // ── Log ──
+  document.getElementById('log').innerHTML =
+    s.log.slice().reverse().map(l => `<div>${l}</div>`).join('');
+}
+
+// ── Finished ──────────────────────────────────────────────────────────────
+
+function renderFinished(s) {
+  show('finished');
+  const sorted = [...s.players].sort((a,b) => a.tokens - b.tokens);
+  document.getElementById('finalScores').innerHTML =
+    `<h2 class="text-xl font-black mb-4 text-center">Scores finaux</h2>` +
+    sorted.map((p, i) =>
+      `<div class="flex justify-between items-center py-2 border-b border-gray-700">
+         <span class="${i===0?'text-yellow-400 font-bold':''}">${i===0?'🏆 ':''}${p.name}</span>
+         <span class="font-mono">${p.tokens} 🪙</span>
+       </div>`
+    ).join('') +
+    `<p class="text-center mt-4 text-gray-400 text-sm">${s.log.at(-1)??''}</p>`;
+}
+
+// ── Actions ───────────────────────────────────────────────────────────────
+
+function toggleKeep(i) { send({ action: 'keep', index: i }); }
+
+function rollDice() {
+  send({ action: 'roll' });
+  document.querySelectorAll('.die').forEach(d => {
+    d.classList.add('dice-roll');
+    d.addEventListener('animationend', () => d.classList.remove('dice-roll'), { once: true });
+  });
+}
+
+function doneTurn() { send({ action: 'done' }); }
+</script>
+</body>
+</html>

@@ -30,7 +30,7 @@ coverage.xml
 htmlcov/
 .ruff_cache/
 
-# Claude Code
+# Local tools
 .claude/
 
 # macOS
