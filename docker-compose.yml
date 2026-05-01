@@ -1,0 +1,6 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8421:8421"
+    restart: unless-stopped
