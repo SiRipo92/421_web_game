@@ -1,6 +1,12 @@
+import warnings
+
+# Must be first: sentry-sdk calls asyncio.iscoroutinefunction() (deprecated in Python ≥3.14)
+# during import-time instrumentation. With PYTHONWARNINGS=error this crashes before any
+# FastAPI middleware is active. The filter must precede all other imports.
+warnings.filterwarnings("ignore", message=".*asyncio.iscoroutinefunction.*")
+
 import logging
 import sys
-import warnings
 from contextlib import asynccontextmanager
 
 import sentry_sdk
@@ -14,10 +20,6 @@ from app.db.models import Base  # noqa: F401
 from app.game.ws import router as game_router
 from app.routers.auth import router as auth_router
 from app.routers.rankings import router as rankings_router
-
-# sentry-sdk calls asyncio.iscoroutinefunction() which is deprecated in Python ≥3.14
-# and raises under strict warning modes. Suppress before sentry_sdk.init() is called.
-warnings.filterwarnings("ignore", message=".*asyncio.iscoroutinefunction.*")
 
 logging.basicConfig(
     level=logging.DEBUG if settings.debug else logging.INFO,
