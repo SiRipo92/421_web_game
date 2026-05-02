@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>421 – Connexion</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen font-sans flex flex-col items-center justify-center px-4 gap-6">
+
+<h1 class="text-5xl font-black tracking-tight text-yellow-400">🎲 421</h1>
+<p class="text-gray-400 text-sm -mt-4">Jeu de dés multijoueur</p>
+
+<div class="bg-gray-800 rounded-2xl p-6 w-full max-w-sm shadow-xl flex flex-col gap-5">
+
+  <!-- Tabs -->
+  <div class="flex rounded-xl overflow-hidden border border-gray-700">
+    <button id="tabLogin" onclick="switchTab('login')"
+      class="flex-1 py-2 text-sm font-bold bg-yellow-400 text-gray-900 transition">
+      Se connecter
+    </button>
+    <button id="tabRegister" onclick="switchTab('register')"
+      class="flex-1 py-2 text-sm font-bold bg-transparent text-gray-400 transition">
+      Créer un compte
+    </button>
+  </div>
+
+  <!-- Login form -->
+  <form id="loginForm" onsubmit="submitLogin(event)" class="flex flex-col gap-3">
+    <input id="loginEmail" type="email" placeholder="Email" required
+      class="bg-gray-700 rounded-lg px-4 py-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-yellow-400"/>
+    <input id="loginPassword" type="password" placeholder="Mot de passe" required
+      class="bg-gray-700 rounded-lg px-4 py-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-yellow-400"/>
+    <p id="loginError" class="text-red-400 text-xs hidden"></p>
+    <button type="submit"
+      class="bg-yellow-400 hover:bg-yellow-300 text-gray-900 font-bold py-2 rounded-lg transition">
+      Se connecter
+    </button>
+  </form>
+
+  <!-- Register form -->
+  <form id="registerForm" onsubmit="submitRegister(event)" class="hidden flex-col gap-3">
+    <input id="regUsername" type="text" placeholder="Nom d'utilisateur" maxlength="32" required
+      class="bg-gray-700 rounded-lg px-4 py-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-yellow-400"/>
+    <input id="regEmail" type="email" placeholder="Email" required
+      class="bg-gray-700 rounded-lg px-4 py-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-yellow-400"/>
+    <input id="regPassword" type="password" placeholder="Mot de passe (8 caractères min.)" required
+      class="bg-gray-700 rounded-lg px-4 py-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-yellow-400"/>
+    <p id="registerError" class="text-red-400 text-xs hidden"></p>
+    <button type="submit"
+      class="bg-yellow-400 hover:bg-yellow-300 text-gray-900 font-bold py-2 rounded-lg transition">
+      Créer mon compte
+    </button>
+  </form>
+
+  <!-- Divider -->
+  <div class="flex items-center gap-2 text-gray-600">
+    <div class="flex-1 border-t border-gray-700"></div>
+    <span class="text-xs">ou</span>
+    <div class="flex-1 border-t border-gray-700"></div>
+  </div>
+
+  <!-- Guest section -->
+  <div id="guestSection" class="flex flex-col gap-2">
+    <p class="text-xs text-gray-500 text-center">Jouer sans compte — votre progression ne sera pas sauvegardée.</p>
+    <div id="guestNameRow" class="hidden flex gap-2">
+      <input id="guestName" type="text" placeholder="Votre pseudo" maxlength="20"
+        class="bg-gray-700 rounded-lg px-3 py-2 flex-1 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-400"/>
+      <button onclick="confirmGuest()"
+        class="bg-blue-500 hover:bg-blue-400 text-white font-bold px-4 rounded-lg transition">
+        OK
+      </button>
+    </div>
+    <p id="guestError" class="text-red-400 text-xs hidden"></p>
+    <button id="guestBtn" onclick="startGuest()"
+      class="border border-gray-600 hover:border-gray-400 text-gray-300 hover:text-white font-medium py-2 rounded-lg transition text-sm">
+      Jouer en invité
+    </button>
+  </div>
+
+</div>
+
+<footer class="text-xs text-gray-600 text-center">
+  <a href="/privacy.html" class="hover:text-gray-400">Politique de confidentialité</a>
+</footer>
+
+<script>
+function switchTab(tab) {
+  const isLogin = tab === 'login';
+  document.getElementById('loginForm').classList.toggle('hidden', !isLogin);
+  document.getElementById('loginForm').classList.toggle('flex', isLogin);
+  document.getElementById('registerForm').classList.toggle('hidden', isLogin);
+  document.getElementById('registerForm').classList.toggle('flex', !isLogin);
+  document.getElementById('tabLogin').className =
+    `flex-1 py-2 text-sm font-bold transition ${isLogin ? 'bg-yellow-400 text-gray-900' : 'bg-transparent text-gray-400'}`;
+  document.getElementById('tabRegister').className =
+    `flex-1 py-2 text-sm font-bold transition ${!isLogin ? 'bg-yellow-400 text-gray-900' : 'bg-transparent text-gray-400'}`;
+}
+
+function showError(id, msg) {
+  const el = document.getElementById(id);
+  el.textContent = msg;
+  el.classList.remove('hidden');
+}
+function clearError(id) { document.getElementById(id).classList.add('hidden'); }
+
+async function submitLogin(e) {
+  e.preventDefault();
+  clearError('loginError');
+  const email = document.getElementById('loginEmail').value.trim();
+  const password = document.getElementById('loginPassword').value;
+  try {
+    const r = await fetch('/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+    const data = await r.json();
+    if (!r.ok) return showError('loginError', data.detail ?? 'Erreur de connexion');
+    localStorage.setItem('token', data.access_token);
+    const me = await fetch('/auth/me', { headers: { Authorization: `Bearer ${data.access_token}` } });
+    const meData = await me.json();
+    localStorage.setItem('token_username', meData.username ?? '');
+    window.location.href = '/';
+  } catch {
+    showError('loginError', 'Erreur réseau');
+  }
+}
+
+async function submitRegister(e) {
+  e.preventDefault();
+  clearError('registerError');
+  const username = document.getElementById('regUsername').value.trim();
+  const email = document.getElementById('regEmail').value.trim();
+  const password = document.getElementById('regPassword').value;
+  try {
+    const r = await fetch('/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, email, password }),
+    });
+    const data = await r.json();
+    if (!r.ok) return showError('registerError', data.detail ?? 'Erreur lors de la création');
+    localStorage.setItem('token', data.access_token);
+    localStorage.setItem('token_username', username);
+    window.location.href = '/';
+  } catch {
+    showError('registerError', 'Erreur réseau');
+  }
+}
+
+function startGuest() {
+  document.getElementById('guestBtn').classList.add('hidden');
+  document.getElementById('guestNameRow').classList.remove('hidden');
+  document.getElementById('guestName').focus();
+}
+
+function confirmGuest() {
+  clearError('guestError');
+  const name = document.getElementById('guestName').value.trim();
+  if (!name) return showError('guestError', 'Entrez un pseudo');
+  sessionStorage.setItem('guest_session', JSON.stringify({ guest: true, name }));
+  window.location.href = '/';
+}
+
+// Allow Enter key in guest name field
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('guestName').addEventListener('keydown', e => {
+    if (e.key === 'Enter') confirmGuest();
+  });
+  // If already authenticated, go straight to game
+  if (localStorage.getItem('token')) window.location.href = '/';
+});
+</script>
+</body>
+</html>

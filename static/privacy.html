@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>421 – Politique de confidentialité</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen font-sans px-4 py-10 max-w-2xl mx-auto">
+<a href="/" class="text-yellow-400 text-sm hover:underline">← Retour au jeu</a>
+<h1 class="text-3xl font-black text-yellow-400 mt-6 mb-8">Politique de confidentialité</h1>
+
+<div class="flex flex-col gap-6 text-gray-300 text-sm leading-relaxed">
+
+<section>
+  <h2 class="text-white font-bold text-base mb-2">1. Données collectées</h2>
+  <p>Lors de la création d'un compte, nous collectons : nom d'utilisateur, adresse e-mail et mot de passe (chiffré). Lors des parties, nous enregistrons vos résultats (placement, jetons, rounds) et faisons évoluer votre classement ELO. Les joueurs invités ne font l'objet d'aucune collecte nominative.</p>
+</section>
+
+<section>
+  <h2 class="text-white font-bold text-base mb-2">2. Finalité</h2>
+  <p>Vos données sont utilisées exclusivement pour le fonctionnement du jeu : authentification, classements, historique de parties. Elles ne sont ni vendues, ni partagées avec des tiers.</p>
+</section>
+
+<section>
+  <h2 class="text-white font-bold text-base mb-2">3. Conservation</h2>
+  <p>Les données de compte sont conservées tant que votre compte est actif. Les comptes inactifs depuis plus de 2 ans font l'objet d'un contrôle de rétention. L'historique de parties est conservé même après suppression de compte, mais dissocié de toute identité (pseudonymisation).</p>
+</section>
+
+<section>
+  <h2 class="text-white font-bold text-base mb-2">4. Vos droits (RGPD)</h2>
+  <ul class="list-disc pl-5 flex flex-col gap-1">
+    <li><strong>Accès &amp; portabilité (Art. 15 &amp; 20)</strong> : <a href="/api/gdpr/export" class="text-yellow-400 hover:underline">Télécharger mes données</a></li>
+    <li><strong>Rectification (Art. 16)</strong> : modifiez vos informations dans votre profil</li>
+    <li><strong>Suppression (Art. 17)</strong> : demande de suppression depuis votre profil — délai de grâce de 30 jours</li>
+    <li><strong>Opposition (Art. 21)</strong> : contactez-nous via GitHub Issues</li>
+  </ul>
+</section>
+
+<section>
+  <h2 class="text-white font-bold text-base mb-2">5. Sécurité</h2>
+  <p>Les mots de passe sont chiffrés avec bcrypt. Les communications sont chiffrées via HTTPS/WSS en production. Les jetons d'authentification (JWT) expirent après 30 minutes.</p>
+</section>
+
+<section>
+  <h2 class="text-white font-bold text-base mb-2">6. Contact</h2>
+  <p>Pour toute question relative à vos données personnelles : ouvrez une issue sur le dépôt GitHub du projet.</p>
+</section>
+
+</div>
+
+<footer class="mt-12 text-xs text-gray-600 text-center">421 · Tous droits réservés</footer>
+</body>
+</html>

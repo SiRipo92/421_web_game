@@ -1,16 +1,16 @@
-import os
 from logging.config import fileConfig
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
+from app.core.config import settings
+
 config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Build sync URL from DATABASE_URL env var (swap asyncpg → psycopg2)
-db_url = os.environ.get("DATABASE_URL", config.get_main_option("sqlalchemy.url", ""))
-sync_url = db_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
+# Use app settings so .env is read automatically (same as runtime)
+sync_url = settings.database_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
 config.set_main_option("sqlalchemy.url", sync_url)
 
 from app.db.base import Base  # noqa: E402
