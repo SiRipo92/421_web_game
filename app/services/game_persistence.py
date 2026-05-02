@@ -1,3 +1,5 @@
+"""Persist completed game results and update ELO rankings in the DB."""
+
 import logging
 import uuid
 from datetime import UTC, datetime
@@ -17,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 async def persist_completed_game(game: Game) -> None:
+    """Write game outcome to DB then remove from in-memory registry."""
     try:
         async with AsyncSessionLocal() as db:
             await _write(game, db)
@@ -29,6 +32,7 @@ async def persist_completed_game(game: Game) -> None:
 
 
 async def _write(game: Game, db: AsyncSession) -> None:
+    """Create game/player rows and recalculate ELO for all registered players."""
     players = game.players
     sorted_players = sorted(players, key=lambda p: p.tokens)
     winner = sorted_players[0]

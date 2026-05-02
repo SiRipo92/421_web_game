@@ -1,7 +1,11 @@
+"""Pydantic response schemas for rankings and profile endpoints."""
+
 from pydantic import BaseModel
 
 
 class PlayerRank(BaseModel):
+    """One row in the leaderboard: ELO, stats, and badge."""
+
     username: str
     elo: int
     games_played: int
@@ -12,10 +16,14 @@ class PlayerRank(BaseModel):
 
 
 class RankingsResponse(BaseModel):
+    """Paginated (top-50) leaderboard response."""
+
     players: list[PlayerRank]
 
 
 class GameHistoryEntry(BaseModel):
+    """One completed game in a player's recent history."""
+
     game_code: str
     played_at: str
     placement: int
@@ -26,6 +34,8 @@ class GameHistoryEntry(BaseModel):
 
 
 class ProfileResponse(BaseModel):
+    """Full player profile: stats, badge, and recent games."""
+
     username: str
     elo: int
     badge: str

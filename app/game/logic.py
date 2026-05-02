@@ -1,3 +1,5 @@
+"""Core game logic: scoring, game/player dataclasses, round resolution."""
+
 import asyncio
 from collections import Counter  # used by _finalize_order
 from dataclasses import asdict, dataclass, field
@@ -43,6 +45,8 @@ def classify(dice: list[int]) -> tuple[str, int, int]:
 
 
 class GamePhase(str, Enum):
+    """Ordered lifecycle phases a game moves through (CHARGE↔DECHARGE can cycle)."""
+
     WAITING = "waiting"
     INITIAL_ROLL = "initial_roll"
     CHARGE = "charge"
@@ -52,6 +56,8 @@ class GamePhase(str, Enum):
 
 @dataclass
 class PlayerTurn:
+    """Mutable state for one player's turn: current dice, reroll flags, and result."""
+
     dice: list[int] = field(default_factory=lambda: [0, 0, 0])
     reroll: list[bool] = field(default_factory=lambda: [False, False, False])
     rolls_left: int = 3
@@ -63,6 +69,8 @@ class PlayerTurn:
 
 @dataclass
 class Player:
+    """A player seat in an active game; turn is None outside their turn."""
+
     id: str
     name: str
     tokens: int = 0
@@ -72,6 +80,8 @@ class Player:
 
 @dataclass
 class Game:
+    """Complete in-memory state for one live game room."""
+
     id: str
     phase: GamePhase = GamePhase.WAITING
     players: list = field(default_factory=list)
@@ -85,22 +95,35 @@ class Game:
     max_throws_this_round: int = 3
     round_starter_id: str = ""
     sets_lost: dict = field(default_factory=dict)
-    # player_id → user UUID (future DB use)
     user_ids: dict = field(default_factory=dict)
+    # Room configuration
+    is_public: bool = False
+    max_players: int = 5
+    bank_rule: str = "free"  # "sec" | "one" | "free"
+    afk_seconds: int = 45
+    afk_bot: bool = True
+    allow_spectators: bool = True
+    host_player_id: str = ""
+    # Runtime state — not serialized
+    afk_tasks: dict = field(default_factory=dict, compare=False, repr=False)
 
     def current_player(self) -> Optional[Player]:
+        """Return the player whose turn it is, or None if no players."""
         if self.players:
             return self.players[self.current_index % len(self.players)]
         return None
 
     def all_done(self) -> bool:
+        """True when every player has marked their turn done this round."""
         return all(p.turn and p.turn.done for p in self.players)
 
     def advance(self):
+        """Move the turn index to the next player (wraps around)."""
         self.current_index = (self.current_index + 1) % len(self.players)
 
 
 def game_state(game: Game) -> dict:
+    """Serialize the full game to a dict suitable for sending over WebSocket."""
     return {
         "type": "state",
         "game_id": game.id,
@@ -110,6 +133,14 @@ def game_state(game: Game) -> dict:
         "current_player_id": game.current_player().id if game.current_player() else None,
         "max_throws": game.max_throws_this_round,
         "round_starter_id": game.round_starter_id,
+        "room": {
+            "is_public": game.is_public,
+            "max_players": game.max_players,
+            "bank_rule": game.bank_rule,
+            "afk_seconds": game.afk_seconds,
+            "allow_spectators": game.allow_spectators,
+            "host_player_id": game.host_player_id,
+        },
         "players": [
             {
                 "id": p.id,
@@ -143,16 +174,19 @@ def game_state(game: Game) -> dict:
 
 
 def new_turn() -> PlayerTurn:
+    """Return a fresh PlayerTurn with all dice unset and 3 rolls available."""
     return PlayerTurn(dice=[0, 0, 0], reroll=[False, False, False], rolls_left=3)
 
 
 def _start_initial_roll(game: Game):
+    """Transition to INITIAL_ROLL and prompt players to roll for order."""
     game.phase = GamePhase.INITIAL_ROLL
     game.initial_rolls = {p.id: None for p in game.players}
     game.log.append("Lancez un dé pour déterminer l'ordre de jeu !")
 
 
 def _finalize_order(game: Game):
+    """Sort players by initial-roll result; re-roll tied players until clear."""
     rolls = game.initial_rolls
     counts = Counter(rolls[p.id] for p in game.players)
     tied_vals = {v for v, c in counts.items() if c > 1}
@@ -172,6 +206,7 @@ def _finalize_order(game: Game):
 
 
 def _do_start(game: Game):
+    """Transition to CHARGE phase and reset all player state for round 1."""
     game.phase = GamePhase.CHARGE
     game.round_num = 1
     game.pool = 11
@@ -187,6 +222,7 @@ def _do_start(game: Game):
 
 
 def _admit_waiting(game: Game):
+    """Move all waiting_players into the active players list mid-game."""
     if not game.waiting_players:
         return
     for p in game.waiting_players:
@@ -198,6 +234,7 @@ def _admit_waiting(game: Game):
 
 
 def _start_new_set(game: Game, set_loser_id: str):
+    """Reset tokens/pool for a new set; set loser becomes round starter."""
     for p in game.players:
         p.tokens = 0
         p.turn = new_turn()
@@ -213,6 +250,7 @@ def _start_new_set(game: Game, set_loser_id: str):
 
 
 async def _resolve_round(game: Game):
+    """Settle fiche transfers after all players have played; handle set/game end."""
     players = game.players
 
     game.last_round_plays = [
@@ -282,6 +320,7 @@ async def _resolve_round(game: Game):
 
 
 async def _persist_game(game: "Game") -> None:
+    """Fire-and-forget task: persist a finished game to the DB."""
     from app.services.game_persistence import persist_completed_game
 
     await persist_completed_game(game)

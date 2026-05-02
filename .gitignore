@@ -41,3 +41,8 @@ htmlcov/
 .idea/
 *.swp
 *.swo
+
+# Frontend
+frontend/node_modules/
+static/dist/
+prototype/

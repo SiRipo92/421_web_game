@@ -1,3 +1,5 @@
+"""Rankings and player profile endpoints."""
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +21,7 @@ BADGES = [
 
 
 def get_badge(elo: int) -> tuple[str, str]:
+    """Return (badge_name, icon) for the given ELO score."""
     for threshold, name, icon in BADGES:
         if elo >= threshold:
             return name, icon
@@ -27,6 +30,7 @@ def get_badge(elo: int) -> tuple[str, str]:
 
 @router.get("/api/rankings", response_model=RankingsResponse)
 async def rankings(db: AsyncSession = Depends(get_db)):
+    """Return the top-50 players ordered by ELO descending."""
     result = await db.execute(
         select(PlayerStats, User.username)
         .join(User, User.id == PlayerStats.user_id)
@@ -53,6 +57,7 @@ async def rankings(db: AsyncSession = Depends(get_db)):
 
 @router.get("/api/profile/{username}", response_model=ProfileResponse)
 async def profile(username: str, db: AsyncSession = Depends(get_db)):
+    """Return a player's stats and recent 20 game history."""
     result = await db.execute(
         select(User).where(User.username == username, User.deleted_at.is_(None))
     )

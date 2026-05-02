@@ -1,3 +1,5 @@
+"""Auth endpoints: register, login, me, forgot-password, reset-password."""
+
 import hashlib
 import secrets
 from datetime import UTC, datetime, timedelta
@@ -25,6 +27,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 async def register(body: RegisterRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    """Create a new user account and return a JWT."""
     existing = await db.execute(
         select(User).where((User.username == body.username) | (User.email == body.email))
     )
@@ -58,6 +61,7 @@ async def register(body: RegisterRequest, request: Request, db: AsyncSession = D
 
 @router.post("/login", response_model=TokenResponse)
 async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
+    """Authenticate by email/password; remember_me extends JWT TTL to 30 days."""
     result = await db.execute(
         select(User).where(User.email == body.email, User.deleted_at.is_(None))
     )
@@ -71,6 +75,7 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
 
 @router.get("/me", response_model=MeResponse)
 async def me(user: User = Depends(get_current_user)):
+    """Return the authenticated user's public profile."""
     return MeResponse(
         id=str(user.id),
         username=user.username,
@@ -82,6 +87,7 @@ async def me(user: User = Depends(get_current_user)):
 
 @router.post("/forgot-password", status_code=status.HTTP_202_ACCEPTED)
 async def forgot_password(body: ForgotPasswordRequest, db: AsyncSession = Depends(get_db)):
+    """Send a password-reset email; always 202 to prevent email enumeration."""
     result = await db.execute(
         select(User).where(User.email == body.email, User.deleted_at.is_(None))
     )
@@ -103,6 +109,7 @@ async def forgot_password(body: ForgotPasswordRequest, db: AsyncSession = Depend
 
 @router.post("/reset-password", status_code=status.HTTP_200_OK)
 async def reset_password(body: ResetPasswordRequest, db: AsyncSession = Depends(get_db)):
+    """Validate a reset token and update the user's password hash."""
     token_hash = hashlib.sha256(body.token.encode()).hexdigest()
     now = datetime.now(UTC)
 

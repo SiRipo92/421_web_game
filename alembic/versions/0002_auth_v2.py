@@ -16,35 +16,46 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("users", sa.Column("birthdate", sa.Date, nullable=True))
-    op.add_column(
-        "users",
-        sa.Column("lang_pref", sa.String(2), nullable=False, server_default="fr"),
-    )
-    op.add_column(
-        "users",
-        sa.Column("email_opt_in", sa.Boolean, nullable=False, server_default="false"),
-    )
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    existing_cols = {col["name"] for col in inspector.get_columns("users")}
 
-    op.create_table(
-        "password_reset_tokens",
-        sa.Column(
-            "id",
-            UUID(as_uuid=True),
-            primary_key=True,
-            server_default=sa.text("gen_random_uuid()"),
-        ),
-        sa.Column(
-            "user_id",
-            UUID(as_uuid=True),
-            sa.ForeignKey("users.id", ondelete="CASCADE"),
-            nullable=False,
-        ),
-        sa.Column("token_hash", sa.Text, unique=True, nullable=False),
-        sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("used_at", sa.DateTime(timezone=True), nullable=True),
-    )
-    op.create_index("ix_prt_token_hash", "password_reset_tokens", ["token_hash"])
+    if "birthdate" not in existing_cols:
+        op.add_column("users", sa.Column("birthdate", sa.Date, nullable=True))
+    if "lang_pref" not in existing_cols:
+        op.add_column(
+            "users",
+            sa.Column("lang_pref", sa.String(2), nullable=False, server_default="fr"),
+        )
+    if "email_opt_in" not in existing_cols:
+        op.add_column(
+            "users",
+            sa.Column("email_opt_in", sa.Boolean, nullable=False, server_default="false"),
+        )
+
+    if "password_reset_tokens" not in inspector.get_table_names():
+        op.create_table(
+            "password_reset_tokens",
+            sa.Column(
+                "id",
+                UUID(as_uuid=True),
+                primary_key=True,
+                server_default=sa.text("gen_random_uuid()"),
+            ),
+            sa.Column(
+                "user_id",
+                UUID(as_uuid=True),
+                sa.ForeignKey("users.id", ondelete="CASCADE"),
+                nullable=False,
+            ),
+            sa.Column("token_hash", sa.Text, unique=True, nullable=False),
+            sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
+            sa.Column("used_at", sa.DateTime(timezone=True), nullable=True),
+        )
+
+    existing_indexes = {idx["name"] for idx in inspector.get_indexes("password_reset_tokens")}
+    if "ix_prt_token_hash" not in existing_indexes:
+        op.create_index("ix_prt_token_hash", "password_reset_tokens", ["token_hash"])
 
 
 def downgrade() -> None:

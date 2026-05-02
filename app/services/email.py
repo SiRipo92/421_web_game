@@ -1,3 +1,5 @@
+"""Email delivery via Resend for transactional auth emails."""
+
 import logging
 
 import resend
@@ -10,11 +12,13 @@ _FROM = "421 Bistro <noreply@421bistro.fr>"
 
 
 def _send(to: str, subject: str, html: str) -> None:
+    """Synchronously dispatch a single email via the Resend API."""
     resend.api_key = settings.resend_api_key
     resend.Emails.send({"from": _FROM, "to": to, "subject": subject, "html": html})
 
 
 async def send_reset_email(to_email: str, token: str, lang: str = "fr") -> None:
+    """Send a bilingual password-reset email with a one-time link."""
     reset_url = f"{settings.app_url}/reset-password?token={token}"
     if lang == "en":
         subject = "Reset your 421 Bistro password"
