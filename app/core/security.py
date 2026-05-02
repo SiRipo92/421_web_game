@@ -1,3 +1,5 @@
+"""Password hashing, JWT creation, and FastAPI auth dependencies."""
+
 from datetime import UTC, datetime, timedelta
 from typing import Optional
 
@@ -20,14 +22,17 @@ ALGORITHM = "HS256"
 
 
 def hash_password(password: str) -> str:
+    """Return a bcrypt hash of the given password."""
     return pwd_context.hash(password)
 
 
 def verify_password(plain: str, hashed: str) -> bool:
+    """Return True if plain matches the bcrypt hash."""
     return pwd_context.verify(plain, hashed)
 
 
 def create_access_token(user_id: str, remember_me: bool = False) -> str:
+    """Issue a signed JWT; remember_me extends TTL from minutes to days."""
     if remember_me:
         delta = timedelta(days=settings.remember_me_expire_days)
     else:
@@ -37,6 +42,7 @@ def create_access_token(user_id: str, remember_me: bool = False) -> str:
 
 
 async def _user_from_token(token: str, db: AsyncSession) -> Optional[User]:
+    """Decode token and return the matching User, or None on any failure."""
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
         user_id: str = payload.get("sub")
@@ -52,6 +58,7 @@ async def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: AsyncSession = Depends(get_db),
 ) -> User:
+    """FastAPI dependency: raise 401 if token is missing or invalid."""
     user = await _user_from_token(token, db)
     if user is None:
         raise HTTPException(
@@ -65,6 +72,7 @@ async def get_optional_user(
     token: Optional[str] = Depends(oauth2_optional),
     db: AsyncSession = Depends(get_db),
 ) -> Optional[User]:
+    """FastAPI dependency: return User or None (no error for missing token)."""
     if not token:
         return None
     return await _user_from_token(token, db)

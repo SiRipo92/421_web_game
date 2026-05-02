@@ -1,0 +1,451 @@
+import { useEffect, useRef, useState } from 'react'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { Die } from '../components/shared/Die.jsx'
+import { DiceRow } from '../components/shared/Die.jsx'
+import { Avatar } from '../components/shared/Avatar.jsx'
+import { ChipStack } from '../components/shared/ChipStack.jsx'
+import { useGame } from '../hooks/useGame.js'
+import { useLang } from '../context/LangContext.jsx'
+
+export function Game({ token }) {
+  const { t } = useLang()
+  const { gameId } = useParams()
+  const [params] = useSearchParams()
+  const playerId = params.get('pid')
+  const navigate = useNavigate()
+  const { state, roll, keep, done, initialRoll } = useGame(gameId, playerId, token)
+  const logRef = useRef(null)
+
+  const me = state.players?.find(p => p.id === playerId)
+  const isMyTurn = state.current_player_id === playerId
+  const myTurn = me?.turn
+  const rollsUsed = myTurn ? 3 - myTurn.rolls_left : 0
+  const canRoll = isMyTurn && myTurn && !myTurn.done && myTurn.rolls_left > 0
+  const canDone = isMyTurn && myTurn && !myTurn.done && rollsUsed > 0
+  const hasRolled = rollsUsed > 0
+
+  useEffect(() => {
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
+  }, [state.log])
+
+  if (state.phase === 'finished') {
+    return <FinishedScreen state={state} playerId={playerId} t={t} navigate={navigate} gameId={gameId} />
+  }
+
+  if (state.phase === 'initial_roll' || state.phase === 'waiting') {
+    return <InitialRollScreen state={state} playerId={playerId} t={t} onRoll={initialRoll} />
+  }
+
+  return (
+    <div style={{
+      minHeight: '100vh',
+      display: 'grid',
+      gridTemplateColumns: '1fr 320px',
+      gap: 0,
+    }} className="gameroom-grid">
+
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
+
+        {/* Top panel */}
+        <div style={{
+          display: 'grid', gridTemplateColumns: 'auto 1fr auto', gap: 24,
+          padding: '1.2rem 1.5rem',
+          borderBottom: '1px solid var(--rule)',
+          background: 'var(--paper-soft)',
+          alignItems: 'center',
+        }} className="top-panel">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <div style={{
+              padding: '0.4rem 1rem',
+              background: state.phase === 'charge' ? 'var(--rouge)' : 'var(--felt)',
+              color: 'var(--paper)',
+              fontFamily: 'var(--display)', fontWeight: 700, letterSpacing: '0.06em',
+              fontSize: '0.95rem', fontStyle: 'italic', transform: 'rotate(-2deg)',
+            }} aria-label={`Phase: ${state.phase === 'charge' ? t('charge') : t('decharge')}`}>
+              {state.phase === 'charge' ? t('charge') : t('decharge')}
+            </div>
+            <div>
+              <div className="eyebrow" style={{ fontSize: '0.62rem' }}>{t('round')}</div>
+              <div className="display" style={{ fontSize: '1.6rem', lineHeight: 1 }}>
+                {String(state.round || 0).padStart(2, '0')}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 10, overflow: 'auto', justifyContent: 'center' }}>
+            {state.players?.map(p => (
+              <PlayerStrip key={p.id} p={p} active={p.id === state.current_player_id} isSelf={p.id === playerId} />
+            ))}
+          </div>
+
+          <div style={{ display: 'flex', gap: 20, alignItems: 'center' }}>
+            <CounterChip label={t('pool')} value={state.pool ?? 0} accent="var(--rouge)" />
+          </div>
+        </div>
+
+        {/* Piste area */}
+        <div style={{
+          flex: 1, padding: '1.5rem',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          position: 'relative',
+        }}>
+          <div style={{ position: 'relative', width: 'min(600px, 70vh, 92%)', aspectRatio: '1/1' }}>
+            <div className="piste" style={{ position: 'absolute', inset: 0 }} role="region" aria-label="Tapis de jeu">
+              <div style={{
+                position: 'absolute', top: '12%', left: '50%', transform: 'translateX(-50%)',
+                fontFamily: 'var(--display)', fontStyle: 'italic',
+                color: 'var(--paper-deep)', fontSize: '1rem', letterSpacing: '0.16em', whiteSpace: 'nowrap',
+              }} aria-hidden="true">❦  L E   T A P I S  ❦</div>
+
+              {/* Dice in center */}
+              <div style={{
+                position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)',
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12,
+              }}>
+                <div style={{ display: 'flex', gap: 12 }}>
+                  {(myTurn?.dice || [0, 0, 0]).map((v, i) => (
+                    <Die
+                      key={i}
+                      value={v || 0}
+                      keep={myTurn ? !myTurn.reroll[i] && hasRolled : false}
+                      tumble={false}
+                      onClick={isMyTurn && hasRolled && !myTurn?.done ? () => keep(i) : undefined}
+                    />
+                  ))}
+                </div>
+                {myTurn?.combo && (
+                  <div style={{
+                    fontFamily: 'var(--display)', fontSize: '1.3rem',
+                    color: myTurn.combo === '421' ? 'var(--brass-soft)' : 'var(--paper)',
+                    fontStyle: myTurn.combo === 'nénette' ? 'italic' : 'normal',
+                    textShadow: '0 2px 8px rgba(0,0,0,0.5)',
+                  }} className={myTurn.combo === '421' ? 'glow-421' : ''}>
+                    {myTurn.combo} · <span className="mono">{myTurn.fiches}f</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Pool chips */}
+              <div style={{ position: 'absolute', bottom: '14%', left: '50%', transform: 'translateX(-50%)' }}>
+                {(state.pool ?? 0) > 0 && <ChipStack count={state.pool} />}
+              </div>
+            </div>
+
+            {/* Players around piste */}
+            {state.players?.map((p, i) => {
+              const total = state.players.length
+              const angle = 90 + (360 / total) * i
+              const rad = (angle * Math.PI) / 180
+              const r = 50
+              const x = 50 + r * Math.cos(rad)
+              const y = 50 + r * Math.sin(rad)
+              return (
+                <PisteSeat key={p.id} p={p}
+                  active={p.id === state.current_player_id}
+                  isSelf={p.id === playerId}
+                  x={x} y={y}
+                />
+              )
+            })}
+          </div>
+        </div>
+
+        {/* Action bar */}
+        <div style={{
+          padding: '1.2rem 1.5rem',
+          borderTop: '1px solid var(--rule)',
+          background: 'var(--paper-soft)',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          gap: 16, flexWrap: 'wrap',
+        }} role="region" aria-label="Contrôles">
+          <div>
+            <div className="eyebrow">
+              {isMyTurn ? t('your_turn') : `${t('waiting_turn')} — ${state.players?.find(p => p.id === state.current_player_id)?.name || ''}`}
+            </div>
+            <div className="serif" style={{ fontStyle: 'italic', color: 'var(--ink-mute)', marginTop: 4 }}>
+              {isMyTurn
+                ? !hasRolled ? t('keep_hint') : `${myTurn?.rolls_left ?? 0} ${t('rolls_left')}.`
+                : <span>{t('waiting_for')} <span className="mono pulse-soft">…</span></span>}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+            <RollDots rollsLeft={myTurn?.rolls_left ?? 3} />
+            {isMyTurn && (
+              <>
+                <button
+                  type="button"
+                  onClick={roll}
+                  disabled={!canRoll}
+                  className="btn btn-rouge"
+                  style={{ opacity: canRoll ? 1 : 0.4, minHeight: 44 }}
+                  aria-label={!hasRolled ? t('roll') : t('reroll')}
+                >
+                  🎲 {!hasRolled ? t('roll') : t('reroll')}
+                </button>
+                <button
+                  type="button"
+                  onClick={done}
+                  disabled={!canDone}
+                  className="btn btn-primary"
+                  style={{ opacity: canDone ? 1 : 0.4, minHeight: 44 }}
+                  aria-label={t('validate')}
+                >
+                  ✓ {t('validate')}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Log panel */}
+      <aside style={{
+        borderLeft: '1px solid var(--rule)',
+        background: 'var(--paper-soft)',
+        display: 'flex', flexDirection: 'column',
+        maxHeight: '100vh',
+      }} className="side-log" aria-label={t('log')}>
+        <div style={{ padding: '1.2rem 1.4rem', borderBottom: '1px solid var(--rule)' }}>
+          <div className="eyebrow">{t('log')}</div>
+          <div className="display" style={{ fontSize: '1.4rem', marginTop: 4 }}>{t('log_subtitle')}</div>
+          <div className="note" style={{ fontSize: '0.85rem' }}>{t('log_sub')}</div>
+        </div>
+        <div ref={logRef} style={{ flex: 1, overflowY: 'auto', padding: '1rem 1.4rem' }}>
+          {[...(state.log || [])].reverse().map((entry, i) => (
+            <div key={i} style={{
+              display: 'grid', gridTemplateColumns: '1fr',
+              padding: '0.45rem 0', borderBottom: '1px dashed var(--rule)',
+            }}>
+              <span className="serif" style={{ fontSize: '0.9rem', color: 'var(--ink)' }}>{entry}</span>
+            </div>
+          ))}
+        </div>
+        <div style={{ padding: '1rem 1.4rem', borderTop: '1px solid var(--rule)' }}>
+          <div className="eyebrow" style={{ marginBottom: 8 }}>{t('combo_hier')}</div>
+          <MiniHier />
+        </div>
+      </aside>
+
+      <style>{`
+        @media (max-width: 980px) {
+          .gameroom-grid { grid-template-columns: 1fr !important; }
+          .side-log { max-height: 300px !important; border-left: none !important; border-top: 1px solid var(--rule); }
+          .top-panel { grid-template-columns: 1fr !important; gap: 12px !important; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .die-tumble, .pulse-soft, .glow-421 { animation: none !important; }
+        }
+      `}</style>
+    </div>
+  )
+}
+
+function InitialRollScreen({ state, playerId, t, onRoll }) {
+  const me = state.players?.find(p => p.id === playerId)
+  const myRoll = state.players?.find(p => p.id === playerId)
+  const hasRolled = myRoll && state.players?.find(p => p.id === playerId)?.initial_roll != null
+
+  return (
+    <div style={{ maxWidth: 640, margin: '4rem auto', padding: '0 1.5rem', textAlign: 'center' }}>
+      <div className="eyebrow" style={{ marginBottom: 16 }}>{t('initial_roll_label')}</div>
+      <h1 className="display" style={{ fontSize: 'clamp(2.4rem, 5vw, 3rem)', margin: '0 0 1rem' }}>
+        {t('initial_roll_hint')}
+      </h1>
+      <div className="ticket" style={{ marginTop: '2rem', padding: '2rem' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: '1.5rem' }}>
+          {state.players?.map(p => (
+            <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 14, justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <Avatar name={p.name} isSelf={p.id === playerId} size={2.2} />
+                <span className="serif">{p.name}</span>
+              </div>
+              <div className="mono" style={{ fontWeight: 700, fontSize: '1.4rem' }}>
+                {p.initial_roll != null ? p.initial_roll : <span className="pulse-soft" style={{ color: 'var(--ink-mute)' }}>…</span>}
+              </div>
+            </div>
+          ))}
+        </div>
+        {!hasRolled ? (
+          <button type="button" onClick={onRoll} className="btn btn-rouge" style={{ width: '100%', justifyContent: 'center', minHeight: 48 }}>
+            🎲 {t('initial_roll')}
+          </button>
+        ) : (
+          <p className="note">{t('waiting_others')}</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function FinishedScreen({ state, playerId, t, navigate, gameId }) {
+  const sorted = [...(state.players || [])].sort((a, b) => (a.tokens ?? 0) - (b.tokens ?? 0))
+  const winner = sorted[0]
+
+  return (
+    <div style={{ maxWidth: 900, margin: '0 auto', padding: '3rem 1.5rem' }}>
+      <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
+        <div className="stamp" style={{ fontSize: '0.9rem', marginBottom: 24 }}>{t('finished')}</div>
+        <h1 className="display" style={{ fontSize: 'clamp(3rem, 7vw, 4.5rem)', margin: '0 0 0.5rem' }}>
+          <em style={{ color: 'var(--rouge)' }}>{winner?.name}</em><br />
+          remporte la table.
+        </h1>
+        <p className="serif" style={{ fontStyle: 'italic', color: 'var(--ink-soft)', fontSize: '1.2rem' }}>
+          Une dernière tournée pour le vainqueur — c'est la maison qui régale. ❦
+        </p>
+      </div>
+
+      <div className="ticket" style={{ marginBottom: '2rem' }}>
+        <div className="eyebrow" style={{ textAlign: 'center', marginBottom: 12 }}>{t('final_score')}</div>
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          {sorted.map((p, i) => (
+            <div key={p.id} style={{
+              display: 'grid', gridTemplateColumns: 'auto auto 1fr auto auto', gap: 16, alignItems: 'center',
+              padding: '1rem 0',
+              borderBottom: i < sorted.length - 1 ? '1px dashed var(--rule)' : 'none',
+            }}>
+              <div className="display" style={{ fontSize: i === 0 ? '2.5rem' : '1.6rem', color: i === 0 ? 'var(--rouge)' : 'var(--ink-fade)', width: 48, textAlign: 'center' }}>
+                {i === 0 ? '🏆' : `${i + 1}ᵉ`}
+              </div>
+              <Avatar name={p.name} size={2.4} isSelf={p.id === playerId} />
+              <div>
+                <div className="display" style={{ fontSize: '1.4rem' }}>
+                  {p.name} {p.id === playerId && <em style={{ fontSize: '0.85rem', color: 'var(--ink-mute)' }}>{t('you_label')}</em>}
+                </div>
+              </div>
+              <div className="serif" style={{ fontStyle: 'italic', color: 'var(--ink-mute)', fontSize: '0.95rem' }}>
+                {p.sets_lost ?? state.players?.find(q => q.id === p.id) ? '' : '0'} {t('sets_lost')}
+              </div>
+              <div className="display" style={{ fontSize: '1.4rem' }}>
+                {p.tokens ?? 0}<span className="serif" style={{ fontSize: '0.7rem', fontStyle: 'italic', color: 'var(--ink-mute)', marginLeft: 4 }}>f</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
+        <button type="button" className="btn btn-ghost" onClick={() => navigate('/')}>{t('back_home')}</button>
+        <button type="button" className="btn btn-ghost" onClick={() => navigate('/rankings')}>📜 {t('rankings')}</button>
+      </div>
+    </div>
+  )
+}
+
+function CounterChip({ label, value, accent }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <div className="chip" style={{ width: '2.4rem', height: '2.4rem', fontSize: '0.9rem' }}>{value}</div>
+      <div>
+        <div className="eyebrow" style={{ fontSize: '0.62rem', color: accent }}>{label}</div>
+        <div className="display" style={{ fontSize: '1.4rem', lineHeight: 1 }}>
+          {value} <span className="serif" style={{ fontSize: '0.7rem', fontStyle: 'italic', color: 'var(--ink-mute)' }}>fiches</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function PlayerStrip({ p, active, isSelf }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 8,
+      padding: '0.4rem 0.8rem', borderRadius: 3,
+      background: active ? 'var(--rouge)' : 'var(--paper-deep)',
+      color: active ? 'var(--paper)' : 'var(--ink)',
+      border: '1px solid var(--rule)', minWidth: 0, whiteSpace: 'nowrap',
+    }}>
+      <Avatar name={p.name} size={1.6} />
+      <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.1, minWidth: 0 }}>
+        <span className="serif" style={{ fontWeight: 600, fontSize: '0.85rem' }}>{p.name}{isSelf ? ' ★' : ''}</span>
+        <span className="mono" style={{ fontSize: '0.65rem', opacity: 0.7 }}>{p.tokens ?? 0} fiches</span>
+      </div>
+      {p.turn?.done && p.turn.dice && (
+        <div style={{ display: 'flex', gap: 2, marginLeft: 4 }}>
+          {p.turn.dice.map((v, i) => <Die key={i} value={v} mini />)}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function PisteSeat({ p, active, isSelf, x, y }) {
+  return (
+    <div style={{
+      position: 'absolute', left: `${x}%`, top: `${y}%`,
+      transform: 'translate(-50%, -50%)',
+      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+      pointerEvents: 'none',
+    }}>
+      <Avatar name={p.name} active={active} isSelf={isSelf} size={3.2} />
+      <div style={{
+        background: active ? 'var(--ink)' : 'var(--paper-soft)',
+        color: active ? 'var(--paper)' : 'var(--ink)',
+        border: '1px solid var(--rule)',
+        padding: '0.3rem 0.7rem', borderRadius: 2,
+        fontFamily: 'var(--display)', fontWeight: 700, fontSize: '0.9rem',
+        whiteSpace: 'nowrap',
+        boxShadow: active ? '0 4px 0 rgba(0,0,0,0.3)' : '0 2px 0 rgba(0,0,0,0.1)',
+      }}>
+        {p.name}{isSelf ? ' ★' : ''}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{
+          fontFamily: 'var(--mono)', fontWeight: 700, fontSize: '0.78rem',
+          background: 'var(--paper-deep)', border: '1px solid var(--rule)',
+          padding: '2px 8px', borderRadius: 999, color: 'var(--ink-soft)',
+        }}>{p.tokens ?? 0} 🪙</div>
+        {p.turn?.done && p.turn.dice && (
+          <div style={{ display: 'flex', gap: 2 }}>
+            {p.turn.dice.map((v, i) => <Die key={i} value={v} mini />)}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function RollDots({ rollsLeft }) {
+  return (
+    <div style={{
+      display: 'inline-flex', alignItems: 'center', gap: 6,
+      padding: '0.3rem 0.8rem', background: 'var(--paper-deep)',
+      border: '1px solid var(--rule)', borderRadius: 999,
+    }} aria-label={`${rollsLeft} lancers restants`}>
+      {[2, 1, 0].map(n => (
+        <span key={n} style={{
+          width: 10, height: 10, borderRadius: '50%',
+          background: rollsLeft >= n + 1 ? 'var(--brass)' : 'var(--paper)',
+          border: '1px solid var(--ink-soft)',
+          display: 'inline-block',
+          opacity: rollsLeft >= n + 1 ? 1 : 0.4,
+        }} />
+      ))}
+      <span className="mono" style={{ fontSize: '0.7rem', color: 'var(--ink-mute)', marginLeft: 4 }}>
+        {rollsLeft}/3
+      </span>
+    </div>
+  )
+}
+
+function MiniHier() {
+  const rows = [
+    { name: '421', dice: [4, 2, 1], pts: 8 },
+    { name: '111', dice: [1, 1, 1], pts: 7 },
+    { name: '11x', dice: [1, 1, 6], pts: 'x' },
+    { name: 'Brelan', dice: [5, 5, 5], pts: 3 },
+    { name: 'Suite', dice: [3, 2, 1], pts: 2 },
+    { name: 'Nénette', dice: [2, 2, 1], pts: 2 },
+  ]
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, fontSize: '0.78rem' }}>
+      {rows.map(r => (
+        <div key={r.name} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ display: 'flex', gap: 1 }}>
+            {r.dice.map((v, i) => <Die key={i} value={v} mini />)}
+          </div>
+          <span className="mono" style={{ color: 'var(--ink-mute)' }}>{r.pts}f</span>
+        </div>
+      ))}
+    </div>
+  )
+}

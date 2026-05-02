@@ -1,3 +1,5 @@
+"""FastAPI application entry point: lifespan, middleware, and router registration."""
+
 import warnings
 
 # Must be first: sentry-sdk calls asyncio.iscoroutinefunction() (deprecated in Python ≥3.14)
@@ -20,6 +22,7 @@ from app.db.models import Base  # noqa: F401
 from app.game.ws import router as game_router
 from app.routers.auth import router as auth_router
 from app.routers.rankings import router as rankings_router
+from app.routers.rooms import router as rooms_router
 
 logging.basicConfig(
     level=logging.DEBUG if settings.debug else logging.INFO,
@@ -32,6 +35,7 @@ logger.info("Starting — debug=%s python=%s", settings.debug, sys.version.split
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Run DB migrations on startup and dispose engine on shutdown."""
     logger.info("Starting up — running DB migrations")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -65,6 +69,7 @@ if settings.debug:
 
 @app.middleware("http")
 async def catch_exceptions_middleware(request: Request, call_next):
+    """Log and return JSON 500 for any unhandled exception."""
     try:
         return await call_next(request)
     except Exception as exc:
@@ -76,9 +81,11 @@ async def catch_exceptions_middleware(request: Request, call_next):
 
 @app.get("/healthz", include_in_schema=False)
 async def healthz():
+    """Health check endpoint for container orchestration liveness probes."""
     return {"status": "ok"}
 
 
 app.include_router(auth_router)
 app.include_router(game_router)
 app.include_router(rankings_router)
+app.include_router(rooms_router)
