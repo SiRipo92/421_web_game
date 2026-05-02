@@ -1,6 +1,8 @@
+import logging
 import uuid
 from datetime import UTC, datetime
 
+import sentry_sdk
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,14 +13,17 @@ from app.game.logic import Game
 from app.game.state import games
 from app.services.elo import updated_elo
 
+logger = logging.getLogger(__name__)
+
 
 async def persist_completed_game(game: Game) -> None:
-    """Fire-and-forget: called when game phase == FINISHED."""
     try:
         async with AsyncSessionLocal() as db:
             await _write(game, db)
-    except Exception as exc:
-        print(f"[persistence] error saving game {game.id}: {exc}")
+        logger.info("Persisted game %s (%d players)", game.id, len(game.players))
+    except Exception:
+        logger.exception("Failed to persist game %s", game.id)
+        sentry_sdk.capture_exception()
     finally:
         games.pop(game.id, None)
 

@@ -1,8 +1,10 @@
 import json
+import logging
 import random
 import uuid
 from typing import Optional
 
+import sentry_sdk
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from jose import JWTError, jwt
@@ -21,6 +23,8 @@ from app.game.logic import (
 from app.game.state import games
 
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
 
 ALGORITHM = "HS256"
 
@@ -216,6 +220,11 @@ async def websocket_endpoint(
                 await manager.broadcast(game_id, game_state(game))
 
     except WebSocketDisconnect:
+        pass
+    except Exception:
+        logger.exception("WebSocket error game=%s player=%s", game_id, player_id)
+        sentry_sdk.capture_exception()
+    finally:
         player.connected = False
         manager.disconnect(game_id, ws)
         await manager.broadcast(game_id, game_state(game))
