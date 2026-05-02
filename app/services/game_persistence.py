@@ -1,4 +1,3 @@
-import asyncio
 import uuid
 from datetime import UTC, datetime
 
@@ -8,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.base import AsyncSessionLocal
 from app.db.models import Game as GameRecord
 from app.db.models import GamePlayer, PlayerStats
-from app.game.logic import Game, GamePhase
+from app.game.logic import Game
 from app.game.state import games
 from app.services.elo import updated_elo
 

@@ -1,5 +1,4 @@
 import asyncio
-import random
 from collections import Counter
 from dataclasses import asdict, dataclass, field
 from enum import Enum
@@ -87,7 +86,8 @@ class Game:
     max_throws_this_round: int  = 3
     round_starter_id:      str  = ""
     sets_lost:             dict = field(default_factory=dict)
-    user_ids:              dict = field(default_factory=dict)  # player_id → user UUID (future DB use)
+    # player_id → user UUID (future DB use)
+    user_ids:              dict = field(default_factory=dict)
 
     def current_player(self) -> Optional[Player]:
         if self.players:
