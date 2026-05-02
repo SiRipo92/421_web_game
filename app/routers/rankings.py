@@ -3,7 +3,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.base import get_db
-from app.db.models import GamePlayer, Game as GameRecord, PlayerStats, User
+from app.db.models import Game as GameRecord
+from app.db.models import GamePlayer, PlayerStats, User
 from app.schemas.rankings import GameHistoryEntry, PlayerRank, ProfileResponse, RankingsResponse
 
 router = APIRouter(tags=["rankings"])
