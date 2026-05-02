@@ -40,8 +40,8 @@ export function TopBar({ user, onLogout }) {
           fontFamily: 'var(--display)', fontWeight: 900, fontSize: '1.3rem', letterSpacing: '-0.04em',
         }}>421</div>
         <div style={{ textAlign: 'left' }}>
-          <div className="display" style={{ fontSize: '1.5rem', lineHeight: 0.9 }}>Le Quatre-Vingt-Un</div>
-          <div className="eyebrow" style={{ fontSize: '0.6rem' }}>Bistro · Est. 1923</div>
+          <div className="display" style={{ fontSize: '1.5rem', lineHeight: 0.9 }}>Le 421</div>
+          <div className="eyebrow" style={{ fontSize: '0.6rem' }}>Bistro · Est. 2026</div>
         </div>
       </Link>
 
