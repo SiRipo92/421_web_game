@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     retention_dry_run: bool = True
     deletion_grace_days: int = 30
+    sentry_dsn: str = ""
 
 
 settings = Settings()

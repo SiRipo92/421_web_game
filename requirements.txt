@@ -8,3 +8,5 @@ passlib[bcrypt]>=1.7
 python-jose[cryptography]>=3.3
 python-multipart>=0.0.9
 anthropic>=0.25
+email-validator>=2.0
+sentry-sdk[fastapi]>=2.0
