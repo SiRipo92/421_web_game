@@ -10,11 +10,11 @@ from app.schemas.rankings import GameHistoryEntry, PlayerRank, ProfileResponse, 
 router = APIRouter(tags=["rankings"])
 
 BADGES = [
-    (1700, "Maître",    "👑"),
-    (1500, "Expert",    "🥇"),
-    (1300, "Confirmé",  "🥈"),
-    (1100, "Amateur",   "🥉"),
-    (0,    "Débutant",  "🎲"),
+    (1700, "Maître", "👑"),
+    (1500, "Expert", "🥇"),
+    (1300, "Confirmé", "🥈"),
+    (1100, "Amateur", "🥉"),
+    (0, "Débutant", "🎲"),
 ]
 
 
@@ -37,15 +37,17 @@ async def rankings(db: AsyncSession = Depends(get_db)):
     players = []
     for stats, username in result:
         badge, icon = get_badge(stats.elo)
-        players.append(PlayerRank(
-            username=username,
-            elo=stats.elo,
-            games_played=stats.games_played,
-            wins=stats.wins,
-            losses=stats.losses,
-            badge=badge,
-            badge_icon=icon,
-        ))
+        players.append(
+            PlayerRank(
+                username=username,
+                elo=stats.elo,
+                games_played=stats.games_played,
+                wins=stats.wins,
+                losses=stats.losses,
+                badge=badge,
+                badge_icon=icon,
+            )
+        )
     return RankingsResponse(players=players)
 
 
@@ -58,9 +60,7 @@ async def profile(username: str, db: AsyncSession = Depends(get_db)):
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    stats_result = await db.execute(
-        select(PlayerStats).where(PlayerStats.user_id == user.id)
-    )
+    stats_result = await db.execute(select(PlayerStats).where(PlayerStats.user_id == user.id))
     stats = stats_result.scalar_one_or_none()
     if not stats:
         raise HTTPException(status_code=404, detail="Stats not found")
@@ -76,19 +76,19 @@ async def profile(username: str, db: AsyncSession = Depends(get_db)):
     recent = []
     for gp, game_rec in gp_result:
         # Count total players in that game
-        count_result = await db.execute(
-            select(GamePlayer).where(GamePlayer.game_id == game_rec.id)
-        )
+        count_result = await db.execute(select(GamePlayer).where(GamePlayer.game_id == game_rec.id))
         total = len(count_result.scalars().all())
-        recent.append(GameHistoryEntry(
-            game_code=game_rec.game_code,
-            played_at=game_rec.finished_at.isoformat(),
-            placement=gp.placement,
-            total_players=total,
-            final_tokens=gp.final_tokens,
-            sets_lost=gp.sets_lost,
-            total_rounds=game_rec.total_rounds,
-        ))
+        recent.append(
+            GameHistoryEntry(
+                game_code=game_rec.game_code,
+                played_at=game_rec.finished_at.isoformat(),
+                placement=gp.placement,
+                total_players=total,
+                final_tokens=gp.final_tokens,
+                sets_lost=gp.sets_lost,
+                total_rounds=game_rec.total_rounds,
+            )
+        )
 
     badge, icon = get_badge(stats.elo)
     return ProfileResponse(

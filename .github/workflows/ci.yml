@@ -38,7 +38,7 @@ jobs:
   integration-tests:
     name: Integration tests
     runs-on: ubuntu-latest
-    needs: lint
+    needs: [lint, unit-tests]
     services:
       postgres:
         image: postgres:16-alpine
@@ -79,6 +79,10 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt -r requirements-dev.txt psycopg2-binary
+      - name: Run Alembic migrations
+        run: alembic upgrade head
+        env:
+          DATABASE_URL: "postgresql+asyncpg://app:test@localhost:5432/fourtwentyone"
       - name: Re-run all tests with combined coverage
         run: pytest tests/ --cov=app --cov-fail-under=80 --cov-report=term-missing
         env:

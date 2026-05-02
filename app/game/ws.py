@@ -2,11 +2,12 @@ import json
 import logging
 import random
 import uuid
+from pathlib import Path
 from typing import Optional
 
 import sentry_sdk
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse
 from jose import JWTError, jwt
 
 from app.core.config import settings
@@ -27,6 +28,7 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 ALGORITHM = "HS256"
+_STATIC = Path(__file__).parent.parent.parent / "static"
 
 
 async def _resolve_user_from_token(token: Optional[str]) -> Optional[str]:
@@ -50,9 +52,7 @@ class ConnectionManager:
 
     def disconnect(self, game_id: str, ws: WebSocket):
         if game_id in self.connections:
-            self.connections[game_id] = [
-                (w, p) for w, p in self.connections[game_id] if w != ws
-            ]
+            self.connections[game_id] = [(w, p) for w, p in self.connections[game_id] if w != ws]
 
     async def broadcast(self, game_id: str, data: dict):
         for ws, _ in self.connections.get(game_id, []):
@@ -100,20 +100,17 @@ async def join_game(
 
 @router.get("/")
 def index():
-    with open("static/index.html") as f:
-        return HTMLResponse(f.read())
+    return FileResponse(_STATIC / "index.html")
 
 
 @router.get("/login.html")
 def login_page():
-    with open("static/login.html") as f:
-        return HTMLResponse(f.read())
+    return FileResponse(_STATIC / "login.html")
 
 
 @router.get("/privacy.html")
 def privacy_page():
-    with open("static/privacy.html") as f:
-        return HTMLResponse(f.read())
+    return FileResponse(_STATIC / "privacy.html")
 
 
 @router.websocket("/ws/{game_id}/{player_id}")
@@ -128,9 +125,8 @@ async def websocket_endpoint(
         await ws.close()
         return
 
-    player = (
-        next((p for p in game.players if p.id == player_id), None) or
-        next((p for p in game.waiting_players if p.id == player_id), None)
+    player = next((p for p in game.players if p.id == player_id), None) or next(
+        (p for p in game.waiting_players if p.id == player_id), None
     )
     if not player:
         await ws.close()

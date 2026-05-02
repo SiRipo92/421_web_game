@@ -6,11 +6,23 @@ from typing import Optional
 
 BASIC_FIGURES_SET = {
     (2, 2, 1),
-    (3, 3, 1), (3, 3, 2),
-    (4, 4, 1), (4, 4, 2), (4, 4, 3),
-    (5, 2, 1), (5, 2, 2), (5, 3, 2),
-    (5, 5, 1), (5, 5, 2), (5, 5, 3), (5, 5, 4),
-    (6, 6, 1), (6, 6, 2), (6, 6, 3), (6, 6, 4), (6, 6, 5),
+    (3, 3, 1),
+    (3, 3, 2),
+    (4, 4, 1),
+    (4, 4, 2),
+    (4, 4, 3),
+    (5, 2, 1),
+    (5, 2, 2),
+    (5, 3, 2),
+    (5, 5, 1),
+    (5, 5, 2),
+    (5, 5, 3),
+    (5, 5, 4),
+    (6, 6, 1),
+    (6, 6, 2),
+    (6, 6, 3),
+    (6, 6, 4),
+    (6, 6, 5),
 }
 
 
@@ -44,50 +56,50 @@ def classify(dice: list[int]) -> tuple[str, int, int]:
 
 
 class GamePhase(str, Enum):
-    WAITING      = "waiting"
+    WAITING = "waiting"
     INITIAL_ROLL = "initial_roll"
-    CHARGE       = "charge"
-    DECHARGE     = "decharge"
-    FINISHED     = "finished"
+    CHARGE = "charge"
+    DECHARGE = "decharge"
+    FINISHED = "finished"
 
 
 @dataclass
 class PlayerTurn:
-    dice:       list[int]  = field(default_factory=lambda: [0, 0, 0])
-    reroll:     list[bool] = field(default_factory=lambda: [False, False, False])
-    rolls_left: int  = 3
-    combo:      str  = ""
-    rank:       int  = 0
-    fiches:     int  = 0
-    done:       bool = False
+    dice: list[int] = field(default_factory=lambda: [0, 0, 0])
+    reroll: list[bool] = field(default_factory=lambda: [False, False, False])
+    rolls_left: int = 3
+    combo: str = ""
+    rank: int = 0
+    fiches: int = 0
+    done: bool = False
 
 
 @dataclass
 class Player:
-    id:        str
-    name:      str
-    tokens:    int  = 0
+    id: str
+    name: str
+    tokens: int = 0
     connected: bool = True
-    turn:      Optional[PlayerTurn] = None
+    turn: Optional[PlayerTurn] = None
 
 
 @dataclass
 class Game:
-    id:                    str
-    phase:                 GamePhase = GamePhase.WAITING
-    players:               list = field(default_factory=list)
-    waiting_players:       list = field(default_factory=list)
-    current_index:         int  = 0
-    round_num:             int  = 0
-    pool:                  int  = 11
-    log:                   list = field(default_factory=list)
-    initial_rolls:         dict = field(default_factory=dict)
-    last_round_plays:      list = field(default_factory=list)
-    max_throws_this_round: int  = 3
-    round_starter_id:      str  = ""
-    sets_lost:             dict = field(default_factory=dict)
+    id: str
+    phase: GamePhase = GamePhase.WAITING
+    players: list = field(default_factory=list)
+    waiting_players: list = field(default_factory=list)
+    current_index: int = 0
+    round_num: int = 0
+    pool: int = 11
+    log: list = field(default_factory=list)
+    initial_rolls: dict = field(default_factory=dict)
+    last_round_plays: list = field(default_factory=list)
+    max_throws_this_round: int = 3
+    round_starter_id: str = ""
+    sets_lost: dict = field(default_factory=dict)
     # player_id → user UUID (future DB use)
-    user_ids:              dict = field(default_factory=dict)
+    user_ids: dict = field(default_factory=dict)
 
     def current_player(self) -> Optional[Player]:
         if self.players:
@@ -103,42 +115,43 @@ class Game:
 
 def game_state(game: Game) -> dict:
     return {
-        "type":              "state",
-        "game_id":           game.id,
-        "phase":             game.phase,
-        "round":             game.round_num,
-        "pool":              game.pool,
+        "type": "state",
+        "game_id": game.id,
+        "phase": game.phase,
+        "round": game.round_num,
+        "pool": game.pool,
         "current_player_id": game.current_player().id if game.current_player() else None,
-        "max_throws":        game.max_throws_this_round,
-        "round_starter_id":  game.round_starter_id,
+        "max_throws": game.max_throws_this_round,
+        "round_starter_id": game.round_starter_id,
         "players": [
             {
-                "id":           p.id,
-                "name":         p.name,
-                "tokens":       p.tokens,
-                "connected":    p.connected,
-                "turn":         asdict(p.turn) if p.turn else None,
+                "id": p.id,
+                "name": p.name,
+                "tokens": p.tokens,
+                "connected": p.connected,
+                "turn": asdict(p.turn) if p.turn else None,
                 "initial_roll": game.initial_rolls.get(p.id),
-                "sets_lost":    game.sets_lost.get(p.id, 0),
+                "sets_lost": game.sets_lost.get(p.id, 0),
             }
             for p in game.players
         ],
         "waiting_players": [{"id": p.id, "name": p.name} for p in game.waiting_players],
         "current_round_plays": [
             {
-                "player_id":  p.id,
-                "name":       p.name,
-                "dice":       p.turn.dice[:],
-                "combo":      p.turn.combo,
-                "rank":       p.turn.rank,
-                "fiches":     p.turn.fiches,
+                "player_id": p.id,
+                "name": p.name,
+                "dice": p.turn.dice[:],
+                "combo": p.turn.combo,
+                "rank": p.turn.rank,
+                "fiches": p.turn.fiches,
                 "is_starter": p.id == game.round_starter_id,
                 "rolls_used": 3 - p.turn.rolls_left,
             }
-            for p in game.players if p.turn and p.turn.done
+            for p in game.players
+            if p.turn and p.turn.done
         ],
         "last_round_plays": game.last_round_plays,
-        "log":              game.log[-40:],
+        "log": game.log[-40:],
     }
 
 
@@ -217,21 +230,22 @@ async def _resolve_round(game: Game):
 
     game.last_round_plays = [
         {
-            "player_id":  p.id,
-            "name":       p.name,
-            "dice":       p.turn.dice[:],
-            "combo":      p.turn.combo,
-            "rank":       p.turn.rank,
-            "fiches":     p.turn.fiches,
+            "player_id": p.id,
+            "name": p.name,
+            "dice": p.turn.dice[:],
+            "combo": p.turn.combo,
+            "rank": p.turn.rank,
+            "fiches": p.turn.fiches,
             "is_starter": p.id == game.round_starter_id,
             "rolls_used": 3 - p.turn.rolls_left,
         }
-        for p in players if p.turn
+        for p in players
+        if p.turn
     ]
 
-    ranks   = [(p, p.turn.rank) for p in players]
-    winner  = max(ranks, key=lambda x: x[1])[0]
-    loser   = min(ranks, key=lambda x: x[1])[0]
+    ranks = [(p, p.turn.rank) for p in players]
+    winner = max(ranks, key=lambda x: x[1])[0]
+    loser = min(ranks, key=lambda x: x[1])[0]
     penalty = max(winner.turn.fiches, 1)
 
     if game.phase == GamePhase.CHARGE:
@@ -248,7 +262,7 @@ async def _resolve_round(game: Game):
         if winner.id != loser.id:
             transfer = min(penalty, winner.tokens)
             winner.tokens -= transfer
-            loser.tokens  += transfer
+            loser.tokens += transfer
             game.log.append(f"{winner.name} donne {transfer} jeton(s) à {loser.name}")
 
         set_winner = next((p for p in players if p.tokens == 0), None)
@@ -282,4 +296,5 @@ async def _resolve_round(game: Game):
 
 async def _persist_game(game: "Game") -> None:
     from app.services.game_persistence import persist_completed_game
+
     await persist_completed_game(game)

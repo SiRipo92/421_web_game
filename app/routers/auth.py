@@ -27,11 +27,13 @@ async def register(body: RegisterRequest, request: Request, db: AsyncSession = D
     await db.flush()
 
     db.add(PlayerStats(user_id=user.id))
-    db.add(GdprAuditLog(
-        user_id=user.id,
-        event_type="account_created",
-        ip_address=request.client.host if request.client else None,
-    ))
+    db.add(
+        GdprAuditLog(
+            user_id=user.id,
+            event_type="account_created",
+            ip_address=request.client.host if request.client else None,
+        )
+    )
     await db.commit()
     await db.refresh(user)
 

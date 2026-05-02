@@ -52,14 +52,20 @@ if settings.debug:
     )
 
 
-@app.exception_handler(Exception)
-async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
-    sentry_sdk.capture_exception(exc)
-    return JSONResponse(
-        status_code=500,
-        content={"detail": str(exc) if settings.debug else "Internal server error"},
-    )
+@app.middleware("http")
+async def catch_exceptions_middleware(request: Request, call_next):
+    try:
+        return await call_next(request)
+    except Exception as exc:
+        logger.exception("Unhandled error %s %s", request.method, request.url.path)
+        sentry_sdk.capture_exception(exc)
+        body = str(exc) if settings.debug else "Internal server error"
+        return JSONResponse(status_code=500, content={"detail": body})
+
+
+@app.get("/healthz", include_in_schema=False)
+async def healthz():
+    return {"status": "ok"}
 
 
 app.include_router(auth_router)

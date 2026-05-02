@@ -35,9 +35,7 @@ async def _write(game: Game, db: AsyncSession) -> None:
     winner_user_id = game.user_ids.get(winner.id)
 
     # Collect registered players for ELO
-    registered = [
-        p for p in players if game.user_ids.get(p.id) is not None
-    ]
+    registered = [p for p in players if game.user_ids.get(p.id) is not None]
     registered_user_ids = [uuid.UUID(game.user_ids[p.id]) for p in registered]
 
     # Load all PlayerStats rows in one query
@@ -63,14 +61,16 @@ async def _write(game: Game, db: AsyncSession) -> None:
     # Write game_players rows
     for placement, p in enumerate(sorted_players, start=1):
         user_id_str = game.user_ids.get(p.id)
-        db.add(GamePlayer(
-            game_id=game_record.id,
-            user_id=uuid.UUID(user_id_str) if user_id_str else None,
-            display_name=p.name,
-            final_tokens=p.tokens,
-            sets_lost=game.sets_lost.get(p.id, 0),
-            placement=placement,
-        ))
+        db.add(
+            GamePlayer(
+                game_id=game_record.id,
+                user_id=uuid.UUID(user_id_str) if user_id_str else None,
+                display_name=p.name,
+                final_tokens=p.tokens,
+                sets_lost=game.sets_lost.get(p.id, 0),
+                placement=placement,
+            )
+        )
 
     # Update ELO for registered players
     for p in registered:
@@ -83,7 +83,7 @@ async def _write(game: Game, db: AsyncSession) -> None:
             for op in registered
             if op.id != p.id and game.user_ids.get(op.id) in {str(k) for k in stats_rows}
         ]
-        won = (p.id == winner.id)
+        won = p.id == winner.id
         stats.elo = updated_elo(stats.elo, opponent_elos, won)
         stats.games_played += 1
         if won:
