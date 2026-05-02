@@ -1,4 +1,6 @@
 import logging
+import sys
+import warnings
 from contextlib import asynccontextmanager
 
 import sentry_sdk
@@ -13,12 +15,17 @@ from app.game.ws import router as game_router
 from app.routers.auth import router as auth_router
 from app.routers.rankings import router as rankings_router
 
+# sentry-sdk calls asyncio.iscoroutinefunction() which is deprecated in Python ≥3.14
+# and raises under strict warning modes. Suppress before sentry_sdk.init() is called.
+warnings.filterwarnings("ignore", message=".*asyncio.iscoroutinefunction.*")
+
 logging.basicConfig(
     level=logging.DEBUG if settings.debug else logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%Y-%m-%dT%H:%M:%S",
 )
 logger = logging.getLogger(__name__)
+logger.info("Starting — debug=%s python=%s", settings.debug, sys.version.split()[0])
 
 
 @asynccontextmanager
@@ -42,6 +49,8 @@ app = FastAPI(
 if settings.sentry_dsn:
     sentry_sdk.init(dsn=settings.sentry_dsn, traces_sample_rate=0.2)
     logger.info("Sentry enabled")
+else:
+    logger.info("Sentry disabled (no DSN configured)")
 
 if settings.debug:
     app.add_middleware(

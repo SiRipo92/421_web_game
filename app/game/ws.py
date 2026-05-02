@@ -98,19 +98,29 @@ async def join_game(
     return {"player_id": pid, "game_id": game.id, "status": "waiting"}
 
 
+def _serve(filename: str) -> FileResponse:
+    path = _STATIC / filename
+    if not path.is_file():
+        logger.error("Static file not found: %s (STATIC=%s)", path, _STATIC)
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=500, detail=f"Static file missing: {filename}")
+    return FileResponse(path)
+
+
 @router.get("/")
 def index():
-    return FileResponse(_STATIC / "index.html")
+    return _serve("index.html")
 
 
 @router.get("/login.html")
 def login_page():
-    return FileResponse(_STATIC / "login.html")
+    return _serve("login.html")
 
 
 @router.get("/privacy.html")
 def privacy_page():
-    return FileResponse(_STATIC / "privacy.html")
+    return _serve("privacy.html")
 
 
 @router.websocket("/ws/{game_id}/{player_id}")
