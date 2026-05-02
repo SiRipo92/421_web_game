@@ -1,10 +1,17 @@
 import json
 import random
 import uuid
+from typing import Optional
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
+from jose import JWTError, jwt
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
+from app.db.base import AsyncSessionLocal
+from app.db.models import User
 from app.game.logic import (
     Game, GamePhase, Player,
     _finalize_order, _resolve_round, _start_initial_roll,
@@ -13,6 +20,19 @@ from app.game.logic import (
 from app.game.state import games
 
 router = APIRouter()
+
+ALGORITHM = "HS256"
+
+
+async def _resolve_user_from_token(token: Optional[str]) -> Optional[str]:
+    """Return user UUID string from JWT, or None for guests."""
+    if not token:
+        return None
+    try:
+        payload = jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
+        return payload.get("sub")
+    except JWTError:
+        return None
 
 
 class ConnectionManager:
@@ -41,25 +61,35 @@ manager = ConnectionManager()
 
 
 @router.get("/api/create")
-def create_game():
+async def create_game(token: Optional[str] = Query(default=None)):
     gid = str(uuid.uuid4())[:8]
     games[gid] = Game(id=gid)
     return {"game_id": gid}
 
 
 @router.get("/api/join/{game_id}")
-def join_game(game_id: str, name: str):
+async def join_game(
+    game_id: str,
+    name: str,
+    token: Optional[str] = Query(default=None),
+):
     game = games.get(game_id.lower())
     if not game:
         return {"error": "Game not found"}
+
+    user_id = await _resolve_user_from_token(token)
     pid = str(uuid.uuid4())[:8]
     player = Player(id=pid, name=name)
+
     if game.phase in (GamePhase.WAITING, GamePhase.INITIAL_ROLL):
         game.players.append(player)
+        game.user_ids[pid] = user_id  # None for guests
         if game.phase == GamePhase.INITIAL_ROLL:
             game.initial_rolls[pid] = None
         return {"player_id": pid, "game_id": game.id, "status": "joined"}
+
     game.waiting_players.append(player)
+    game.user_ids[pid] = user_id
     return {"player_id": pid, "game_id": game.id, "status": "waiting"}
 
 
@@ -69,8 +99,25 @@ def index():
         return HTMLResponse(f.read())
 
 
+@router.get("/login.html")
+def login_page():
+    with open("static/login.html") as f:
+        return HTMLResponse(f.read())
+
+
+@router.get("/privacy.html")
+def privacy_page():
+    with open("static/privacy.html") as f:
+        return HTMLResponse(f.read())
+
+
 @router.websocket("/ws/{game_id}/{player_id}")
-async def websocket_endpoint(ws: WebSocket, game_id: str, player_id: str):
+async def websocket_endpoint(
+    ws: WebSocket,
+    game_id: str,
+    player_id: str,
+    token: Optional[str] = Query(default=None),
+):
     game = games.get(game_id.lower())
     if not game:
         await ws.close()
@@ -83,6 +130,10 @@ async def websocket_endpoint(ws: WebSocket, game_id: str, player_id: str):
     if not player:
         await ws.close()
         return
+
+    # Update user_id from WS token if not already set from join
+    if token and game.user_ids.get(player_id) is None:
+        game.user_ids[player_id] = await _resolve_user_from_token(token)
 
     await manager.connect(game_id, ws, player_id)
     player.connected = True
