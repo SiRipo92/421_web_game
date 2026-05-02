@@ -1,58 +1,45 @@
 import asyncio
-from collections import Counter
+from collections import Counter  # used by _finalize_order
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Optional
 
-BASIC_FIGURES_SET = {
-    (2, 2, 1),
-    (3, 3, 1),
-    (3, 3, 2),
-    (4, 4, 1),
-    (4, 4, 2),
-    (4, 4, 3),
-    (5, 2, 1),
-    (5, 2, 2),
-    (5, 3, 2),
-    (5, 5, 1),
-    (5, 5, 2),
-    (5, 5, 3),
-    (5, 5, 4),
-    (6, 6, 1),
-    (6, 6, 2),
-    (6, 6, 3),
-    (6, 6, 4),
-    (6, 6, 5),
-}
+_SUITE_RANKS = {(3, 2, 1): 1100, (4, 3, 2): 1200, (5, 4, 3): 1300, (6, 5, 4): 1400}
 
 
 def classify(dice: list[int]) -> tuple[str, int, int]:
-    """(combo_name, rank, fiches). Higher rank = stronger play."""
+    """Return (combo_name, rank, fiches). Higher rank = stronger play.
+
+    Hierarchy (low → high):
+      basic figures (1f)  < suites 1100-1400 (2f)  < triples 2200-2600 (2-6f)
+      < 11x 7200-7600 (2-6f)  < 111 8000 (7f)  < 421 9000 (8f)
+    """
     if not all(d > 0 for d in dice):
         return "", 0, 0
-    s = sorted(dice, reverse=True)
-    t = tuple(s)
+    a, b, c = sorted(dice, reverse=True)
 
-    if t == (4, 2, 1):
-        return "421", 4000, 8
+    if (a, b, c) == (4, 2, 1):
+        return "421", 9000, 8
 
-    if t[0] == t[1] == t[2]:
-        v = t[0]
-        if v == 1:
-            return "111", 3007, 7
-        return f"{v}{v}{v}", 2000 + v, v
+    if a == b == c == 1:
+        return "111", 8000, 7
 
-    if t[1] == 1 and t[2] == 1:
-        x = t[0]
-        return f"11{x}", 3000 + x, x
+    # 11x — pair of aces plus a figure (must check before triple)
+    if b == 1 and c == 1:
+        return f"11{a}", 7000 + a * 100, a
 
-    if t in BASIC_FIGURES_SET:
-        rank = 1000 + t[0] * 100 + t[1] * 10 + t[2]
-        name = "nénette" if t == (2, 2, 1) else f"{t[0]}{t[1]}{t[2]}"
-        return name, rank, 1
+    # Triple / Brelan
+    if a == b == c:
+        return f"{a}{a}{a}", 2000 + a * 100, a
 
-    rank = t[0] * 100 + t[1] * 10 + t[2]
-    return f"{t[0]}{t[1]}{t[2]}", rank, 0
+    # Suite — three consecutive dice
+    if a - b == 1 and b - c == 1:
+        name = "l'amour" if (a, b, c) == (6, 5, 4) else f"{c}{b}{a}"
+        return name, _SUITE_RANKS[(a, b, c)], 2
+
+    # Basic figure — everything else scores 1 fiche
+    name = "nénette" if (a, b, c) == (2, 2, 1) else f"{a}{b}{c}"
+    return name, a * 100 + b * 10 + c, 1
 
 
 class GamePhase(str, Enum):
