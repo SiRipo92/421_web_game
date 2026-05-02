@@ -265,6 +265,7 @@ async def _resolve_round(game: Game):
             if sl_count >= 2:
                 game.phase = GamePhase.FINISHED
                 game.log.append(f"Fin de partie ! {set_winner.name} gagne !")
+                asyncio.create_task(_persist_game(game))
                 return
             _start_new_set(game, sl_id)
             return
@@ -277,3 +278,8 @@ async def _resolve_round(game: Game):
         p.turn = new_turn()
     starter_name = next((p.name for p in game.players if p.id == game.round_starter_id), "")
     game.log.append(f"Round {game.round_num} · {starter_name} donne le rythme")
+
+
+async def _persist_game(game: "Game") -> None:
+    from app.services.game_persistence import persist_completed_game
+    await persist_completed_game(game)
