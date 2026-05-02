@@ -6,16 +6,17 @@ from typing import Optional
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from jose import JWTError, jwt
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.db.base import AsyncSessionLocal
-from app.db.models import User
 from app.game.logic import (
-    Game, GamePhase, Player,
-    _finalize_order, _resolve_round, _start_initial_roll,
-    classify, game_state, new_turn,
+    Game,
+    GamePhase,
+    Player,
+    _finalize_order,
+    _resolve_round,
+    _start_initial_roll,
+    classify,
+    game_state,
 )
 from app.game.state import games
 
