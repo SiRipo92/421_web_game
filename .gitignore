@@ -33,6 +33,9 @@ htmlcov/
 # Local tools
 .claude/
 
+# Local rules notes (cahier des charges scratch)
+cdc.txt
+
 # macOS
 .DS_Store
 
