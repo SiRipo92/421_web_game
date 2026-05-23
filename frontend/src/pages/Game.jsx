@@ -5,6 +5,7 @@ import { Avatar } from '../components/shared/Avatar.jsx'
 import { ChipStack } from '../components/shared/ChipStack.jsx'
 import { ComboTable } from '../components/shared/ComboTable.jsx'
 import { RoomSettingsPanel } from '../components/shared/RoomSettingsPanel.jsx'
+import { ConfirmModal } from '../components/shared/ConfirmModal.jsx'
 import { useGame } from '../hooks/useGame.js'
 import { useLang } from '../context/useLang.js'
 
@@ -19,6 +20,7 @@ export function Game({ token }) {
 
   const [logOpen, setLogOpen] = useState(true)
   const [showRoomSettings, setShowRoomSettings] = useState(false)
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false)
 
   const me = state.players?.find(p => p.id === playerId)
   const isHost = state.room?.host_player_id === playerId
@@ -102,7 +104,7 @@ export function Game({ token }) {
             <button
               type="button"
               className="btn-link"
-              onClick={() => { if (window.confirm(t('leave') + ' ?')) { leave(); navigate('/') } }}
+              onClick={() => setShowLeaveConfirm(true)}
               style={{ fontSize: '0.75rem', color: 'var(--ink-mute)' }}
             >← {t('leave')}</button>
           </div>
@@ -138,6 +140,17 @@ export function Game({ token }) {
                     />
                   ))}
                 </div>
+                {isMyTurn && hasRolled && !myTurn?.done && (myTurn?.rolls_left ?? 0) > 0 && (
+                  <div className="serif" style={{
+                    fontSize: '0.78rem',
+                    color: 'var(--ink-mute)',
+                    fontStyle: 'italic',
+                    textShadow: '0 1px 2px rgba(0,0,0,0.6)',
+                    marginTop: 4,
+                  }}>
+                    {t('dice_keep_hint')}
+                  </div>
+                )}
                 {myTurn?.combo && (
                   <div style={{
                     fontFamily: 'var(--display)', fontSize: '1.3rem',
@@ -281,6 +294,18 @@ export function Game({ token }) {
           room={state.room}
           hostName={state.players?.find(p => p.id === state.room?.host_player_id)?.name}
           onClose={() => setShowRoomSettings(false)}
+        />
+      )}
+
+      {showLeaveConfirm && (
+        <ConfirmModal
+          title={t('confirm_leave_title')}
+          text={t('confirm_leave_text')}
+          confirmLabel={t('confirm_leave_yes')}
+          cancelLabel={t('confirm_leave_no')}
+          danger
+          onConfirm={() => { leave(); navigate('/') }}
+          onCancel={() => setShowLeaveConfirm(false)}
         />
       )}
     </div>

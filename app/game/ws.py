@@ -479,6 +479,14 @@ async def websocket_endpoint(
                 game.initial_rolls.pop(player_id, None)
                 game.out_of_match.discard(player_id)
 
+                # Surface a visible "X left" entry so other players know what happened.
+                _log(
+                    game,
+                    "log_player_left",
+                    f"← {player.name} a quitté la salle.",
+                    name=player.name,
+                )
+
                 if not game.players:
                     games.pop(game_id.upper(), None)
                     _join_locks.pop(game_id.upper(), None)
@@ -546,23 +554,43 @@ async def websocket_endpoint(
                 elif not is_starter and rolls_used >= game.max_throws_this_round:
                     continue
                 _cancel_afk(game, player_id)
+                # NEW semantics: reroll[i]=True means "this die will be re-rolled".
+                # After the first throw, the default is all-True so the *next* "Relancer"
+                # re-rolls everything unless the player explicitly clicks dice to "keep"
+                # them (toggles reroll[i] → False). This matches the standard dice-game
+                # UX: tap a die to lock it, then re-roll the unlocked ones.
                 for i in range(3):
                     if t.rolls_left == 3 or t.reroll[i]:
                         t.dice[i] = random.randint(1, 6)
-                t.reroll = [False, False, False]
+                # After a roll, mark every die "to be re-rolled" by default — the player
+                # locks the ones they want to keep before throwing again.
+                t.reroll = [True, True, True]
                 t.rolls_left -= 1
                 t.combo, t.rank, t.fiches = classify(t.dice)
-                if game.phase == GamePhase.CHARGE and game.bank_rule == "sec":
+
+                # Auto-validate when the player has no more throws available (G3).
+                # If they've hit max throws or it's "sec" mode (1 throw), we mark done
+                # automatically so no extra Valider click is needed.
+                is_at_max = (
+                    t.rolls_left <= 0
+                    or (game.phase == GamePhase.CHARGE and game.bank_rule == "sec")
+                    or (not is_starter and (3 - t.rolls_left) >= game.max_throws_this_round)
+                )
+                if is_at_max:
                     t.done = True
-                    if player_id == game.round_starter_id:
+                    if (
+                        player_id == game.round_starter_id
+                        and game.phase == GamePhase.CHARGE
+                        and game.bank_rule == "sec"
+                    ):
                         game.max_throws_this_round = 1
-                    _sec_dice = sorted(t.dice, reverse=True)
+                    sorted_dice = sorted(t.dice, reverse=True)
                     _log(
                         game,
                         "log_turn",
-                        f"{player.name}: {_sec_dice} → {t.combo} ({t.fiches}f)",
+                        f"{player.name}: {sorted_dice} → {t.combo} ({t.fiches}f)",
                         name=player.name,
-                        dice=_sec_dice,
+                        dice=sorted_dice,
                         combo=t.combo,
                         fiches=t.fiches,
                     )

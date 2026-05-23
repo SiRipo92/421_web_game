@@ -48,7 +48,32 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 **Why:** R1 covered tied losers. Exact-same-combo tied winners in décharge still take the "no transfer this cycle" path. Per the spec, they should re-roll to pick the giver.
 **Scope:** Mirror the loser-tiebreak code path with `purpose="winner"`. `_resolve_tiebreak` picks HIGHEST rank (giver) instead of lowest. Winner gives `original_penalty` chips to the original loser.
 
-### G8. Round-point persistence trigger
+### G9. Smarter AFK bot
+**Why:** Reported by playtest. The bot today just rolls once with all three dice and stops, regardless of what the rest of the table is doing. Per the user: it should play like a human strategically — look at the highest score-to-beat in the cycle, re-roll only the dice that don't help, use available throws.
+**Scope:**
+- Bot reads `current_round_plays` / starter's combo to learn the target.
+- If the bot has rolls available and its current combo is lower than the target, it picks which dice to keep based on a simple heuristic (e.g., keep dice that complete a known combo; re-roll the rest).
+- Respect `max_throws_this_round`.
+- Special-case 421 (8 fiches): always keep dice that contribute to a 421 (a 4, 2, or 1).
+- The heuristic should stay simple — no full search; just a couple of rules.
+
+### G10. Side-panel commentary ticker
+**Why:** Reported. The right-side log is great for full history; user also wants a left-side "headline" ticker for the most recent meaningful events, where short messages fade in/out as new events arrive.
+**Scope:**
+- New component `CommentaryTicker.jsx` rendered on the left edge of the game viewport.
+- Subscribes to the same `log_events` stream; filters to "headline" events (player_left, tiebreak_start, round_point, match_lost, pool_empty, big combos).
+- Renders each event as a short translated phrase ("Players tied — awaiting tiebreak", "Highest to beat: 421 in 1 throw", "X left the room"); auto-fade after ~6 s.
+- Headlines specifically include: "X has left", "Players tied, awaiting tiebreak", "Highest score to beat: 421 in N turns".
+
+### G11. Single-player searching modal (open/public rooms)
+**Why:** Reported. When only one player remains in a public/open room, the game shouldn't continue alone — pause and wait for new players to join. Spectators should be able to join.
+**Scope:**
+- Backend: when an active game (CHARGE/DECHARGE/TIEBREAK) drops to one active player, pause: enter a new `GamePhase.WAITING_FOR_PLAYERS` (or reuse WAITING with a flag), suspend AFK timers, stop the match-end check.
+- Frontend: SearchingModal that shows "Searching for players…" with the current player count and an auto-start timer once a 2nd player joins.
+- New-player path: when a spectator or new joiner comes in, they're added to `players` (not `waiting_players`); game resumes with a fresh banker roll for the new lineup (per the rules: a new game = new banker tirage).
+- Alternative simpler option: just dissolve the room when only one player remains, like WAITING phase does today.
+
+### G12. Round-point persistence trigger
 **Why:** With no auto-game-end, `_persist_game` only fires for the lone-survivor edge case. Logged-in users' round points accumulated in a session are lost when the room dissolves.
 **Scope:** Trigger persistence (1) when a player leaves the room mid-game, (2) when the room dissolves (last player leaves or host migrates). Write `round_points[pid]` to `GamePlayer.round_points` and update `PlayerStats`.
 
@@ -198,6 +223,7 @@ Past commits that captured incorrect rules — superseded by **R1**, **R2**, **R
 
 ## Done
 
+- **2026-05-23** _(pending SHA)_ — Fixed broken dice "Relancer" (flipped semantics: click die to keep; unselected dice re-rolled by default). Auto-validate on max throws so the "Valider" click is no longer required when the player has no choice. Styled in-game `ConfirmModal` replaces `window.confirm` for the leave action. `log_player_left` event surfaced in the game log. Added dice-keep hint text under the dice. Roadmap items G9 (smarter AFK bot), G10 (commentary ticker), G11 (single-player searching modal) captured.
 - **2026-05-23** `6d176d0` — TIEBREAK frontend (`TiebreakScreen` in `Game.jsx`, `tiebreakRoll` action in `useGame.js`) + AFK bot for TIEBREAK phase (`_afk_tiebreak_timer`, scheduled by `_schedule_afk`). Added missing i18n keys for `log_match_lost`, `log_round_point`, `log_player_sits_out`, `log_tiebreak_start`, `log_tiebreak_throw`, `log_afk_initial`, `log_round_all_tie`. Always-call `_schedule_afk` after `_resolve_round` so the new phase's timer is set up.
 - **2026-05-23** `bef1248` — Backend TIEBREAK phase + `tiebreak_roll` action + `_resolve_tiebreak` (tied losers only; tied winners deferred to G7).
 - **2026-05-23** `a905ae3` — match_losses + round_points accounting; no game-end on 2 losses; `GamePlayer.sets_lost` → `round_points` DB migration.
