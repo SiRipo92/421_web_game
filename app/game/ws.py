@@ -436,6 +436,21 @@ async def _dispatch(
 
     if action == "leave":
         _cancel_afk(game, player_id)
+
+        # G18: persist this player's session stats if they were actively
+        # playing AND they're a registered user. Snapshot the values FIRST
+        # because the cleanup below pops them from the game dicts.
+        if game.phase in (GamePhase.CHARGE, GamePhase.DECHARGE, GamePhase.TIEBREAK):
+            leaver_user_id = game.user_ids.get(player_id)
+            if leaver_user_id:
+                from app.services.game_persistence import persist_player_session
+
+                asyncio.create_task(
+                    persist_player_session(
+                        leaver_user_id, game.id, game.round_points.get(player_id, 0)
+                    )
+                )
+
         leaver_index = next((i for i, p in enumerate(game.players) if p.id == player_id), -1)
         game.players = [p for p in game.players if p.id != player_id]
         game.user_ids.pop(player_id, None)
@@ -676,7 +691,19 @@ async def _dispatch(
             reason=reason,
         )
 
-        # Same cleanup as a voluntary leave.
+        # Same cleanup as a voluntary leave — including the G18 stats persistence
+        # snapshot when the kicked player was actively playing as a registered user.
+        if game.phase in (GamePhase.CHARGE, GamePhase.DECHARGE, GamePhase.TIEBREAK):
+            target_user_id = game.user_ids.get(target_id)
+            if target_user_id:
+                from app.services.game_persistence import persist_player_session
+
+                asyncio.create_task(
+                    persist_player_session(
+                        target_user_id, game.id, game.round_points.get(target_id, 0)
+                    )
+                )
+
         _cancel_afk(game, target_id)
         leaver_index = next((i for i, p in enumerate(game.players) if p.id == target_id), -1)
         game.players = [p for p in game.players if p.id != target_id]

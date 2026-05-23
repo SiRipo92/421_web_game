@@ -31,6 +31,60 @@ async def persist_completed_game(game: Game) -> None:
         games.pop(game.id, None)
 
 
+async def persist_player_session(user_id_str: str, game_code: str, round_points: int) -> None:
+    """Bump a single registered player's lifetime stats when they leave an active game.
+
+    Called from the WS leave handler whenever a logged-in user steps out of a
+    game past WAITING (i.e. they were actually playing). Increments
+    `games_played`, attributes their session `round_points` to `losses`, and
+    counts a `win` only if they left with zero round points.
+
+    Snapshotted values are passed by argument — we don't keep a reference to
+    the live `Game` because the caller may have already mutated it (popping the
+    leaver from `user_ids` / `round_points`) by the time this coroutine runs.
+
+    ELO recalculation is deliberately skipped here. Without a canonical game-end
+    we don't know who the "opponents" are in the rating sense; the next
+    iteration (or a periodic batch job) can revisit when game-record writes
+    have a clear trigger.
+    """
+    if not user_id_str:
+        return
+    try:
+        user_uuid = uuid.UUID(user_id_str)
+    except (TypeError, ValueError):
+        return
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(select(PlayerStats).where(PlayerStats.user_id == user_uuid))
+            stats = result.scalar_one_or_none()
+            if stats is None:
+                # Shouldn't happen — PlayerStats is created at registration time.
+                logger.warning(
+                    "persist_player_session: no PlayerStats row for user %s", user_id_str
+                )
+                return
+            stats.games_played += 1
+            if round_points > 0:
+                stats.losses += round_points
+            else:
+                stats.wins += 1
+            await db.commit()
+        logger.info(
+            "Persisted session: user=%s game=%s round_points=%d",
+            user_id_str,
+            game_code,
+            round_points,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to persist player session game=%s user=%s",
+            game_code,
+            user_id_str,
+        )
+        sentry_sdk.capture_exception()
+
+
 async def _write(game: Game, db: AsyncSession) -> None:
     """Create game/player rows and recalculate ELO for all registered players."""
     players = game.players
