@@ -73,7 +73,48 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 - New-player path: when a spectator or new joiner comes in, they're added to `players` (not `waiting_players`); game resumes with a fresh banker roll for the new lineup (per the rules: a new game = new banker tirage).
 - Alternative simpler option: just dissolve the room when only one player remains, like WAITING phase does today.
 
-### G12. Round-point persistence trigger
+### G13. Match-end announcement banner
+**Why:** Reported. When a player gets manché (reaches 11 chips), the only visible signal today is one line in the right-side text log — easy to miss. The user wants a clear visual "match is over, X lost" announcement so play feels punctuated.
+**Scope:**
+- Watch `state.log_events` for the most recent entry with key `log_match_lost`.
+- Render a centered fade-in/out banner over the piste: « **X est manché !** Match 1/2 — nouveau match dans 3s… »
+- Auto-dismiss after ~4s; click-to-dismiss also.
+- Same pattern usable for `log_round_point` (when 2/2 reached, "X prend un point de round").
+**Acceptance:** Two-player game; one player reaches 11; the screen shows a centered banner naming them as the manché before the new match starts.
+
+### G14. Layout overhaul — piste sizing, dice placement, log positioning
+**Why:** The piste doesn't take up the screen's full visual real estate; the dice area and chip stack sit inside a small circle while the rest of the page has unused white space. The user wants the game to feel "bigger".
+**Scope:**
+- Rework `Game.jsx`'s main grid:
+  - Make the piste 70–80% of the viewport (clamp aspect-ratio: 1).
+  - Move the dice + combo display to a fixed bottom-of-piste position, larger, more readable.
+  - Right-side log → narrower, full-height column.
+  - Left-side commentary ticker (G10) gets a permanent slot.
+- Consider a CSS grid: `[ticker 280] | [piste 1fr] | [log 320]` on wide screens, stacked on mobile.
+**Acceptance:** On a 1440-wide screen, the piste fills > 60% of the available width, dice are clearly readable without leaning in, log is still visible.
+
+### G15. Visible turn-rhythm + throws indicator
+**Why:** Reported. Today the player sees only the `RollDots` (3 small dots) and a small "N lancers restants" line. They don't see explicitly: "the starter set the rhythm at N throws, you're on throw M of N." This makes the bank-rule + free-rythm semantics opaque.
+**Scope:**
+- Top panel: new compact `RhythmIndicator` showing:
+  - Bank rule label ("Sec" or "Libre")
+  - For the round starter: "Rythme: libre" while they roll, then "Rythme: N lancers" once they validate.
+  - For other players: "Vous: M/N lancers"
+- Visible right next to the existing `RollDots`.
+**Acceptance:** Non-starter in a "free" room can read the rhythm from the screen without checking the docs.
+
+### G16. Larger / more legible in-piste hints
+**Why:** Reported. The dice keep hint (`dice_keep_hint`) is small italic brass on translucent black — hard to read.
+**Scope:** Bump to ~0.95rem, slightly heavier weight, more padding, possibly a small "?" icon prefix to anchor the eye.
+
+### G17. Investigate duplicate dev-mode WS connections
+**Why:** Backend log shows the same player_id getting `[accepted]` 3–6 times within seconds during local play. Almost certainly React StrictMode running `useGame`'s effect twice on mount + the C2 "kick old connection" close logic. The result is harmless (only the last socket survives) but it spams the log and produces Vite proxy EPIPE/ECONNRESET noise.
+**Scope:**
+- Confirm StrictMode + double-effect is the cause (check `main.jsx` for `<StrictMode>` wrapper).
+- Options: (a) accept it as dev-only noise and document; (b) move WS open/close out of useEffect into a useRef-guarded singleton per (gameId, playerId, token) tuple; (c) keep StrictMode but make the WS connect lazy + idempotent.
+- Doesn't affect production behavior, so low-priority.
+
+### G18. Round-point persistence trigger
 **Why:** With no auto-game-end, `_persist_game` only fires for the lone-survivor edge case. Logged-in users' round points accumulated in a session are lost when the room dissolves.
 **Scope:** Trigger persistence (1) when a player leaves the room mid-game, (2) when the room dissolves (last player leaves or host migrates). Write `round_points[pid]` to `GamePlayer.round_points` and update `PlayerStats`.
 

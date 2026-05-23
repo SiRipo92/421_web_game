@@ -21,10 +21,13 @@ export function Game({ token }) {
   const [logOpen, setLogOpen] = useState(true)
   const [showRoomSettings, setShowRoomSettings] = useState(false)
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false)
+  const [matchEnd, setMatchEnd] = useState(null) // {name, count} for the G13 banner
+  const lastMatchEndFpRef = useRef(null)
 
   const me = state.players?.find(p => p.id === playerId)
   const isHost = state.room?.host_player_id === playerId
   const isMyTurn = state.current_player_id === playerId
+  const isStarter = state.round_starter_id === playerId
   const myTurn = me?.turn
   const rollsUsed = myTurn ? 3 - myTurn.rolls_left : 0
   const canRoll = isMyTurn && myTurn && !myTurn.done && myTurn.rolls_left > 0
@@ -35,6 +38,30 @@ export function Game({ token }) {
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
   }, [state.log])
+
+  // G13: pop a transient banner whenever a new manché event lands. We diff against
+  // the previous "name:count" fingerprint so the same event doesn't re-trigger on
+  // every state broadcast.
+  useEffect(() => {
+    const events = state.log_events || []
+    for (let i = events.length - 1; i >= 0; i--) {
+      const e = events[i]
+      if (e?.key === 'log_match_lost') {
+        const fp = `${e.name}:${e.count}`
+        if (fp !== lastMatchEndFpRef.current) {
+          lastMatchEndFpRef.current = fp
+          setMatchEnd({ name: e.name, count: e.count })
+        }
+        return
+      }
+    }
+  }, [state.log_events])
+
+  useEffect(() => {
+    if (!matchEnd) return
+    const id = setTimeout(() => setMatchEnd(null), 4500)
+    return () => clearTimeout(id)
+  }, [matchEnd])
 
   if (state.phase === 'finished') {
     return <FinishedScreen state={state} playerId={playerId} t={t} navigate={navigate} />
@@ -116,6 +143,14 @@ export function Game({ token }) {
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           position: 'relative',
         }}>
+          {matchEnd && (
+            <MatchEndBanner
+              t={t}
+              name={matchEnd.name}
+              count={matchEnd.count}
+              onClose={() => setMatchEnd(null)}
+            />
+          )}
           <div style={{ position: 'relative', width: 'min(600px, 70vh, 92%)', aspectRatio: '1/1' }}>
             <div className="piste" style={{ position: 'absolute', inset: 0 }} role="region" aria-label="Tapis de jeu">
               <div style={{
@@ -142,16 +177,19 @@ export function Game({ token }) {
                 </div>
                 {isMyTurn && hasRolled && !myTurn?.done && (myTurn?.rolls_left ?? 0) > 0 && (
                   <div className="serif" style={{
-                    fontSize: '0.8rem',
+                    fontSize: '0.95rem',
                     color: 'var(--brass-soft)',
                     fontStyle: 'italic',
-                    textShadow: '0 1px 3px rgba(0,0,0,0.8)',
-                    marginTop: 8,
-                    padding: '0.3rem 0.6rem',
-                    background: 'rgba(0,0,0,0.25)',
-                    borderRadius: 3,
+                    textShadow: '0 1px 3px rgba(0,0,0,0.9)',
+                    marginTop: 10,
+                    padding: '0.5rem 0.85rem',
+                    background: 'rgba(0,0,0,0.45)',
+                    borderRadius: 4,
+                    maxWidth: '90%',
+                    textAlign: 'center',
+                    border: '1px solid rgba(212,171,103,0.3)',
                   }}>
-                    {t('dice_keep_hint')}
+                    💡 {t('dice_keep_hint')}
                   </div>
                 )}
                 {myTurn?.combo && (
@@ -213,6 +251,15 @@ export function Game({ token }) {
             )}
           </div>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+            <RhythmIndicator
+              t={t}
+              isMyTurn={isMyTurn}
+              isStarter={isStarter}
+              hasRolled={hasRolled}
+              rollsUsed={rollsUsed}
+              maxThrows={state.max_throws ?? 3}
+              bankRule={state.room?.bank_rule}
+            />
             <RollDots rollsLeft={myTurn?.rolls_left ?? 3} />
             {isMyTurn && (
               <>
@@ -578,6 +625,91 @@ function AfkBar({ total }) {
       </div>
       <span className="mono" style={{ fontSize: '0.75rem', color: remaining <= 10 ? 'var(--rouge)' : 'var(--ink-mute)' }}>
         {remaining}s
+      </span>
+    </div>
+  )
+}
+
+function MatchEndBanner({ t, name, count, onClose }) {
+  return (
+    <button
+      type="button"
+      onClick={onClose}
+      style={{
+        position: 'absolute',
+        inset: 0,
+        zIndex: 50,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'rgba(20,15,12,0.55)',
+        border: 'none',
+        cursor: 'pointer',
+        animation: 'fadeIn 0.25s ease-out',
+      }}
+      aria-label={t('close')}
+    >
+      <div
+        className="ticket"
+        style={{
+          background: 'var(--paper)',
+          border: '2px solid var(--rouge)',
+          padding: '1.6rem 2.4rem',
+          textAlign: 'center',
+          maxWidth: 460,
+          boxShadow: '0 18px 48px rgba(0,0,0,0.45)',
+        }}
+      >
+        <div className="eyebrow" style={{ color: 'var(--rouge)', marginBottom: 8 }}>
+          {t('match_end_eyebrow')}
+        </div>
+        <h2 className="display" style={{ fontSize: '1.8rem', margin: '0 0 0.5rem' }}>
+          <em style={{ color: 'var(--rouge)' }}>{name}</em> {t('match_end_is_manche')}
+        </h2>
+        <p className="serif" style={{ color: 'var(--ink-mute)', margin: '0 0 0.3rem' }}>
+          {t('match_end_count', { count, total: 2 })}
+        </p>
+        <p className="serif" style={{ fontSize: '0.8rem', color: 'var(--ink-fade)', fontStyle: 'italic', margin: 0 }}>
+          {t('match_end_dismiss_hint')}
+        </p>
+      </div>
+      <style>{`@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }`}</style>
+    </button>
+  )
+}
+
+function RhythmIndicator({ t, isMyTurn, isStarter, hasRolled, rollsUsed, maxThrows, bankRule }) {
+  // Two pieces of info we want surfaced:
+  //   1. The rhythm cap for this cycle (locked once the starter validates)
+  //   2. The current player's progress against it
+  // We keep it compact so it sits next to the existing RollDots without crowding.
+  const rhythmLocked = !isStarter || rollsUsed > 0  // starter sets it on first action
+  const cap = bankRule === 'sec' ? 1 : maxThrows
+  const youUsed = isMyTurn ? rollsUsed : 0
+
+  return (
+    <div
+      aria-label={t('rhythm_label')}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 2,
+        padding: '0.35rem 0.75rem',
+        background: 'var(--paper-deep)',
+        border: '1px solid var(--rule)',
+        borderRadius: 999,
+        minWidth: 110,
+      }}
+    >
+      <span className="eyebrow" style={{ fontSize: '0.6rem', color: 'var(--ink-mute)' }}>
+        {t('rhythm_label')}
+      </span>
+      <span className="mono" style={{ fontSize: '0.85rem', fontWeight: 700 }}>
+        {!rhythmLocked && isStarter && !hasRolled
+          ? t('rhythm_free')
+          : isMyTurn
+          ? `${youUsed}/${cap}`
+          : `${cap}`}
       </span>
     </div>
   )
