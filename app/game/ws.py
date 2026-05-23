@@ -398,6 +398,243 @@ async def spectate_endpoint(
         manager.disconnect_spectator(game_id.upper(), ws)
 
 
+async def _dispatch(
+    game: Game,
+    game_id: str,
+    ws: WebSocket,
+    player: Player,
+    player_id: str,
+    action: Optional[str],
+    msg: dict,
+) -> Optional[str]:
+    """Dispatch a single WS message to its action handler.
+
+    Returns ``"break"`` to signal the caller to exit its receive loop (used by
+    the ``leave`` action when the room dissolves). Any other return value means
+    "keep listening". An exception here is caught by ``websocket_endpoint`` and
+    logged without dropping the connection.
+    """
+    if action == "start":
+        if game.phase != GamePhase.WAITING:
+            return None
+        if player_id != game.host_player_id:
+            return None
+        if len(game.players) < 2:
+            return None
+        _start_initial_roll(game)
+        _schedule_afk(game, game_id)
+        await manager.broadcast(game_id, game_state(game))
+        return None
+
+    if action == "leave":
+        _cancel_afk(game, player_id)
+        leaver_index = next((i for i, p in enumerate(game.players) if p.id == player_id), -1)
+        game.players = [p for p in game.players if p.id != player_id]
+        game.user_ids.pop(player_id, None)
+        game.match_losses.pop(player_id, None)
+        game.round_points.pop(player_id, None)
+        game.has_avatars.pop(player_id, None)
+        game.initial_rolls.pop(player_id, None)
+        game.out_of_match.discard(player_id)
+
+        _log(
+            game,
+            "log_player_left",
+            f"← {player.name} a quitté la salle.",
+            name=player.name,
+        )
+
+        if not game.players:
+            games.pop(game_id.upper(), None)
+            _join_locks.pop(game_id.upper(), None)
+            await ws.close()
+            return "break"
+        if game.host_player_id == player_id and game.phase == GamePhase.WAITING:
+            games.pop(game_id.upper(), None)
+            _join_locks.pop(game_id.upper(), None)
+            await manager.broadcast(game_id, game_state(game))
+            await ws.close()
+            return "break"
+
+        if leaver_index >= 0 and leaver_index < game.current_index:
+            game.current_index -= 1
+        if game.current_index >= len(game.players):
+            game.current_index = 0
+
+        if game.round_starter_id == player_id and game.players:
+            game.round_starter_id = game.players[game.current_index].id
+
+        if game.host_player_id == player_id and game.players:
+            longest = min(game.players, key=lambda p: p.joined_at)
+            game.host_player_id = longest.id
+
+        if game.all_done():
+            await _resolve_round(game)
+        else:
+            _schedule_afk(game, game_id)
+        await manager.broadcast(game_id, game_state(game))
+        await ws.close()
+        return "break"
+
+    if action == "initial_roll":
+        if game.phase != GamePhase.INITIAL_ROLL:
+            return None
+        if player_id not in game.initial_rolls or game.initial_rolls[player_id] is not None:
+            return None
+        _cancel_afk(game, player_id)
+        game.initial_rolls[player_id] = random.randint(1, 6)
+        if all(v is not None for v in game.initial_rolls.values()):
+            _finalize_order(game)
+        _schedule_afk(game, game_id)
+        await manager.broadcast(game_id, game_state(game))
+        return None
+
+    if action == "roll":
+        if game.phase not in (GamePhase.CHARGE, GamePhase.DECHARGE):
+            return None
+        if game.current_player() is None or game.current_player().id != player_id:
+            return None
+        t = player.turn
+        if t is None or t.done or t.rolls_left <= 0:
+            return None
+        is_starter = player_id == game.round_starter_id
+        rolls_used = 3 - t.rolls_left
+        if game.phase == GamePhase.CHARGE and game.bank_rule == "sec":
+            if rolls_used >= 1:
+                return None
+        elif not is_starter and rolls_used >= game.max_throws_this_round:
+            return None
+        _cancel_afk(game, player_id)
+        # Click-to-keep semantics (Yahtzee): reroll[i]=True ⇒ die will be re-rolled.
+        # Default after each roll is all-True; player clicks to lock individual dice.
+        for i in range(3):
+            if t.rolls_left == 3 or t.reroll[i]:
+                t.dice[i] = random.randint(1, 6)
+        t.reroll = [True, True, True]
+        t.rolls_left -= 1
+        t.combo, t.rank, t.fiches = classify(t.dice)
+
+        # Auto-validate (G3) when the player has no remaining throws.
+        is_at_max = (
+            t.rolls_left <= 0
+            or (game.phase == GamePhase.CHARGE and game.bank_rule == "sec")
+            or (not is_starter and (3 - t.rolls_left) >= game.max_throws_this_round)
+        )
+        if is_at_max:
+            t.done = True
+            if (
+                player_id == game.round_starter_id
+                and game.phase == GamePhase.CHARGE
+                and game.bank_rule == "sec"
+            ):
+                game.max_throws_this_round = 1
+            sorted_dice = sorted(t.dice, reverse=True)
+            _log(
+                game,
+                "log_turn",
+                f"{player.name}: {sorted_dice} → {t.combo} ({t.fiches}f)",
+                name=player.name,
+                dice=sorted_dice,
+                combo=t.combo,
+                fiches=t.fiches,
+            )
+            game.advance()
+            if game.all_done():
+                await _resolve_round(game)
+        _schedule_afk(game, game_id)
+        await manager.broadcast(game_id, game_state(game))
+        return None
+
+    if action == "keep":
+        if game.phase not in (GamePhase.CHARGE, GamePhase.DECHARGE):
+            return None
+        if game.current_player() is None or game.current_player().id != player_id:
+            return None
+        t = player.turn
+        if t is None or t.rolls_left == 3 or t.done:
+            return None
+        is_starter = player_id == game.round_starter_id
+        rolls_used = 3 - t.rolls_left
+        if not is_starter and rolls_used >= game.max_throws_this_round:
+            return None
+        _cancel_afk(game, player_id)
+        idx = msg.get("index")
+        if idx is not None and 0 <= idx < 3:
+            t.reroll[idx] = not t.reroll[idx]
+        _schedule_afk(game, game_id)
+        await manager.broadcast(game_id, game_state(game))
+        return None
+
+    if action == "done":
+        if game.phase not in (GamePhase.CHARGE, GamePhase.DECHARGE):
+            return None
+        if game.current_player() is None or game.current_player().id != player_id:
+            return None
+        t = player.turn
+        if t is None or t.rolls_left == 3:
+            return None
+        _cancel_afk(game, player_id)
+        t.done = True
+        if player_id == game.round_starter_id:
+            if game.phase == GamePhase.CHARGE and game.bank_rule == "sec":
+                game.max_throws_this_round = 1
+            else:
+                game.max_throws_this_round = max(3 - t.rolls_left, 1)
+        done_dice = sorted(t.dice, reverse=True)
+        _log(
+            game,
+            "log_turn",
+            f"{player.name}: {done_dice} → {t.combo} ({t.fiches}f)",
+            name=player.name,
+            dice=done_dice,
+            combo=t.combo,
+            fiches=t.fiches,
+        )
+        game.advance()
+        if game.all_done():
+            await _resolve_round(game)
+        _schedule_afk(game, game_id)
+        await manager.broadcast(game_id, game_state(game))
+        return None
+
+    if action == "tiebreak_roll":
+        if game.phase != GamePhase.TIEBREAK or not game.tiebreak:
+            return None
+        if player_id != game.tiebreak.get("next_pid"):
+            return None
+        _cancel_afk(game, player_id)
+        dice = [random.randint(1, 6) for _ in range(3)]
+        combo, rank, fiches = classify(dice)
+        game.tiebreak["throws"][player_id] = {
+            "dice": dice,
+            "combo": combo,
+            "rank": rank,
+            "fiches": fiches,
+        }
+        sorted_dice = sorted(dice, reverse=True)
+        _log(
+            game,
+            "log_tiebreak_throw",
+            f"{player.name} (départage) : {sorted_dice} → {combo} ({fiches}f)",
+            name=player.name,
+            dice=sorted_dice,
+            combo=combo,
+            fiches=fiches,
+        )
+        tied = game.tiebreak["tied_pids"]
+        idx = tied.index(player_id) + 1
+        if idx >= len(tied):
+            game.tiebreak["next_pid"] = None
+            await _resolve_tiebreak(game)
+        else:
+            game.tiebreak["next_pid"] = tied[idx]
+        _schedule_afk(game, game_id)
+        await manager.broadcast(game_id, game_state(game))
+        return None
+
+    return None
+
+
 @router.websocket("/ws/{game_id}/{player_id}")
 async def websocket_endpoint(
     ws: WebSocket,
@@ -455,236 +692,32 @@ async def websocket_endpoint(
                 continue
             action = msg.get("action")
 
-            if action == "start":
-                if game.phase != GamePhase.WAITING:
-                    continue
-                if player_id != game.host_player_id:
-                    continue
-                if len(game.players) < 2:
-                    continue
-                _start_initial_roll(game)
-                _schedule_afk(game, game_id)
-                await manager.broadcast(game_id, game_state(game))
-
-            elif action == "leave":
-                _cancel_afk(game, player_id)
-                leaver_index = next(
-                    (i for i, p in enumerate(game.players) if p.id == player_id), -1
+            # Defensive guard: a bug in any single action handler should NOT
+            # kill the WS connection (which would lock the player out of the
+            # game until they reconnect). Log, notify the client, re-broadcast,
+            # then keep listening. `_dispatch` returns "break" to exit the
+            # loop (used by the leave handler when the room dissolves).
+            try:
+                result = await _dispatch(game, game_id, ws, player, player_id, action, msg)
+            except Exception:
+                logger.exception(
+                    "Action %r failed (game=%s player=%s)",
+                    action,
+                    game_id,
+                    player_id,
                 )
-                game.players = [p for p in game.players if p.id != player_id]
-                game.user_ids.pop(player_id, None)
-                game.match_losses.pop(player_id, None)
-                game.round_points.pop(player_id, None)
-                game.has_avatars.pop(player_id, None)
-                game.initial_rolls.pop(player_id, None)
-                game.out_of_match.discard(player_id)
-
-                # Surface a visible "X left" entry so other players know what happened.
-                _log(
-                    game,
-                    "log_player_left",
-                    f"← {player.name} a quitté la salle.",
-                    name=player.name,
-                )
-
-                if not game.players:
-                    games.pop(game_id.upper(), None)
-                    _join_locks.pop(game_id.upper(), None)
-                    await ws.close()
-                    break
-                if game.host_player_id == player_id and game.phase == GamePhase.WAITING:
-                    games.pop(game_id.upper(), None)
-                    _join_locks.pop(game_id.upper(), None)
+                sentry_sdk.capture_exception()
+                try:
+                    await ws.send_json({"error": "action_failed", "action": action})
+                except Exception:
+                    pass
+                try:
                     await manager.broadcast(game_id, game_state(game))
-                    await ws.close()
-                    break
-
-                # E2: keep current_index pointing at the right player
-                if leaver_index >= 0 and leaver_index < game.current_index:
-                    game.current_index -= 1
-                if game.current_index >= len(game.players):
-                    game.current_index = 0
-
-                # B5: if the round starter just left, hand the rhythm to whoever is current
-                if game.round_starter_id == player_id and game.players:
-                    game.round_starter_id = game.players[game.current_index].id
-
-                # Host migration: longest-tenured remaining player takes over. We sort by
-                # joined_at because the players list may have been reordered by the
-                # initial-roll sort, so [0] is not reliably the oldest seat.
-                if game.host_player_id == player_id and game.players:
-                    longest = min(game.players, key=lambda p: p.joined_at)
-                    game.host_player_id = longest.id
-
-                if game.all_done():
-                    await _resolve_round(game)
-                else:
-                    _schedule_afk(game, game_id)
-                await manager.broadcast(game_id, game_state(game))
-                await ws.close()
+                except Exception:
+                    pass
+                continue
+            if result == "break":
                 break
-
-            elif action == "initial_roll":
-                if game.phase != GamePhase.INITIAL_ROLL:
-                    continue
-                if player_id not in game.initial_rolls or game.initial_rolls[player_id] is not None:
-                    continue
-                _cancel_afk(game, player_id)
-                game.initial_rolls[player_id] = random.randint(1, 6)
-                if all(v is not None for v in game.initial_rolls.values()):
-                    _finalize_order(game)
-                _schedule_afk(game, game_id)
-                await manager.broadcast(game_id, game_state(game))
-
-            elif action == "roll":
-                if game.phase not in (GamePhase.CHARGE, GamePhase.DECHARGE):
-                    continue
-                if game.current_player().id != player_id:
-                    continue
-                t = player.turn
-                if t.done or t.rolls_left <= 0:
-                    continue
-                is_starter = player_id == game.round_starter_id
-                rolls_used = 3 - t.rolls_left
-                # bank_rule="sec" caps everyone to 1 throw during charge (and auto-marks done);
-                # "free" lets the round starter set the rhythm, others match up to that count.
-                if game.phase == GamePhase.CHARGE and game.bank_rule == "sec":
-                    if rolls_used >= 1:
-                        continue
-                elif not is_starter and rolls_used >= game.max_throws_this_round:
-                    continue
-                _cancel_afk(game, player_id)
-                # Click-to-keep semantics (Yahtzee convention):
-                #   reroll[i] = True  → this die will be re-rolled on the next throw
-                #   reroll[i] = False → kept (locked); the die-paper[data-keep="true"]
-                #                       CSS gives it a lifted brass treatment.
-                # After each roll the default is all-True (every die unkept), so the
-                # player clicks the ones they want to lock before throwing again.
-                # No-selection + Relancer is no longer a special case — every die has
-                # reroll=True by default, so they all get re-rolled.
-                for i in range(3):
-                    if t.rolls_left == 3 or t.reroll[i]:
-                        t.dice[i] = random.randint(1, 6)
-                t.reroll = [True, True, True]
-                t.rolls_left -= 1
-                t.combo, t.rank, t.fiches = classify(t.dice)
-
-                # Auto-validate when the player has no more throws available (G3).
-                # If they've hit max throws or it's "sec" mode (1 throw), we mark done
-                # automatically so no extra Valider click is needed.
-                is_at_max = (
-                    t.rolls_left <= 0
-                    or (game.phase == GamePhase.CHARGE and game.bank_rule == "sec")
-                    or (not is_starter and (3 - t.rolls_left) >= game.max_throws_this_round)
-                )
-                if is_at_max:
-                    t.done = True
-                    if (
-                        player_id == game.round_starter_id
-                        and game.phase == GamePhase.CHARGE
-                        and game.bank_rule == "sec"
-                    ):
-                        game.max_throws_this_round = 1
-                    sorted_dice = sorted(t.dice, reverse=True)
-                    _log(
-                        game,
-                        "log_turn",
-                        f"{player.name}: {sorted_dice} → {t.combo} ({t.fiches}f)",
-                        name=player.name,
-                        dice=sorted_dice,
-                        combo=t.combo,
-                        fiches=t.fiches,
-                    )
-                    game.advance()
-                    if game.all_done():
-                        await _resolve_round(game)
-                _schedule_afk(game, game_id)
-                await manager.broadcast(game_id, game_state(game))
-
-            elif action == "keep":
-                if game.phase not in (GamePhase.CHARGE, GamePhase.DECHARGE):
-                    continue
-                if game.current_player().id != player_id:
-                    continue
-                t = player.turn
-                if t.rolls_left == 3 or t.done:
-                    continue
-                is_starter = player_id == game.round_starter_id
-                rolls_used = 3 - t.rolls_left
-                if not is_starter and rolls_used >= game.max_throws_this_round:
-                    continue
-                _cancel_afk(game, player_id)
-                idx = msg.get("index")
-                if idx is not None and 0 <= idx < 3:
-                    t.reroll[idx] = not t.reroll[idx]
-                _schedule_afk(game, game_id)
-                await manager.broadcast(game_id, game_state(game))
-
-            elif action == "done":
-                if game.phase not in (GamePhase.CHARGE, GamePhase.DECHARGE):
-                    continue
-                if game.current_player().id != player_id:
-                    continue
-                t = player.turn
-                if t.rolls_left == 3:
-                    continue
-                _cancel_afk(game, player_id)
-                t.done = True
-                if player_id == game.round_starter_id:
-                    if game.phase == GamePhase.CHARGE and game.bank_rule == "sec":
-                        game.max_throws_this_round = 1
-                    else:
-                        game.max_throws_this_round = max(3 - t.rolls_left, 1)
-                _done_dice = sorted(t.dice, reverse=True)
-                _log(
-                    game,
-                    "log_turn",
-                    f"{player.name}: {_done_dice} → {t.combo} ({t.fiches}f)",
-                    name=player.name,
-                    dice=_done_dice,
-                    combo=t.combo,
-                    fiches=t.fiches,
-                )
-                game.advance()
-                if game.all_done():
-                    await _resolve_round(game)
-                _schedule_afk(game, game_id)
-                await manager.broadcast(game_id, game_state(game))
-
-            elif action == "tiebreak_roll":
-                if game.phase != GamePhase.TIEBREAK or not game.tiebreak:
-                    continue
-                if player_id != game.tiebreak.get("next_pid"):
-                    continue
-                _cancel_afk(game, player_id)
-                dice = [random.randint(1, 6) for _ in range(3)]
-                combo, rank, fiches = classify(dice)
-                game.tiebreak["throws"][player_id] = {
-                    "dice": dice,
-                    "combo": combo,
-                    "rank": rank,
-                    "fiches": fiches,
-                }
-                sorted_dice = sorted(dice, reverse=True)
-                _log(
-                    game,
-                    "log_tiebreak_throw",
-                    f"{player.name} (départage) : {sorted_dice} → {combo} ({fiches}f)",
-                    name=player.name,
-                    dice=sorted_dice,
-                    combo=combo,
-                    fiches=fiches,
-                )
-                # Advance to the next tied player; resolve when all have thrown.
-                tied = game.tiebreak["tied_pids"]
-                idx = tied.index(player_id) + 1
-                if idx >= len(tied):
-                    game.tiebreak["next_pid"] = None
-                    await _resolve_tiebreak(game)
-                else:
-                    game.tiebreak["next_pid"] = tied[idx]
-                _schedule_afk(game, game_id)
-                await manager.broadcast(game_id, game_state(game))
 
     except WebSocketDisconnect:
         pass
