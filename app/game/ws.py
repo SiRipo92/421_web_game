@@ -426,6 +426,7 @@ async def websocket_endpoint(
                 game.sets_lost.pop(player_id, None)
                 game.has_avatars.pop(player_id, None)
                 game.initial_rolls.pop(player_id, None)
+                game.out_of_match.discard(player_id)
 
                 if not game.players:
                     games.pop(game_id.upper(), None)

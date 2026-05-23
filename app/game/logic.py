@@ -102,6 +102,10 @@ class Game:
     sets_lost: dict = field(default_factory=dict)
     user_ids: dict = field(default_factory=dict)
     has_avatars: dict = field(default_factory=dict)
+    # Players who hit 0 tokens during the current match — they sit out the rest
+    # of the match (no turns), but rejoin on match-end. Cleared when a new match
+    # starts.
+    out_of_match: set = field(default_factory=set)
     # Room configuration
     is_public: bool = False
     max_players: int = 5
@@ -114,18 +118,34 @@ class Game:
     afk_tasks: dict = field(default_factory=dict, compare=False, repr=False)
 
     def current_player(self) -> Optional[Player]:
-        """Return the player whose turn it is, or None if no players."""
-        if self.players:
-            return self.players[self.current_index % len(self.players)]
+        """Return the player whose turn it is, skipping sat-out players.
+
+        Players in `out_of_match` (0 tokens during the current match) are
+        skipped — we walk forward from `current_index` and return the first
+        active seat. Returns None when no active players remain.
+        """
+        if not self.players:
+            return None
+        n = len(self.players)
+        for offset in range(n):
+            idx = (self.current_index + offset) % n
+            if self.players[idx].id not in self.out_of_match:
+                return self.players[idx]
         return None
 
     def all_done(self) -> bool:
-        """True when every player has marked their turn done this round."""
-        return all(p.turn and p.turn.done for p in self.players)
+        """True when every active (non-sat-out) player has marked their turn done."""
+        return all(p.id in self.out_of_match or (p.turn and p.turn.done) for p in self.players)
 
     def advance(self):
-        """Move the turn index to the next player (wraps around)."""
-        self.current_index = (self.current_index + 1) % len(self.players)
+        """Move the turn index to the next active (non-sat-out) player."""
+        if not self.players:
+            return
+        n = len(self.players)
+        for _ in range(n):
+            self.current_index = (self.current_index + 1) % n
+            if self.players[self.current_index].id not in self.out_of_match:
+                return
 
 
 def game_state(game: Game) -> dict:
@@ -159,6 +179,7 @@ def game_state(game: Game) -> dict:
                 "turn": asdict(p.turn) if p.turn else None,
                 "initial_roll": game.initial_rolls.get(p.id),
                 "sets_lost": game.sets_lost.get(p.id, 0),
+                "out_of_match": p.id in game.out_of_match,
             }
             for p in game.players
         ],
@@ -236,6 +257,7 @@ def _do_start(game: Game):
     game.pool = 11
     game.current_index = 0
     game.max_throws_this_round = 3
+    game.out_of_match.clear()
     for p in game.players:
         p.tokens = 0
         p.turn = new_turn()
@@ -265,7 +287,8 @@ def _admit_waiting(game: Game):
 
 
 def _start_new_set(game: Game, set_loser_id: str):
-    """Reset tokens/pool for a new set; set loser becomes round starter."""
+    """Reset tokens/pool for a new match; the manché starts the new match."""
+    game.out_of_match.clear()
     for p in game.players:
         p.tokens = 0
         p.turn = new_turn()
@@ -287,12 +310,19 @@ def _start_new_set(game: Game, set_loser_id: str):
 
 
 async def _resolve_round(game: Game):
-    """Settle fiche transfers after all players have played; handle set/game end."""
-    players = game.players
+    """Settle fiche transfers after every active player has played this table cycle.
+
+    A "table cycle" is one full pass: each non-sat-out player rolls, the loser
+    takes the penalty, the winner gives (in décharge), and we set up the next
+    pass. The match ends only when one player ends up holding all 11 chips
+    (the « manché »); only then do match losses / round transitions fire.
+    Sat-out players (0 chips) are skipped from rank comparison and turn order.
+    """
+    all_players = game.players
 
     # E1: only one player remaining (everyone else left/disconnected) → they win
-    if len(players) == 1:
-        survivor = players[0]
+    if len(all_players) == 1:
+        survivor = all_players[0]
         game.phase = GamePhase.FINISHED
         _log(
             game,
@@ -302,6 +332,9 @@ async def _resolve_round(game: Game):
         )
         asyncio.create_task(_persist_game(game))
         return
+
+    # Only active (non-sat-out) players are scored this cycle.
+    active = [p for p in all_players if p.id not in game.out_of_match and p.turn]
 
     game.last_round_plays = [
         {
@@ -314,105 +347,129 @@ async def _resolve_round(game: Game):
             "is_starter": p.id == game.round_starter_id,
             "rolls_used": 3 - p.turn.rolls_left,
         }
-        for p in players
-        if p.turn
+        for p in active
     ]
-
-    ranks = [(p, p.turn.rank) for p in players]
-    max_rank = max(r for _, r in ranks)
-    min_rank = min(r for _, r in ranks)
 
     next_starter_id: str | None = None  # set if a loser is determined
 
-    if max_rank == min_rank:
-        # B3: everyone tied → no transfer, starter unchanged
-        _log(game, "log_round_all_tie", "Manche annulée — tous à égalité.", rank=max_rank)
+    # Edge case: only one active player (others sat out). They auto-lose this
+    # cycle in décharge (no one to give chips to them); we just advance.
+    if len(active) < 2:
+        # No comparison possible; fall through to next-cycle setup.
+        pass
     else:
-        winners = [p for p, r in ranks if r == max_rank]
-        losers = [p for p, r in ranks if r == min_rank]
-        penalty = max(winners[0].turn.fiches, 1)
+        ranks = [(p, p.turn.rank) for p in active]
+        max_rank = max(r for _, r in ranks)
+        min_rank = min(r for _, r in ranks)
 
-        if game.phase == GamePhase.CHARGE:
-            # B3: each tied loser takes `penalty` from the pool, until empty
-            for loser in losers:
-                if game.pool <= 0:
-                    break
-                taken = min(penalty, game.pool)
-                loser.tokens += taken
-                game.pool -= taken
-                _log(
-                    game,
-                    "log_charge_takes",
-                    f"{loser.name} prend {taken} jeton(s) · Pool: {game.pool}",
-                    name=loser.name,
-                    n=taken,
-                    pool=game.pool,
-                )
-            if game.pool == 0:
-                game.phase = GamePhase.DECHARGE
-                _log(game, "log_pool_empty", "Pool vide → Décharge !")
+        if max_rank == min_rank:
+            # B3 (legacy): everyone tied → no transfer this cycle, starter unchanged.
+            # NOTE: real game rules call for a tiebreak re-throw here; that's roadmap R1.
+            _log(game, "log_round_all_tie", "Manche annulée — tous à égalité.", rank=max_rank)
+        else:
+            winners = [p for p, r in ranks if r == max_rank]
+            losers = [p for p, r in ranks if r == min_rank]
+            penalty = max(winners[0].turn.fiches, 1)
 
-        else:  # DECHARGE
-            # B3: single winner gives to each tied loser (split if >1 loser).
-            # Multiple winners (tied at top) → no transfer this round.
-            if len(winners) == 1:
-                winner = winners[0]
-                each = max(penalty // len(losers), 1) if len(losers) > 1 else penalty
+            if game.phase == GamePhase.CHARGE:
                 for loser in losers:
-                    if winner.tokens <= 0:
+                    if game.pool <= 0:
                         break
-                    transfer = min(each, winner.tokens)
-                    winner.tokens -= transfer
-                    loser.tokens += transfer
+                    taken = min(penalty, game.pool)
+                    loser.tokens += taken
+                    game.pool -= taken
                     _log(
                         game,
-                        "log_decharge_gives",
-                        f"{winner.name} donne {transfer} jeton(s) à {loser.name}",
-                        winner=winner.name,
-                        n=transfer,
-                        loser=loser.name,
+                        "log_charge_takes",
+                        f"{loser.name} prend {taken} jeton(s) · Pool: {game.pool}",
+                        name=loser.name,
+                        n=taken,
+                        pool=game.pool,
                     )
+                if game.pool == 0:
+                    game.phase = GamePhase.DECHARGE
+                    _log(game, "log_pool_empty", "Pool vide → Décharge !")
 
-            set_winner = next((p for p in players if p.tokens == 0), None)
-            if set_winner:
-                set_loser = max(players, key=lambda p: p.tokens)
-                sl_id = set_loser.id
-                game.sets_lost[sl_id] = game.sets_lost.get(sl_id, 0) + 1
-                sl_count = game.sets_lost[sl_id]
-                _admit_waiting(game)
+            else:  # DECHARGE
+                if len(winners) == 1:
+                    winner = winners[0]
+                    each = max(penalty // len(losers), 1) if len(losers) > 1 else penalty
+                    for loser in losers:
+                        if winner.tokens <= 0:
+                            break
+                        transfer = min(each, winner.tokens)
+                        winner.tokens -= transfer
+                        loser.tokens += transfer
+                        _log(
+                            game,
+                            "log_decharge_gives",
+                            f"{winner.name} donne {transfer} jeton(s) à {loser.name}",
+                            winner=winner.name,
+                            n=transfer,
+                            loser=loser.name,
+                        )
+
+            # B2: loser of this cycle becomes the next cycle's starter
+            next_starter_id = losers[0].id
+
+    # Sit out any player that just hit 0 chips (only relevant in DECHARGE).
+    # They miss the rest of this match but rejoin when a new match starts.
+    if game.phase == GamePhase.DECHARGE:
+        for p in all_players:
+            if p.tokens == 0 and p.id not in game.out_of_match:
+                game.out_of_match.add(p.id)
                 _log(
                     game,
-                    "log_set_lost",
-                    f"{set_loser.name} a les 11 jetons — set perdu ({sl_count}/2) · "
-                    f"{set_loser.name} donne le rythme au prochain set.",
-                    name=set_loser.name,
-                    count=sl_count,
+                    "log_player_sits_out",
+                    f"{p.name} n'a plus de fiches — pause jusqu'au prochain match.",
+                    name=p.name,
                 )
-                if sl_count >= 2:
-                    game.phase = GamePhase.FINISHED
-                    _log(
-                        game,
-                        "log_game_over",
-                        f"Fin de partie ! {set_winner.name} gagne !",
-                        winner=set_winner.name,
-                    )
-                    asyncio.create_task(_persist_game(game))
-                    return
-                _start_new_set(game, sl_id)
-                return
 
-        # B2: loser of the round becomes next round's starter (first by index if tied)
-        next_starter_id = losers[0].id
+    # Match-end check: one player holds all 11 chips → they're the « manché »
+    manche = next((p for p in all_players if p.tokens >= 11), None)
+    if manche:
+        ml_id = manche.id
+        game.sets_lost[ml_id] = game.sets_lost.get(ml_id, 0) + 1
+        ml_count = game.sets_lost[ml_id]
+        _admit_waiting(game)
+        _log(
+            game,
+            "log_set_lost",
+            f"{manche.name} a les 11 jetons — manché ({ml_count}/2)",
+            name=manche.name,
+            count=ml_count,
+        )
+        if ml_count >= 2:
+            # Round-end: this player took a round point. With no game-end (R2)
+            # we should reset match_losses + start a new round. For now we keep
+            # the FINISHED transition pending R2.
+            game.phase = GamePhase.FINISHED
+            _log(
+                game,
+                "log_game_over",
+                f"Fin de partie ! {manche.name} perd la partie.",
+                winner=manche.name,
+            )
+            asyncio.create_task(_persist_game(game))
+            return
+        _start_new_set(game, ml_id)
+        return
 
-    # Normal next round
+    # Normal next cycle (match still in progress)
     game.round_num += 1
     game.max_throws_this_round = 3
     if next_starter_id is not None:
         game.round_starter_id = next_starter_id
-        game.current_index = next((i for i, p in enumerate(players) if p.id == next_starter_id), 0)
-    for p in players:
-        p.turn = new_turn()
-    starter_name = next((p.name for p in game.players if p.id == game.round_starter_id), "")
+        game.current_index = next(
+            (i for i, p in enumerate(all_players) if p.id == next_starter_id), 0
+        )
+    # Fresh turn for active players; sat-out players get no turn this cycle
+    for p in all_players:
+        if p.id in game.out_of_match:
+            p.turn = None
+        else:
+            p.turn = new_turn()
+    starter_name = next((p.name for p in all_players if p.id == game.round_starter_id), "")
     _log(
         game,
         "log_round_start",

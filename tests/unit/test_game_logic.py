@@ -465,6 +465,86 @@ async def test_resolve_round_decharge_tied_winners_no_transfer():
 
 
 @pytest.mark.asyncio
+async def test_match_ends_only_on_eleven_chips_not_on_zero():
+    """3-player décharge: a player hitting 0 does NOT end the match; only 11 does.
+
+    Before the rewrite, the trigger was 'any player at 0 tokens', which fired
+    prematurely in N-player games where someone could hit 0 while the manché-
+    threshold (11) wasn't reached. Now the trigger is 'any player at 11'.
+    """
+    game = _make_game(3)
+    game.phase = GamePhase.DECHARGE
+    # p1 wins (8 fiches) but only has 2 tokens — they give 2 to p2, drop to 0,
+    # p2 climbs to 6, nobody hits 11. Match continues.
+    game.players[0].tokens = 5
+    game.players[1].tokens = 2
+    game.players[2].tokens = 4
+    game.players[0].turn = _done_turn(2200, 2)
+    game.players[1].turn = _done_turn(9000, 8)
+    game.players[2].turn = _done_turn(100, 1)
+    game.round_starter_id = "p1"
+    await _resolve_round(game)
+    # p1 dropped to 0; p2 went to 6 — no manché yet
+    assert game.players[1].tokens == 0
+    assert game.players[2].tokens == 6
+    assert game.sets_lost.get("p2", 0) == 0
+    assert game.phase != GamePhase.FINISHED
+    # p1 (now at 0) should be sat out for the rest of the match
+    assert "p1" in game.out_of_match
+
+
+@pytest.mark.asyncio
+async def test_player_at_zero_chips_is_marked_out_of_match():
+    """A player whose tokens drop to 0 during décharge joins out_of_match."""
+    game = _make_game(3)
+    game.phase = GamePhase.DECHARGE
+    game.players[0].tokens = 1  # will give 1 chip and drop to 0
+    game.players[1].tokens = 5
+    game.players[2].tokens = 5
+    # p0 wins, p2 loses → p0 gives 1 to p2; p0 hits 0
+    game.players[0].turn = _done_turn(9000, 8)
+    game.players[1].turn = _done_turn(2200, 2)
+    game.players[2].turn = _done_turn(100, 1)
+    game.round_starter_id = "p0"
+    await _resolve_round(game)
+    assert "p0" in game.out_of_match
+    # And on the next cycle p0 has no turn (skipped)
+    assert game.players[0].turn is None
+
+
+def test_current_player_skips_sat_out():
+    """current_player() walks past players in out_of_match."""
+    game = _make_game(3)
+    game.out_of_match.add("p1")
+    game.current_index = 0
+    assert game.current_player().id == "p0"
+    game.advance()
+    # advance() skips p1 → lands on p2
+    assert game.current_player().id == "p2"
+
+
+def test_all_done_ignores_sat_out():
+    """A sat-out player with no turn doesn't block all_done()."""
+    game = _make_game(2)
+    game.out_of_match.add("p1")
+    game.players[0].turn = _done_turn(100, 1)
+    game.players[1].turn = None  # sat out
+    assert game.all_done()
+
+
+@pytest.mark.asyncio
+async def test_new_match_clears_out_of_match():
+    """Starting a new match (via _start_new_set) clears the sit-out set."""
+    from app.game.logic import _start_new_set
+
+    game = _make_game(2)
+    game.out_of_match.add("p0")
+    _start_new_set(game, "p1")
+    assert game.out_of_match == set()
+    assert game.players[0].turn is not None  # p0 rejoins
+
+
+@pytest.mark.asyncio
 async def test_resolve_round_single_player_auto_ends_game():
     """E1: if everyone else left, the lone survivor wins immediately."""
     game = _make_game(1)
