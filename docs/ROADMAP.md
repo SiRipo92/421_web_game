@@ -305,6 +305,10 @@ Past commits that captured incorrect rules — superseded by **R1**, **R2**, **R
 
 ## Done
 
+- **2026-05-23** `efd0be5` — French vocabulary review (G22). Replaced "match" → « manche », "round" → « partie », "pool" → « banque », "Le Tapis" → « La piste » across `i18n/index.js` (FR section), `Game.jsx` piste banner, `CreateRoom.jsx` title, backend French log fallback strings in `logic.py`. English copy unchanged.
+- **2026-05-23** `c3ba8f1` — Match-end banner (G13), rhythm indicator (G15), bigger keep-hint (G16).
+- **2026-05-23** `ec71db8` — Defensive try/except around WS action dispatch — bug in any handler no longer drops the socket. Extracted `_dispatch` helper.
+- **2026-05-23** `9887c80` — Click-to-keep dice (Yahtzee convention) + visible hint on the dark piste.
 - **2026-05-23** `292234f` — Corrected re-roll semantics (8a0e948 had them flipped). Click a die = mark for re-roll. No selection + Relancer = re-roll all. Hint copy updated.
 - **2026-05-23** `8a0e948` — Initial attempt at re-roll fix + auto-validate + styled leave modal + leave logging. Semantics flipped wrong way; corrected in 292234f. Auto-validate, ConfirmModal, and leave log stand. (flipped semantics: click die to keep; unselected dice re-rolled by default). Auto-validate on max throws so the "Valider" click is no longer required when the player has no choice. Styled in-game `ConfirmModal` replaces `window.confirm` for the leave action. `log_player_left` event surfaced in the game log. Added dice-keep hint text under the dice. Roadmap items G9 (smarter AFK bot), G10 (commentary ticker), G11 (single-player searching modal) captured.
 - **2026-05-23** `6d176d0` — TIEBREAK frontend (`TiebreakScreen` in `Game.jsx`, `tiebreakRoll` action in `useGame.js`) + AFK bot for TIEBREAK phase (`_afk_tiebreak_timer`, scheduled by `_schedule_afk`). Added missing i18n keys for `log_match_lost`, `log_round_point`, `log_player_sits_out`, `log_tiebreak_start`, `log_tiebreak_throw`, `log_afk_initial`, `log_round_all_tie`. Always-call `_schedule_afk` after `_resolve_round` so the new phase's timer is set up.

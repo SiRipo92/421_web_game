@@ -116,7 +116,7 @@ const I18N = {
     private_label: "Privé",
     bot_takes_over: "ordi prend la main",
     chips_label: "11 fiches",
-    game_rules_note: "Le perdant de deux sets quitte la table. Le dernier debout l'emporte.",
+    game_rules_note: "Le perdant accumule des points de partie. Aucun joueur n'est jamais éliminé — la table reste ouverte tant que vous le souhaitez.",
 
     // Lobby
     lobby_title: "Le comptoir",
@@ -133,12 +133,12 @@ const I18N = {
     // Game
     pool: "Banque",
     bank: "Banque",
-    round: "Manche",
+    round: "Tour",
     charge: "Charge",
     decharge: "Décharge",
     log: "Journal",
     log_subtitle: "L'ardoise",
-    log_sub: "Manche en cours, plays par plays.",
+    log_sub: "Manche en cours, coup par coup.",
     your_turn: "À vous de jouer",
     waiting_turn: "En attente",
     roll: "Lancer",
@@ -205,7 +205,7 @@ const I18N = {
     htp_term_round_point_label: "Point de partie",
     htp_term_round_point_text: "Marque de perte permanente. Conservée dans votre profil pour les comptes inscrits, dans la session courante pour les invités.",
     htp_objective_title: "L'objectif",
-    htp_objective_text: "Évitez d'être le « loser » de chaque manche. Il y a toujours exactement un loser par manche — les autres joueurs sont tous des gagnants. Personne n'est éliminé : même celui qui prend un point de partie revient pour la partie suivante. La salle continue tant que vous voulez ; les points de partie s'accumulent dans votre profil.",
+    htp_objective_text: "Évitez d'être le perdant de chaque manche. Il y a toujours exactement un loser par manche — les autres joueurs sont tous des gagnants. Personne n'est éliminé : même celui qui prend un point de partie revient pour la partie suivante. La salle continue tant que vous voulez ; les points de partie s'accumulent dans votre profil.",
     htp_phases_title: "Le déroulement",
     htp_initial_title: "1. Tirage du donneur",
     htp_initial_text: "Au lancement d'une nouvelle salle, chaque joueur jette un dé. Celui qui obtient le score le plus bas devient le donneur de la première manche. En cas d'égalité au plus bas, seuls les joueurs à égalité relancent jusqu'à départager.",
