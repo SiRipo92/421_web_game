@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useLang } from '../context/LangContext.jsx'
+import { useLang } from '../context/useLang.js'
 import { listRooms, joinGame } from '../api/game.js'
 
 export function Lobby({ token }) {
@@ -10,23 +10,34 @@ export function Lobby({ token }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
-  const fetchRooms = async () => {
-    setLoading(true)
+  const fetchRooms = useCallback(async () => {
     try {
       const { rooms: r } = await listRooms()
       setRooms(r)
+      setError('')
     } catch {
       setError(t('err_generic'))
     } finally {
       setLoading(false)
     }
-  }
+  }, [t])
 
   useEffect(() => {
-    fetchRooms()
-    const interval = setInterval(fetchRooms, 5000)
-    return () => clearInterval(interval)
-  }, [])
+    let cancelled = false
+    const run = async () => {
+      try {
+        const { rooms: r } = await listRooms()
+        if (!cancelled) { setRooms(r); setError('') }
+      } catch {
+        if (!cancelled) setError(t('err_generic'))
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    run()
+    const interval = setInterval(run, 5000)
+    return () => { cancelled = true; clearInterval(interval) }
+  }, [t])
 
   const handleJoin = async (gameId) => {
     const name = sessionStorage.getItem('playerName') || t('default_player_name')

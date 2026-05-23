@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Segment } from '../components/shared/Segment.jsx'
 import { Stepper } from '../components/shared/Stepper.jsx'
-import { useLang } from '../context/LangContext.jsx'
+import { useLang } from '../context/useLang.js'
 import { createGame, joinGame } from '../api/game.js'
 
 export function CreateRoom({ token }) {

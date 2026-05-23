@@ -31,6 +31,7 @@ async def contact(request: Request, body: ContactRequest):
         return {"detail": "Message received"}
 
     import resend
+
     resend.api_key = settings.resend_api_key
     if not settings.resend_api_key:
         logger.warning("Contact form: RESEND_API_KEY not set, email not sent")
@@ -50,13 +51,15 @@ async def contact(request: Request, body: ContactRequest):
         f"<p>{body.message.replace(chr(10), '<br/>')}</p>"
     )
     try:
-        resend.Emails.send({
-            "from": _FROM,
-            "to": settings.contact_email,
-            "reply_to": f"{body.name} <{body.email}>",
-            "subject": email_subject,
-            "html": html,
-        })
+        resend.Emails.send(
+            {
+                "from": _FROM,
+                "to": settings.contact_email,
+                "reply_to": f"{body.name} <{body.email}>",
+                "subject": email_subject,
+                "html": html,
+            }
+        )
         logger.info("Contact email sent from %s (subject: %s)", body.email, body.subject)
     except Exception:
         logger.exception("Failed to send contact email from %s", body.email)

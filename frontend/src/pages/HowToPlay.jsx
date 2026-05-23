@@ -1,5 +1,5 @@
 import { ComboTable } from '../components/shared/ComboTable.jsx'
-import { useLang } from '../context/LangContext.jsx'
+import { useLang } from '../context/useLang.js'
 
 export function HowToPlay() {
   const { t } = useLang()

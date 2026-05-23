@@ -82,7 +82,7 @@ async def test_reset_password_bad_token(client):
     """POST /auth/reset-password with a garbage token returns 400."""
     r = await client.post(
         "/auth/reset-password",
-        json={"token": "notarealtoken", "new_password": "newpassword123"},
+        json={"token": "notarealtoken", "new_password": "Newpassword1"},
     )
     assert r.status_code == 400
 
@@ -103,7 +103,7 @@ async def test_reset_password_success(client, make_user):
     assert captured, "send_reset_email should have been called"
     r = await client.post(
         "/auth/reset-password",
-        json={"token": captured[0], "new_password": "newpassword456"},
+        json={"token": captured[0], "new_password": "Newpassword2"},
     )
     assert r.status_code == 200
     # Old password should no longer work
@@ -147,6 +147,7 @@ async def test_me_valid_jwt_unknown_user(client):
 
 
 # ── Register — validation edge cases ─────────────────────────────────────────
+
 
 async def test_register_password_no_uppercase_returns_422(client, make_user):
     """Password without uppercase is rejected at the schema level with 422.
@@ -222,6 +223,7 @@ async def test_register_missing_birthdate_returns_422(client, make_user):
 
 # ── Register — response shape and DB side-effects ────────────────────────────
 
+
 async def test_register_response_shape(client, make_user):
     """Successful registration returns access_token, token_type, and is_new."""
     r = await client.post("/auth/register", json=make_user())
@@ -272,9 +274,9 @@ async def test_register_email_opt_in_defaults_false(client, make_user):
 
 # ── Register — duplicate handling ─────────────────────────────────────────────
 
+
 async def test_register_duplicate_username_returns_409(client, make_user):
     """Same username, different email → 409."""
-    import uuid
     first = make_user()
     await client.post("/auth/register", json=first)
 
@@ -296,6 +298,7 @@ async def test_register_duplicate_email_returns_409(client, make_user):
 
 
 # ── Reset password — new password actually works ──────────────────────────────
+
 
 async def test_reset_password_new_password_enables_login(client, make_user):
     """After a successful reset, the new password can be used to log in."""

@@ -1,7 +1,10 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useLang } from '../context/LangContext.jsx'
+import { useLang } from '../context/useLang.js'
 import * as authApi from '../api/auth.js'
+
+const MIN_AGE_YEARS = 15
+const minBirthdate = () => new Date(Date.now() - MIN_AGE_YEARS * 365.25 * 86400000).toISOString().split('T')[0]
 
 export function CompleteProfile({ user, token, onRefreshUser }) {
   const { t } = useLang()
@@ -10,6 +13,7 @@ export function CompleteProfile({ user, token, onRefreshUser }) {
   const [birthdate, setBirthdate] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const maxBirthdate = useMemo(() => minBirthdate(), [])
 
   // Already complete — shouldn't normally reach this page
   if (user?.profile_complete) {
@@ -75,7 +79,7 @@ export function CompleteProfile({ user, token, onRefreshUser }) {
               required
               value={birthdate}
               onChange={e => setBirthdate(e.target.value)}
-              max={new Date(Date.now() - 15 * 365.25 * 86400000).toISOString().split('T')[0]}
+              max={maxBirthdate}
             />
           </div>
           {error && <p style={{ color: 'var(--rouge)', fontSize: '0.9rem', margin: 0 }}>{error}</p>}

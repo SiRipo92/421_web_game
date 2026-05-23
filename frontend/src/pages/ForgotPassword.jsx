@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useLang } from '../context/LangContext.jsx'
+import { useLang } from '../context/useLang.js'
 import { forgotPassword } from '../api/auth.js'
 
 export function ForgotPassword() {

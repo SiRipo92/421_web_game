@@ -59,6 +59,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+
 def _on_rate_limit(request: Request, exc: RateLimitExceeded) -> JSONResponse:
     return JSONResponse(status_code=429, content={"detail": "rate_limit"})
 

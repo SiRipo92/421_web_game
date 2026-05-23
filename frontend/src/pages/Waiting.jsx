@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Avatar } from '../components/shared/Avatar.jsx'
 import { ShareButtons } from '../components/shared/ShareButtons.jsx'
 import { useGame } from '../hooks/useGame.js'
-import { useLang } from '../context/LangContext.jsx'
+import { useLang } from '../context/useLang.js'
 
 export function Waiting({ token }) {
   const { t } = useLang()
@@ -11,7 +11,7 @@ export function Waiting({ token }) {
   const [params] = useSearchParams()
   const playerId = params.get('pid')
   const navigate = useNavigate()
-  const { state, initialRoll, start } = useGame(gameId, playerId, token)
+  const { state, start } = useGame(gameId, playerId, token)
   const hasNavigated = useRef(false)
 
   useEffect(() => {
@@ -22,7 +22,6 @@ export function Waiting({ token }) {
     }
   }, [state.phase, gameId, playerId, navigate])
 
-  const me = state.players?.find(p => p.id === playerId)
   const isHost = state.room?.host_player_id === playerId
   const isPublic = state.room?.is_public
 

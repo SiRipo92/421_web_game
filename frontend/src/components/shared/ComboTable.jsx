@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { DiceRow } from './Die.jsx'
-import { useLang } from '../../context/LangContext.jsx'
+import { useLang } from '../../context/useLang.js'
 
 const COMBO_ROWS = [
   {

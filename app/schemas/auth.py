@@ -8,6 +8,7 @@ from pydantic import BaseModel, EmailStr, field_validator
 
 try:
     from MailChecker import MailChecker as _MailChecker
+
     _mailchecker_available = True
 except ImportError:
     _mailchecker_available = False

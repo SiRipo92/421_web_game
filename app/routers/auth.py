@@ -162,6 +162,7 @@ async def google_auth(
     try:
         from google.auth.transport import requests as google_requests
         from google.oauth2 import id_token
+
         info = id_token.verify_oauth2_token(
             body.credential, google_requests.Request(), settings.google_client_id
         )
@@ -204,11 +205,13 @@ async def google_auth(
         db.add(user)
         await db.flush()
         db.add(PlayerStats(user_id=user.id))
-        db.add(GdprAuditLog(
-            user_id=user.id,
-            event_type="account_created_google",
-            ip_address=request.client.host if request.client else None,
-        ))
+        db.add(
+            GdprAuditLog(
+                user_id=user.id,
+                event_type="account_created_google",
+                ip_address=request.client.host if request.client else None,
+            )
+        )
         await db.commit()
         await db.refresh(user)
 
@@ -273,10 +276,12 @@ async def delete_account(
     now = datetime.now(UTC)
     current_user.deletion_requested_at = now
     current_user.deleted_at = now
-    db.add(GdprAuditLog(
-        user_id=current_user.id,
-        event_type="account_deleted",
-    ))
+    db.add(
+        GdprAuditLog(
+            user_id=current_user.id,
+            event_type="account_deleted",
+        )
+    )
     await db.commit()
 
 
@@ -287,9 +292,7 @@ async def export_data(
 ):
     """Return all stored personal data for the current user as JSON."""
     stats = await db.get(PlayerStats, current_user.id)
-    games_result = await db.execute(
-        select(GamePlayer).where(GamePlayer.user_id == current_user.id)
-    )
+    games_result = await db.execute(select(GamePlayer).where(GamePlayer.user_id == current_user.id))
     games = games_result.scalars().all()
     return {
         "account": {
@@ -304,7 +307,9 @@ async def export_data(
             "games_played": stats.games_played,
             "wins": stats.wins,
             "losses": stats.losses,
-        } if stats else None,
+        }
+        if stats
+        else None,
         "games": [
             {"placement": g.placement, "final_tokens": g.final_tokens, "sets_lost": g.sets_lost}
             for g in games
@@ -321,23 +326,25 @@ def _moderate_image(jpeg_bytes: bytes) -> bool:
     msg = client.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=5,
-        messages=[{
-            "role": "user",
-            "content": [
-                {
-                    "type": "image",
-                    "source": {"type": "base64", "media_type": "image/jpeg", "data": b64},
-                },
-                {
-                    "type": "text",
-                    "text": (
-                        "You are a content moderator for a family-friendly gaming platform. "
-                        "Does this image contain nudity, sexual content, hate symbols, or "
-                        "extreme violence? Answer with only SAFE or UNSAFE."
-                    ),
-                },
-            ],
-        }],
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {"type": "base64", "media_type": "image/jpeg", "data": b64},
+                    },
+                    {
+                        "type": "text",
+                        "text": (
+                            "You are a content moderator for a family-friendly gaming platform. "
+                            "Does this image contain nudity, sexual content, hate symbols, or "
+                            "extreme violence? Answer with only SAFE or UNSAFE."
+                        ),
+                    },
+                ],
+            }
+        ],
     )
     return msg.content[0].text.strip().upper().startswith("SAFE")
 
@@ -396,6 +403,7 @@ async def delete_avatar(
 async def get_avatar(user_id: str, db: AsyncSession = Depends(get_db)):
     """Serve a user's avatar image; 404 if not set."""
     import uuid as _uuid
+
     try:
         uid = _uuid.UUID(user_id)
     except ValueError:

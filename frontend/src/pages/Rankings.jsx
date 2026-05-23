@@ -1,18 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Avatar } from '../components/shared/Avatar.jsx'
-import { useLang } from '../context/LangContext.jsx'
-
-const BADGE_TIERS = [
-  { max: 800, badge: '🎲 Débutant' },
-  { max: 1200, badge: '🥉 Amateur' },
-  { max: 1600, badge: '🥈 Confirmé' },
-  { max: 2000, badge: '🥇 Expert' },
-  { max: Infinity, badge: '👑 Maître' },
-]
-
-export function badge(elo) {
-  return BADGE_TIERS.find(t => elo < t.max)?.badge ?? '👑 Maître'
-}
+import { useLang } from '../context/useLang.js'
+import { badge } from '../utils/badge.js'
 
 export function Rankings({ user }) {
   const { t } = useLang()

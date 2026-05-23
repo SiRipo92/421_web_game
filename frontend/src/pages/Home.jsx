@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Die } from '../components/shared/Die.jsx'
 import { ChipStack } from '../components/shared/ChipStack.jsx'
 import { ComboTable } from '../components/shared/ComboTable.jsx'
-import { useLang } from '../context/LangContext.jsx'
+import { useLang } from '../context/useLang.js'
 import { joinGame } from '../api/game.js'
 
 export function Home({ user, token }) {

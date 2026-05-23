@@ -1,35 +1,11 @@
 import { useState, useEffect, useRef } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { Avatar } from './Avatar.jsx'
-import { useLang } from '../../context/LangContext.jsx'
-import { useTheme } from '../../context/ThemeContext.jsx'
+import { useLang } from '../../context/useLang.js'
+import { useTheme } from '../../context/useTheme.js'
 
-export function TopBar({ user, onLogout }) {
-  const { t, lang, setLang } = useLang()
-  const { theme, setTheme } = useTheme()
-  const location = useLocation()
-  const [burgerOpen, setBurgerOpen] = useState(false)
-  const [userMenuOpen, setUserMenuOpen] = useState(false)
-  const userMenuRef = useRef(null)
-
-  // Close burger on navigation
-  useEffect(() => { setBurgerOpen(false) }, [location.pathname])
-
-  // Close user dropdown on outside click
-  useEffect(() => {
-    if (!userMenuOpen) return
-    const handler = (e) => { if (!userMenuRef.current?.contains(e.target)) setUserMenuOpen(false) }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [userMenuOpen])
-
-  const navLinks = [
-    { to: '/', label: t('home') },
-    { to: '/rankings', label: t('rankings') },
-    { to: '/how-to-play', label: t('how_to_play') },
-  ]
-
-  const LangToggle = ({ onSelect }) => (
+function LangToggle({ lang, setLang, onSelect }) {
+  return (
     <div role="group" aria-label="Language" className="topbar-lang">
       {['fr', 'en'].map(l => (
         <button
@@ -51,8 +27,10 @@ export function TopBar({ user, onLogout }) {
       ))}
     </div>
   )
+}
 
-  const ThemeToggle = ({ onSelect }) => (
+function ThemeToggle({ theme, setTheme, onSelect }) {
+  return (
     <button
       type="button"
       onClick={() => { setTheme(theme === 'light' ? 'dark' : 'light'); onSelect?.() }}
@@ -60,6 +38,33 @@ export function TopBar({ user, onLogout }) {
       className="topbar-theme-btn"
     >{theme === 'light' ? '🌙' : '☀️'}</button>
   )
+}
+
+export function TopBar({ user, onLogout }) {
+  const { t, lang, setLang } = useLang()
+  const { theme, setTheme } = useTheme()
+  const location = useLocation()
+  const [burgerOpen, setBurgerOpen] = useState(false)
+  const [userMenuOpen, setUserMenuOpen] = useState(false)
+  const userMenuRef = useRef(null)
+
+  // Close burger on navigation — legitimate route-change side-effect, not derivable
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { setBurgerOpen(false) }, [location.pathname])
+
+  // Close user dropdown on outside click
+  useEffect(() => {
+    if (!userMenuOpen) return
+    const handler = (e) => { if (!userMenuRef.current?.contains(e.target)) setUserMenuOpen(false) }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [userMenuOpen])
+
+  const navLinks = [
+    { to: '/', label: t('home') },
+    { to: '/rankings', label: t('rankings') },
+    { to: '/how-to-play', label: t('how_to_play') },
+  ]
 
   return (
     <header className="topbar">
@@ -84,8 +89,8 @@ export function TopBar({ user, onLogout }) {
         ))}
 
         <div className="topbar-rule" aria-hidden="true" />
-        <LangToggle />
-        <ThemeToggle />
+        <LangToggle lang={lang} setLang={setLang} />
+        <ThemeToggle theme={theme} setTheme={setTheme} />
         <div className="topbar-rule" aria-hidden="true" />
 
         {user ? (
@@ -156,11 +161,11 @@ export function TopBar({ user, onLogout }) {
         <div className="topbar-drawer-controls">
           <div className="topbar-drawer-row">
             <span className="eyebrow">Langue</span>
-            <LangToggle onSelect={() => setBurgerOpen(false)} />
+            <LangToggle lang={lang} setLang={setLang} onSelect={() => setBurgerOpen(false)} />
           </div>
           <div className="topbar-drawer-row">
             <span className="eyebrow">{theme === 'light' ? 'Mode sombre' : 'Mode clair'}</span>
-            <ThemeToggle onSelect={() => setBurgerOpen(false)} />
+            <ThemeToggle theme={theme} setTheme={setTheme} onSelect={() => setBurgerOpen(false)} />
           </div>
         </div>
 

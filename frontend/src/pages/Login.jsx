@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { GoogleLogin } from '@react-oauth/google'
-import { useLang } from '../context/LangContext.jsx'
+import { useLang } from '../context/useLang.js'
 
 export function Login({ onLogin, onRegister, onGoogleLogin }) {
   const { t, lang } = useLang()
@@ -135,6 +135,11 @@ function LoginForm({ t, lang, onLogin, onGoogleLogin, onSwitch, onNav }) {
   )
 }
 
+const EMAIL_RE = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/
+
+const MIN_AGE_YEARS = 15
+const minBirthdate = () => new Date(Date.now() - MIN_AGE_YEARS * 365.25 * 86400000).toISOString().split('T')[0]
+
 function pwdChecks(pwd) {
   return {
     length: pwd.length >= 8,
@@ -186,8 +191,8 @@ function RegisterForm({ t, lang, onRegister, onGoogleLogin, onSwitch, onNav }) {
 
   const checks = pwdChecks(password)
   const pwdValid = checks.length && checks.upper && checks.special && checks.maxlen
+  const maxBirthdate = useMemo(() => minBirthdate(), [])
 
-  const EMAIL_RE = /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/
   const validateEmailFormat = (v) => {
     if (v && !EMAIL_RE.test(v)) { setEmailError(t('err_email_format')); return false }
     setEmailError(''); return true
@@ -272,7 +277,7 @@ function RegisterForm({ t, lang, onRegister, onGoogleLogin, onSwitch, onNav }) {
         </p>
         <input id="reg-birthdate" className="input" type="date" required
           value={birthdate} onChange={e => setBirthdate(e.target.value)}
-          max={new Date(Date.now() - 15 * 365.25 * 86400000).toISOString().split('T')[0]} />
+          max={maxBirthdate} />
       </div>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
         <input id="accept-cgu" type="checkbox" required checked={acceptCgu} onChange={e => setAcceptCgu(e.target.checked)}

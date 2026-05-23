@@ -1,7 +1,6 @@
-import { createContext, useContext, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useT } from '../i18n/index.js'
-
-const LangContext = createContext(null)
+import { LangContext } from './useLang.js'
 
 export function LangProvider({ children }) {
   const [lang, setLang] = useState(() => localStorage.getItem('lang') || 'fr')
@@ -18,8 +17,4 @@ export function LangProvider({ children }) {
       {children}
     </LangContext.Provider>
   )
-}
-
-export function useLang() {
-  return useContext(LangContext)
 }

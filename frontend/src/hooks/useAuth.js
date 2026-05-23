@@ -8,11 +8,17 @@ export function useAuth() {
   const avatarVerRef = useRef(0)
 
   useEffect(() => {
-    if (!token) { setLoading(false); return }
+    if (!token) return
+    let cancelled = false
     authApi.me(token)
-      .then(u => setUser(u))
-      .catch(() => { localStorage.removeItem('token'); setToken(null) })
-      .finally(() => setLoading(false))
+      .then(u => { if (!cancelled) setUser(u) })
+      .catch(() => {
+        if (cancelled) return
+        localStorage.removeItem('token')
+        setToken(null)
+      })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
   }, [token])
 
   const login = useCallback(async (email, password, rememberMe = false) => {

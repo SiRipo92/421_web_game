@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Avatar } from '../components/shared/Avatar.jsx'
-import { useLang } from '../context/LangContext.jsx'
-import { badge } from './Rankings.jsx'
+import { useLang } from '../context/useLang.js'
+import { badge } from '../utils/badge.js'
 import { useRef } from 'react'
 import * as authApi from '../api/auth.js'
 

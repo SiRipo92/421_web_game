@@ -215,9 +215,11 @@ def _finalize_order(game: Game):
     summary = " · ".join(f"{p.name}:{rolls[p.id]}" for p in game.players)
     first = game.players[0].name
     _log(
-        game, "log_order_set",
+        game,
+        "log_order_set",
         f"{summary} — {first} commence (plus bas).",
-        summary=summary, first=first,
+        summary=summary,
+        first=first,
     )
     _do_start(game)
 
@@ -236,9 +238,12 @@ def _do_start(game: Game):
     game.round_starter_id = game.players[0].id if game.players else ""
     starter_name = game.players[0].name if game.players else ""
     _log(
-        game, "log_round_start",
+        game,
+        "log_round_start",
         f"Round {game.round_num} – Charge · {starter_name} donne le rythme",
-        num=game.round_num, phase="charge", starter=starter_name,
+        num=game.round_num,
+        phase="charge",
+        starter=starter_name,
     )
 
 
@@ -268,9 +273,11 @@ def _start_new_set(game: Game, set_loser_id: str):
     game.round_num += 1
     loser_name = next((p.name for p in game.players if p.id == set_loser_id), "?")
     _log(
-        game, "log_new_set",
+        game,
+        "log_new_set",
         f"Nouveau set · Round {game.round_num} · {loser_name} donne le rythme",
-        num=game.round_num, starter=loser_name,
+        num=game.round_num,
+        starter=loser_name,
     )
 
 
@@ -304,9 +311,12 @@ async def _resolve_round(game: Game):
             loser.tokens += taken
             game.pool -= taken
             _log(
-                game, "log_charge_takes",
+                game,
+                "log_charge_takes",
                 f"{loser.name} prend {taken} jeton(s) · Pool: {game.pool}",
-                name=loser.name, n=taken, pool=game.pool,
+                name=loser.name,
+                n=taken,
+                pool=game.pool,
             )
         if game.pool == 0:
             game.phase = GamePhase.DECHARGE
@@ -318,9 +328,12 @@ async def _resolve_round(game: Game):
             winner.tokens -= transfer
             loser.tokens += transfer
             _log(
-                game, "log_decharge_gives",
+                game,
+                "log_decharge_gives",
                 f"{winner.name} donne {transfer} jeton(s) à {loser.name}",
-                winner=winner.name, n=transfer, loser=loser.name,
+                winner=winner.name,
+                n=transfer,
+                loser=loser.name,
             )
 
         set_winner = next((p for p in players if p.tokens == 0), None)
@@ -331,15 +344,18 @@ async def _resolve_round(game: Game):
             sl_count = game.sets_lost[sl_id]
             _admit_waiting(game)
             _log(
-                game, "log_set_lost",
+                game,
+                "log_set_lost",
                 f"{set_loser.name} a les 11 jetons — set perdu ({sl_count}/2) · "
                 f"{set_loser.name} donne le rythme au prochain set.",
-                name=set_loser.name, count=sl_count,
+                name=set_loser.name,
+                count=sl_count,
             )
             if sl_count >= 2:
                 game.phase = GamePhase.FINISHED
                 _log(
-                    game, "log_game_over",
+                    game,
+                    "log_game_over",
                     f"Fin de partie ! {set_winner.name} gagne !",
                     winner=set_winner.name,
                 )
@@ -356,9 +372,12 @@ async def _resolve_round(game: Game):
         p.turn = new_turn()
     starter_name = next((p.name for p in game.players if p.id == game.round_starter_id), "")
     _log(
-        game, "log_round_start",
+        game,
+        "log_round_start",
         f"Round {game.round_num} · {starter_name} donne le rythme",
-        num=game.round_num, phase=game.phase.value, starter=starter_name,
+        num=game.round_num,
+        phase=game.phase.value,
+        starter=starter_name,
     )
 
 

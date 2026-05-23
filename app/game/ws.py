@@ -121,9 +121,13 @@ async def _afk_timer(game: Game, player_id: str, game_id: str):
     t = player.turn
     dice_sorted = sorted(t.dice, reverse=True)
     _log(
-        game, "log_afk_turn",
+        game,
+        "log_afk_turn",
         f"{player.name} (AFK): {dice_sorted} → {t.combo} ({t.fiches}f)",
-        name=player.name, dice=dice_sorted, combo=t.combo, fiches=t.fiches,
+        name=player.name,
+        dice=dice_sorted,
+        combo=t.combo,
+        fiches=t.fiches,
     )
     game.advance()
     if game.all_done():
@@ -388,9 +392,13 @@ async def websocket_endpoint(
                         game.max_throws_this_round = 1
                     _sec_dice = sorted(t.dice, reverse=True)
                     _log(
-                        game, "log_turn",
+                        game,
+                        "log_turn",
                         f"{player.name}: {_sec_dice} → {t.combo} ({t.fiches}f)",
-                        name=player.name, dice=_sec_dice, combo=t.combo, fiches=t.fiches,
+                        name=player.name,
+                        dice=_sec_dice,
+                        combo=t.combo,
+                        fiches=t.fiches,
                     )
                     game.advance()
                     if game.all_done():
@@ -437,9 +445,13 @@ async def websocket_endpoint(
                         game.max_throws_this_round = max(3 - t.rolls_left, 1)
                 _done_dice = sorted(t.dice, reverse=True)
                 _log(
-                    game, "log_turn",
+                    game,
+                    "log_turn",
                     f"{player.name}: {_done_dice} → {t.combo} ({t.fiches}f)",
-                    name=player.name, dice=_done_dice, combo=t.combo, fiches=t.fiches,
+                    name=player.name,
+                    dice=_done_dice,
+                    combo=t.combo,
+                    fiches=t.fiches,
                 )
                 game.advance()
                 if game.all_done():

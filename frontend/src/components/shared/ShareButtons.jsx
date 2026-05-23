@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useLang } from '../../context/LangContext.jsx'
+import { useLang } from '../../context/useLang.js'
 
 export function ShareButtons({ code, plugins = [] }) {
   const { t } = useLang()

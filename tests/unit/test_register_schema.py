@@ -29,6 +29,7 @@ def _make(**overrides) -> RegisterRequest:
 
 # ── Password ──────────────────────────────────────────────────────────────────
 
+
 def test_password_too_short():
     with pytest.raises(ValidationError, match="8 characters"):
         _make(password="Ab1")
@@ -68,6 +69,7 @@ def test_password_special_char_satisfies_digit_rule():
 
 # ── Username ──────────────────────────────────────────────────────────────────
 
+
 def test_username_one_char_rejected():
     with pytest.raises(ValidationError, match="2.32 characters"):
         _make(username="x")
@@ -91,6 +93,7 @@ def test_username_32_chars_accepted():
 
 
 # ── Age / birthdate ───────────────────────────────────────────────────────────
+
 
 def test_age_14_rejected():
     underage = (date.today() - timedelta(days=14 * 365)).isoformat()
@@ -121,6 +124,7 @@ def test_age_30_years_accepted():
 
 # ── lang_pref ─────────────────────────────────────────────────────────────────
 
+
 def test_lang_pref_unsupported_rejected():
     with pytest.raises(ValidationError, match="'fr' or 'en'"):
         _make(lang_pref="de")
@@ -139,6 +143,7 @@ def test_lang_pref_defaults_to_fr():
 
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
+
 
 def test_email_opt_in_defaults_false():
     assert _make().email_opt_in is False

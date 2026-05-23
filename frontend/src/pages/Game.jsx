@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Die } from '../components/shared/Die.jsx'
-import { DiceRow } from '../components/shared/Die.jsx'
 import { Avatar } from '../components/shared/Avatar.jsx'
 import { ChipStack } from '../components/shared/ChipStack.jsx'
 import { ComboTable } from '../components/shared/ComboTable.jsx'
 import { useGame } from '../hooks/useGame.js'
-import { useLang } from '../context/LangContext.jsx'
+import { useLang } from '../context/useLang.js'
 
 export function Game({ token }) {
   const { t } = useLang()
@@ -18,8 +17,6 @@ export function Game({ token }) {
   const logRef = useRef(null)
 
   const [logOpen, setLogOpen] = useState(true)
-  const [afkCountdown, setAfkCountdown] = useState(null)
-  const afkIntervalRef = useRef(null)
 
   const me = state.players?.find(p => p.id === playerId)
   const isMyTurn = state.current_player_id === playerId
@@ -28,29 +25,14 @@ export function Game({ token }) {
   const canRoll = isMyTurn && myTurn && !myTurn.done && myTurn.rolls_left > 0
   const canDone = isMyTurn && myTurn && !myTurn.done && rollsUsed > 0
   const hasRolled = rollsUsed > 0
+  const showAfkBar = isMyTurn && state.room?.afk_bot && state.room?.afk_seconds > 0
 
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
   }, [state.log])
 
-  useEffect(() => {
-    clearInterval(afkIntervalRef.current)
-    if (isMyTurn && state.room?.afk_bot && state.room?.afk_seconds > 0) {
-      let remaining = state.room.afk_seconds
-      setAfkCountdown(remaining)
-      afkIntervalRef.current = setInterval(() => {
-        remaining -= 1
-        setAfkCountdown(remaining)
-        if (remaining <= 0) clearInterval(afkIntervalRef.current)
-      }, 1000)
-    } else {
-      setAfkCountdown(null)
-    }
-    return () => clearInterval(afkIntervalRef.current)
-  }, [state.current_player_id, state.room?.afk_bot, state.room?.afk_seconds])
-
   if (state.phase === 'finished') {
-    return <FinishedScreen state={state} playerId={playerId} t={t} navigate={navigate} gameId={gameId} />
+    return <FinishedScreen state={state} playerId={playerId} t={t} navigate={navigate} />
   }
 
   if (state.phase === 'initial_roll' || state.phase === 'waiting') {
@@ -194,25 +176,8 @@ export function Game({ token }) {
                 ? !hasRolled ? t('keep_hint') : `${myTurn?.rolls_left ?? 0} ${t('rolls_left')}.`
                 : <span>{t('waiting_for')} <span className="mono pulse-soft">…</span></span>}
             </div>
-            {afkCountdown !== null && afkCountdown > 0 && (
-              <div style={{
-                marginTop: 6, display: 'flex', alignItems: 'center', gap: 6,
-              }}>
-                <div style={{
-                  height: 3, flex: 1, maxWidth: 120, borderRadius: 2,
-                  background: 'var(--rule)', overflow: 'hidden',
-                }}>
-                  <div style={{
-                    height: '100%',
-                    width: `${(afkCountdown / (state.room?.afk_seconds ?? 45)) * 100}%`,
-                    background: afkCountdown <= 10 ? 'var(--rouge)' : 'var(--brass)',
-                    transition: 'width 1s linear, background 0.3s',
-                  }} />
-                </div>
-                <span className="mono" style={{ fontSize: '0.75rem', color: afkCountdown <= 10 ? 'var(--rouge)' : 'var(--ink-mute)' }}>
-                  {afkCountdown}s
-                </span>
-              </div>
+            {showAfkBar && (
+              <AfkBar key={state.current_player_id} total={state.room.afk_seconds} />
             )}
           </div>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -299,7 +264,6 @@ export function Game({ token }) {
 }
 
 function InitialRollScreen({ state, playerId, t, onRoll }) {
-  const me = state.players?.find(p => p.id === playerId)
   const myRoll = state.players?.find(p => p.id === playerId)
   const hasRolled = myRoll && state.players?.find(p => p.id === playerId)?.initial_roll != null
 
@@ -335,7 +299,7 @@ function InitialRollScreen({ state, playerId, t, onRoll }) {
   )
 }
 
-function FinishedScreen({ state, playerId, t, navigate, gameId }) {
+function FinishedScreen({ state, playerId, t, navigate }) {
   const sorted = [...(state.players || [])].sort((a, b) => (a.tokens ?? 0) - (b.tokens ?? 0))
   const winner = sorted[0]
 
@@ -458,6 +422,35 @@ function PisteSeat({ p, active, isSelf, x, y }) {
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+function AfkBar({ total }) {
+  const [remaining, setRemaining] = useState(total)
+  useEffect(() => {
+    const id = setInterval(() => {
+      setRemaining(r => (r > 0 ? r - 1 : 0))
+    }, 1000)
+    return () => clearInterval(id)
+  }, [])
+  if (remaining <= 0) return null
+  return (
+    <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+      <div style={{
+        height: 3, flex: 1, maxWidth: 120, borderRadius: 2,
+        background: 'var(--rule)', overflow: 'hidden',
+      }}>
+        <div style={{
+          height: '100%',
+          width: `${(remaining / total) * 100}%`,
+          background: remaining <= 10 ? 'var(--rouge)' : 'var(--brass)',
+          transition: 'width 1s linear, background 0.3s',
+        }} />
+      </div>
+      <span className="mono" style={{ fontSize: '0.75rem', color: remaining <= 10 ? 'var(--rouge)' : 'var(--ink-mute)' }}>
+        {remaining}s
+      </span>
     </div>
   )
 }
