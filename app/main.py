@@ -16,8 +16,10 @@ import sentry_sdk
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from slowapi.errors import RateLimitExceeded
 
 from app.core.config import settings
+from app.core.limiter import limiter
 from app.db.base import engine
 from app.db.models import Base  # noqa: F401
 from app.game.ws import router as game_router
@@ -55,6 +57,13 @@ app = FastAPI(
     redoc_url=None,
     lifespan=lifespan,
 )
+
+def _on_rate_limit(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    return JSONResponse(status_code=429, content={"detail": "rate_limit"})
+
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _on_rate_limit)
 
 if settings.sentry_dsn:
     sentry_sdk.init(dsn=settings.sentry_dsn, traces_sample_rate=0.2)

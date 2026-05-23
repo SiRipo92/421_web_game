@@ -1,24 +1,32 @@
-"""Auth endpoints: register, login, me, forgot-password, reset-password."""
+"""Auth endpoints: register, login, me, forgot-password, reset-password, google."""
 
+import base64
 import hashlib
+import io
 import secrets
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+import anthropic
+from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile, status
+from PIL import Image
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.limiter import limiter
 from app.core.security import create_access_token, get_current_user, hash_password, verify_password
 from app.db.base import get_db
-from app.db.models import GdprAuditLog, PasswordResetToken, PlayerStats, User
+from app.db.models import GamePlayer, GdprAuditLog, PasswordResetToken, PlayerStats, User
 from app.schemas.auth import (
+    CompleteProfileRequest,
     ForgotPasswordRequest,
+    GoogleAuthRequest,
     LoginRequest,
     MeResponse,
     RegisterRequest,
     ResetPasswordRequest,
     TokenResponse,
+    UpdateMeRequest,
 )
 from app.services.email import send_reset_email
 
@@ -26,7 +34,8 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
-async def register(body: RegisterRequest, request: Request, db: AsyncSession = Depends(get_db)):
+@limiter.limit("5/minute")
+async def register(request: Request, body: RegisterRequest, db: AsyncSession = Depends(get_db)):
     """Create a new user account and return a JWT."""
     existing = await db.execute(
         select(User).where((User.username == body.username) | (User.email == body.email))
@@ -60,13 +69,15 @@ async def register(body: RegisterRequest, request: Request, db: AsyncSession = D
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
+@limiter.limit("10/minute")
+async def login(request: Request, body: LoginRequest, db: AsyncSession = Depends(get_db)):
     """Authenticate by email/password; remember_me extends JWT TTL to 30 days."""
     result = await db.execute(
         select(User).where(User.email == body.email, User.deleted_at.is_(None))
     )
     user = result.scalar_one_or_none()
-    if not user or not verify_password(body.password, user.hashed_password):
+    pw_ok = user and user.hashed_password and verify_password(body.password, user.hashed_password)
+    if not pw_ok:
         raise HTTPException(status_code=401, detail="Invalid email or password")
     return TokenResponse(
         access_token=create_access_token(str(user.id), remember_me=body.remember_me)
@@ -82,6 +93,8 @@ async def me(user: User = Depends(get_current_user)):
         email=user.email,
         lang_pref=user.lang_pref,
         email_opt_in=user.email_opt_in,
+        profile_complete=user.birthdate is not None,
+        has_avatar=user.avatar_data is not None,
     )
 
 
@@ -136,3 +149,262 @@ async def reset_password(body: ResetPasswordRequest, db: AsyncSession = Depends(
     await db.commit()
 
     return {"detail": "Password updated successfully"}
+
+
+@router.post("/google", response_model=TokenResponse)
+@limiter.limit("10/minute")
+async def google_auth(
+    request: Request, body: GoogleAuthRequest, db: AsyncSession = Depends(get_db)
+):
+    """Verify a Google ID token and sign in or register the user."""
+    if not settings.google_client_id:
+        raise HTTPException(status_code=503, detail="Google sign-in not configured")
+    try:
+        from google.auth.transport import requests as google_requests
+        from google.oauth2 import id_token
+        info = id_token.verify_oauth2_token(
+            body.credential, google_requests.Request(), settings.google_client_id
+        )
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid Google token")
+
+    google_id = info["sub"]
+    email = info["email"]
+
+    result = await db.execute(
+        select(User).where((User.google_id == google_id) | (User.email == email))
+    )
+    user = result.scalar_one_or_none()
+
+    is_new = False
+    if user:
+        if not user.google_id:
+            user.google_id = google_id
+        await db.commit()
+    else:
+        is_new = True
+        username = (info.get("name") or email.split("@")[0])[:32]
+        # Ensure username uniqueness
+        base = username
+        suffix = 0
+        while True:
+            existing = await db.execute(select(User).where(User.username == username))
+            if not existing.scalar_one_or_none():
+                break
+            suffix += 1
+            username = f"{base[:30]}{suffix}"
+
+        user = User(
+            username=username,
+            email=email,
+            hashed_password=None,
+            google_id=google_id,
+            lang_pref="fr",
+        )
+        db.add(user)
+        await db.flush()
+        db.add(PlayerStats(user_id=user.id))
+        db.add(GdprAuditLog(
+            user_id=user.id,
+            event_type="account_created_google",
+            ip_address=request.client.host if request.client else None,
+        ))
+        await db.commit()
+        await db.refresh(user)
+
+    return TokenResponse(access_token=create_access_token(str(user.id)), is_new=is_new)
+
+
+@router.post("/complete-profile", status_code=200)
+@limiter.limit("10/minute")
+async def complete_profile(
+    request: Request,
+    body: CompleteProfileRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Set username and birthdate for accounts created via Google SSO."""
+    existing = await db.execute(
+        select(User).where(User.username == body.username, User.id != current_user.id)
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Username already taken")
+
+    current_user.username = body.username
+    current_user.birthdate = body.birthdate
+    await db.commit()
+    return {"detail": "Profile completed"}
+
+
+@router.patch("/me", response_model=MeResponse)
+async def update_me(
+    body: UpdateMeRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update the current user's username and/or language preference."""
+    if body.username is not None and body.username != current_user.username:
+        existing = await db.execute(
+            select(User).where(User.username == body.username, User.id != current_user.id)
+        )
+        if existing.scalar_one_or_none():
+            raise HTTPException(status_code=409, detail="Username already taken")
+        current_user.username = body.username
+    if body.lang_pref is not None:
+        current_user.lang_pref = body.lang_pref
+    await db.commit()
+    await db.refresh(current_user)
+    return MeResponse(
+        id=str(current_user.id),
+        username=current_user.username,
+        email=current_user.email,
+        lang_pref=current_user.lang_pref,
+        email_opt_in=current_user.email_opt_in,
+        profile_complete=current_user.birthdate is not None,
+    )
+
+
+@router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_account(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Soft-delete the account immediately; data is purged after the grace period."""
+    now = datetime.now(UTC)
+    current_user.deletion_requested_at = now
+    current_user.deleted_at = now
+    db.add(GdprAuditLog(
+        user_id=current_user.id,
+        event_type="account_deleted",
+    ))
+    await db.commit()
+
+
+@router.get("/export")
+async def export_data(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return all stored personal data for the current user as JSON."""
+    stats = await db.get(PlayerStats, current_user.id)
+    games_result = await db.execute(
+        select(GamePlayer).where(GamePlayer.user_id == current_user.id)
+    )
+    games = games_result.scalars().all()
+    return {
+        "account": {
+            "username": current_user.username,
+            "email": current_user.email,
+            "lang_pref": current_user.lang_pref,
+            "email_opt_in": current_user.email_opt_in,
+            "created_at": current_user.created_at.isoformat(),
+        },
+        "stats": {
+            "elo": stats.elo,
+            "games_played": stats.games_played,
+            "wins": stats.wins,
+            "losses": stats.losses,
+        } if stats else None,
+        "games": [
+            {"placement": g.placement, "final_tokens": g.final_tokens, "sets_lost": g.sets_lost}
+            for g in games
+        ],
+    }
+
+
+def _moderate_image(jpeg_bytes: bytes) -> bool:
+    """Return True if the image passes Claude Haiku content moderation."""
+    if not settings.anthropic_api_key:
+        return True
+    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    b64 = base64.standard_b64encode(jpeg_bytes).decode()
+    msg = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=5,
+        messages=[{
+            "role": "user",
+            "content": [
+                {
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": "image/jpeg", "data": b64},
+                },
+                {
+                    "type": "text",
+                    "text": (
+                        "You are a content moderator for a family-friendly gaming platform. "
+                        "Does this image contain nudity, sexual content, hate symbols, or "
+                        "extreme violence? Answer with only SAFE or UNSAFE."
+                    ),
+                },
+            ],
+        }],
+    )
+    return msg.content[0].text.strip().upper().startswith("SAFE")
+
+
+def _process_image(data: bytes) -> bytes:
+    """Resize to 200×200 cover crop and encode as JPEG."""
+    img = Image.open(io.BytesIO(data)).convert("RGB")
+    w, h = img.size
+    side = min(w, h)
+    left = (w - side) // 2
+    top = (h - side) // 2
+    img = img.crop((left, top, left + side, top + side)).resize((200, 200), Image.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=85, optimize=True)
+    return buf.getvalue()
+
+
+@router.post("/avatar", status_code=200)
+@limiter.limit("10/minute")
+async def upload_avatar(
+    request: Request,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload, moderate, and store a profile avatar."""
+    if file.content_type not in ("image/jpeg", "image/png", "image/webp", "image/gif"):
+        raise HTTPException(status_code=415, detail="Unsupported image type")
+    raw = await file.read(6 * 1024 * 1024)  # read up to 6 MB
+    if len(raw) >= 6 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Image too large (max 5 MB)")
+    try:
+        jpeg = _process_image(raw)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Could not process image")
+    if not _moderate_image(jpeg):
+        raise HTTPException(status_code=400, detail="Image contains inappropriate content")
+    current_user.avatar_data = jpeg
+    current_user.avatar_content_type = "image/jpeg"
+    await db.commit()
+    return {"detail": "Avatar updated"}
+
+
+@router.delete("/avatar", status_code=204)
+async def delete_avatar(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove the current user's custom avatar."""
+    current_user.avatar_data = None
+    current_user.avatar_content_type = None
+    await db.commit()
+
+
+@router.get("/avatar/{user_id}", response_class=Response)
+async def get_avatar(user_id: str, db: AsyncSession = Depends(get_db)):
+    """Serve a user's avatar image; 404 if not set."""
+    import uuid as _uuid
+    try:
+        uid = _uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Not found")
+    user = await db.get(User, uid)
+    if not user or not user.avatar_data:
+        raise HTTPException(status_code=404, detail="No avatar")
+    return Response(
+        content=user.avatar_data,
+        media_type=user.avatar_content_type or "image/jpeg",
+        headers={"Cache-Control": "private, max-age=3600"},
+    )

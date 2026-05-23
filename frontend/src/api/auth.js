@@ -4,7 +4,13 @@ async function req(path, opts = {}) {
     ...opts,
   })
   const body = await res.json().catch(() => ({}))
-  if (!res.ok) throw { status: res.status, detail: body.detail || 'error' }
+  if (!res.ok) {
+    if (res.status === 429) throw { status: 429, detail: 'rate_limit' }
+    const detail = Array.isArray(body.detail)
+      ? body.detail.map(e => e.msg || String(e)).join('; ')
+      : body.detail || 'error'
+    throw { status: res.status, detail }
+  }
   return body
 }
 
@@ -22,3 +28,48 @@ export const forgotPassword = (email) =>
 
 export const resetPassword = (token, new_password) =>
   req('/auth/reset-password', { method: 'POST', body: JSON.stringify({ token, new_password }) })
+
+export const googleLogin = (credential) =>
+  req('/auth/google', { method: 'POST', body: JSON.stringify({ credential }) })
+
+export const completeProfile = (token, username, birthdate) =>
+  req('/auth/complete-profile', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ username, birthdate }),
+  })
+
+export const updateMe = (token, data) =>
+  req('/auth/me', {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify(data),
+  })
+
+export const deleteAccount = (token) =>
+  req('/auth/me', {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+
+export const exportData = (token) =>
+  req('/auth/export', { headers: { Authorization: `Bearer ${token}` } })
+
+export const uploadAvatar = async (token, file) => {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await fetch('/auth/avatar', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  })
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    if (res.status === 429) throw { status: 429, detail: 'rate_limit' }
+    throw { status: res.status, detail: body.detail || 'error' }
+  }
+  return body
+}
+
+export const deleteAvatar = (token) =>
+  req('/auth/avatar', { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } })

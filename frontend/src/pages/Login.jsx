@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { GoogleLogin } from '@react-oauth/google'
 import { useLang } from '../context/LangContext.jsx'
 
-export function Login({ onLogin, onRegister }) {
-  const { t } = useLang()
+export function Login({ onLogin, onRegister, onGoogleLogin }) {
+  const { t, lang } = useLang()
   const navigate = useNavigate()
   const [params] = useSearchParams()
   const [tab, setTab] = useState(params.get('tab') === 'register' ? 'register' : 'login')
@@ -16,23 +17,23 @@ export function Login({ onLogin, onRegister }) {
 
       {/* Left: branding + badge tiers */}
       <div>
-        <div className="eyebrow" style={{ marginBottom: 12 }}>{tab === 'register' ? 'Inscription' : 'Connexion'}</div>
+        <div className="eyebrow" style={{ marginBottom: 12 }}>
+          {tab === 'register' ? t('login_eyebrow_register') : t('login_eyebrow_login')}
+        </div>
         <h1 className="display" style={{ fontSize: 'clamp(2.5rem, 5vw, 3.5rem)', margin: '0 0 1rem', lineHeight: 0.95 }}>
           {tab === 'register'
-            ? <><span>Devenez</span><br /><em style={{ color: 'var(--rouge)' }}>habitué</em>.</>
-            : <><span>Bonjour,</span><br /><em style={{ color: 'var(--rouge)' }}>cher client</em>.</>}
+            ? <>{t('login_h1_register_pre')}<br /><em style={{ color: 'var(--rouge)' }}>{t('login_h1_register_em')}</em>.</>
+            : <>{t('login_h1_login_pre')}<br /><em style={{ color: 'var(--rouge)' }}>{t('login_h1_login_em')}</em>.</>}
         </h1>
         <p className="serif" style={{ fontSize: '1.1rem', color: 'var(--ink-soft)', maxWidth: 420, lineHeight: 1.5 }}>
-          {tab === 'register'
-            ? 'Suivez vos parties, votre Elo, et collectionnez les badges du bistrot. Vos victoires comptent.'
-            : 'Reprenez là où vous vous étiez arrêté. Vos parties et votre rang vous attendent.'}
+          {tab === 'register' ? t('login_desc_register') : t('login_desc_login')}
         </p>
         <div style={{ marginTop: '2rem', display: 'flex', flexDirection: 'column', gap: 8, color: 'var(--ink-mute)', fontSize: '0.95rem' }} className="serif">
-          <div>🎲 Débutant · 0–800 Elo</div>
-          <div>🥉 Amateur · 800–1200</div>
-          <div>🥈 Confirmé · 1200–1600</div>
-          <div>🥇 Expert · 1600–2000</div>
-          <div>👑 Maître · 2000+</div>
+          <div>{t('badge_beginner')}</div>
+          <div>{t('badge_amateur')}</div>
+          <div>{t('badge_confirmed')}</div>
+          <div>{t('badge_expert')}</div>
+          <div>{t('badge_master')}</div>
         </div>
       </div>
 
@@ -46,8 +47,8 @@ export function Login({ onLogin, onRegister }) {
         </div>
 
         {tab === 'login'
-          ? <LoginForm t={t} onLogin={onLogin} onSwitch={() => setTab('register')} onNav={navigate} />
-          : <RegisterForm t={t} onRegister={onRegister} onSwitch={() => setTab('login')} onNav={navigate} />}
+          ? <LoginForm t={t} lang={lang} onLogin={onLogin} onGoogleLogin={onGoogleLogin} onSwitch={() => setTab('register')} onNav={navigate} />
+          : <RegisterForm t={t} lang={lang} onRegister={onRegister} onGoogleLogin={onGoogleLogin} onSwitch={() => setTab('login')} onNav={navigate} />}
       </div>
 
       <style>{`
@@ -59,7 +60,7 @@ export function Login({ onLogin, onRegister }) {
   )
 }
 
-function LoginForm({ t, onLogin, onSwitch, onNav }) {
+function LoginForm({ t, lang, onLogin, onGoogleLogin, onSwitch, onNav }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [rememberMe, setRememberMe] = useState(false)
@@ -74,9 +75,20 @@ function LoginForm({ t, onLogin, onSwitch, onNav }) {
       await onLogin(email, password, rememberMe)
       onNav('/')
     } catch (err) {
-      setError(t('err_invalid'))
+      if (err?.status === 429) setError(t('err_rate_limit'))
+      else setError(t('err_invalid'))
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleGoogleSuccess = async (credentialResponse) => {
+    setError('')
+    try {
+      const result = await onGoogleLogin?.(credentialResponse.credential)
+      onNav(result?.is_new ? '/complete-profile' : '/')
+    } catch {
+      setError(t('err_sso_google'))
     }
   }
 
@@ -112,6 +124,7 @@ function LoginForm({ t, onLogin, onSwitch, onNav }) {
       <div className="hr-orn" style={{ margin: '0.5rem 0' }}>
         <span style={{ fontSize: '0.75rem', fontStyle: 'italic' }}>{t('or')}</span>
       </div>
+      <SsoButtons t={t} lang={lang} onGoogleSuccess={handleGoogleSuccess} mode="signin_with" />
       <button type="button" onClick={() => onNav('/')} className="btn btn-ghost" style={{ justifyContent: 'center' }}>
         {t('play_guest')}
       </button>
@@ -122,7 +135,44 @@ function LoginForm({ t, onLogin, onSwitch, onNav }) {
   )
 }
 
-function RegisterForm({ t, onRegister, onSwitch, onNav }) {
+function pwdChecks(pwd) {
+  return {
+    length: pwd.length >= 8,
+    upper: /[A-Z]/.test(pwd),
+    special: /[\d\W]/.test(pwd),
+    maxlen: new TextEncoder().encode(pwd).length <= 72,
+  }
+}
+
+function SsoButtons({ t, lang, onGoogleSuccess, mode }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <GoogleLogin
+        onSuccess={onGoogleSuccess}
+        onError={() => {}}
+        useOneTap={false}
+        shape="rectangular"
+        theme="outline"
+        text={mode}
+        locale={lang}
+      />
+      <button type="button" disabled style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+        padding: '0.5rem 1rem', border: '1px solid var(--rule)', borderRadius: 4,
+        background: 'var(--paper-soft)', color: 'var(--ink-fade)', cursor: 'not-allowed',
+        fontSize: '0.9rem', fontFamily: 'var(--body)',
+      }}>
+        {t('sso_apple')}
+      </button>
+      <p className="serif" style={{ fontSize: '0.75rem', color: 'var(--ink-fade)', textAlign: 'center', margin: 0 }}>
+        {t('sso_consent_pre')}{' '}
+        <Link to="/terms" style={{ color: 'var(--ink-mute)' }}>{t('accept_terms_link')}</Link>
+      </p>
+    </div>
+  )
+}
+
+function RegisterForm({ t, lang, onRegister, onGoogleLogin, onSwitch, onNav }) {
   const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -131,20 +181,40 @@ function RegisterForm({ t, onRegister, onSwitch, onNav }) {
   const [acceptCgu, setAcceptCgu] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [pwdTouched, setPwdTouched] = useState(false)
+  const [emailError, setEmailError] = useState('')
+
+  const checks = pwdChecks(password)
+  const pwdValid = checks.length && checks.upper && checks.special && checks.maxlen
+
+  const EMAIL_RE = /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/
+  const validateEmailFormat = (v) => {
+    if (v && !EMAIL_RE.test(v)) { setEmailError(t('err_email_format')); return false }
+    setEmailError(''); return true
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
+    if (!validateEmailFormat(email)) return
     if (!acceptCgu) { setError(t('err_accept_cgu')); return }
+    if (!pwdValid) { setError(t('err_weak_password')); return }
     setLoading(true)
     try {
       await onRegister({ username, email, password, birthdate, email_opt_in: emailOptIn })
       onNav('/')
     } catch (err) {
-      const msg = err?.detail || ''
-      if (msg.includes('15')) setError(t('err_age_min'))
-      else if (msg.includes('taken') || msg.includes('409')) setError(t('err_already_taken'))
-      else if (msg.includes('8 char') || msg.includes('password')) setError(t('err_weak_password'))
+      const msg = (err?.detail || '').toLowerCase()
+      if (err?.status === 429) setError(t('err_rate_limit'))
+      else if (msg.includes('15') || msg.includes('age')) setError(t('err_age_min'))
+      else if (msg.includes('taken') || err?.status === 409) setError(t('err_already_taken'))
+      else if (msg.includes('disposable')) setError(t('err_disposable_email'))
+      else if (msg.includes('domain') || msg.includes('not valid') || msg.includes('deliverable')) setError(t('err_email_domain'))
+      else if (msg.includes('email')) setError(t('err_email_format'))
+      else if (msg.includes('uppercase')) setError(t('err_pwd_uppercase'))
+      else if (msg.includes('number') || msg.includes('special')) setError(t('err_pwd_special'))
+      else if (msg.includes('72') || msg.includes('bcrypt')) setError(t('err_pwd_too_long'))
+      else if (msg.includes('8 char') || msg.includes('password') || msg.includes('weak')) setError(t('err_weak_password'))
       else setError(t('err_generic'))
     } finally {
       setLoading(false)
@@ -162,17 +232,44 @@ function RegisterForm({ t, onRegister, onSwitch, onNav }) {
       <div>
         <label className="field-label" htmlFor="reg-email">{t('email')}</label>
         <input id="reg-email" className="input" type="email" required
-          value={email} onChange={e => setEmail(e.target.value)}
+          value={email}
+          onChange={e => { setEmail(e.target.value); if (emailError) validateEmailFormat(e.target.value) }}
+          onBlur={e => validateEmailFormat(e.target.value)}
           placeholder="marcel@bistrot.fr" autoComplete="email" />
+        {emailError && <p style={{ color: 'var(--rouge)', fontSize: '0.8rem', margin: '4px 0 0' }}>{emailError}</p>}
       </div>
       <div>
         <label className="field-label" htmlFor="reg-password">{t('password')}</label>
-        <input id="reg-password" className="input" type="password" required minLength={8}
-          value={password} onChange={e => setPassword(e.target.value)}
+        <input id="reg-password" className="input" type="password" required
+          value={password}
+          onChange={e => { setPassword(e.target.value); setPwdTouched(true) }}
+          onBlur={() => setPwdTouched(true)}
           placeholder="••••••••" autoComplete="new-password" />
+        {pwdTouched && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 6 }}>
+            {[
+              { key: 'length', label: t('pwd_req_length') },
+              { key: 'upper',  label: t('pwd_req_upper') },
+              { key: 'special', label: t('pwd_req_special') },
+              { key: 'maxlen', label: t('pwd_req_maxlen') },
+            ].map(r => (
+              <div key={r.key} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.8rem' }}>
+                <span style={{ color: checks[r.key] ? 'var(--felt-deep)' : 'var(--ink-fade)', fontWeight: 700, lineHeight: 1 }}>
+                  {checks[r.key] ? '✓' : '○'}
+                </span>
+                <span style={{ color: checks[r.key] ? 'var(--ink-soft)' : 'var(--ink-fade)' }} className="serif">
+                  {r.label}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
       <div>
         <label className="field-label" htmlFor="reg-birthdate">{t('birthdate')}</label>
+        <p className="serif" style={{ fontSize: '0.8rem', color: 'var(--ink-mute)', margin: '2px 0 4px', fontStyle: 'italic' }}>
+          {t('age_notice')}
+        </p>
         <input id="reg-birthdate" className="input" type="date" required
           value={birthdate} onChange={e => setBirthdate(e.target.value)}
           max={new Date(Date.now() - 15 * 365.25 * 86400000).toISOString().split('T')[0]} />
@@ -181,7 +278,9 @@ function RegisterForm({ t, onRegister, onSwitch, onNav }) {
         <input id="accept-cgu" type="checkbox" required checked={acceptCgu} onChange={e => setAcceptCgu(e.target.checked)}
           style={{ marginTop: 3, flexShrink: 0 }} />
         <label htmlFor="accept-cgu" className="serif" style={{ fontSize: '0.9rem', cursor: 'pointer', lineHeight: 1.4 }}>
-          {t('accept_cgu')} <a href="/privacy" style={{ color: 'var(--rouge)' }}>·</a>
+          {t('accept_terms_pre')}{' '}
+          <Link to="/terms" target="_blank" style={{ color: 'var(--rouge)' }}>{t('accept_terms_link')}</Link>
+          {' '}<span style={{ color: 'var(--rouge)' }}>*</span>
         </label>
       </div>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
@@ -198,6 +297,15 @@ function RegisterForm({ t, onRegister, onSwitch, onNav }) {
       <div className="hr-orn" style={{ margin: '0.5rem 0' }}>
         <span style={{ fontSize: '0.75rem', fontStyle: 'italic' }}>{t('or')}</span>
       </div>
+      <SsoButtons t={t} lang={lang} onGoogleSuccess={async (credentialResponse) => {
+        setError('')
+        try {
+          const result = await onGoogleLogin?.(credentialResponse.credential)
+          onNav(result?.is_new ? '/complete-profile' : '/')
+        } catch {
+          setError(t('err_sso_google'))
+        }
+      }} mode="signup_with" />
       <button type="button" onClick={() => onNav('/')} className="btn btn-ghost" style={{ justifyContent: 'center' }}>
         {t('play_guest')}
       </button>

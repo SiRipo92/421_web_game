@@ -2,6 +2,8 @@
 
 from unittest.mock import AsyncMock, patch
 
+from sqlalchemy import select
+
 
 async def test_register_creates_user(client, make_user):
     """POST /auth/register with valid data returns 201 and an access_token."""
@@ -142,3 +144,199 @@ async def test_me_valid_jwt_unknown_user(client):
     )
     r = await client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 401
+
+
+# ── Register — validation edge cases ─────────────────────────────────────────
+
+async def test_register_password_no_uppercase_returns_422(client, make_user):
+    """Password without uppercase is rejected at the schema level with 422.
+
+    This is the root cause of the registration breakage: the test fixture was
+    using 'testpassword123' (no uppercase) which fails the password_strong
+    validator in RegisterRequest.
+    """
+    data = make_user()
+    data["password"] = "testpassword123"
+    r = await client.post("/auth/register", json=data)
+    assert r.status_code == 422
+    errors = r.json()["detail"]
+    fields = [e["loc"][-1] for e in errors]
+    assert "password" in fields
+
+
+async def test_register_password_too_short_returns_422(client, make_user):
+    """Password under 8 characters returns 422 with 'password' in the error location."""
+    data = make_user()
+    data["password"] = "Ab1"
+    r = await client.post("/auth/register", json=data)
+    assert r.status_code == 422
+    fields = [e["loc"][-1] for e in r.json()["detail"]]
+    assert "password" in fields
+
+
+async def test_register_password_no_digit_or_special_returns_422(client, make_user):
+    """Password with no digit or special character returns 422."""
+    data = make_user()
+    data["password"] = "NoDigitsHere"
+    r = await client.post("/auth/register", json=data)
+    assert r.status_code == 422
+    fields = [e["loc"][-1] for e in r.json()["detail"]]
+    assert "password" in fields
+
+
+async def test_register_username_too_short_returns_422(client, make_user):
+    """Single-character username returns 422."""
+    data = make_user()
+    data["username"] = "x"
+    r = await client.post("/auth/register", json=data)
+    assert r.status_code == 422
+    fields = [e["loc"][-1] for e in r.json()["detail"]]
+    assert "username" in fields
+
+
+async def test_register_username_too_long_returns_422(client, make_user):
+    """Username over 32 characters returns 422."""
+    data = make_user()
+    data["username"] = "a" * 33
+    r = await client.post("/auth/register", json=data)
+    assert r.status_code == 422
+    fields = [e["loc"][-1] for e in r.json()["detail"]]
+    assert "username" in fields
+
+
+async def test_register_invalid_lang_pref_returns_422(client, make_user):
+    """Unsupported lang_pref value returns 422."""
+    data = make_user()
+    data["lang_pref"] = "de"
+    r = await client.post("/auth/register", json=data)
+    assert r.status_code == 422
+
+
+async def test_register_missing_birthdate_returns_422(client, make_user):
+    """Omitting birthdate (required field) returns 422."""
+    data = make_user()
+    del data["birthdate"]
+    r = await client.post("/auth/register", json=data)
+    assert r.status_code == 422
+
+
+# ── Register — response shape and DB side-effects ────────────────────────────
+
+async def test_register_response_shape(client, make_user):
+    """Successful registration returns access_token, token_type, and is_new."""
+    r = await client.post("/auth/register", json=make_user())
+    assert r.status_code == 201
+    body = r.json()
+    assert "access_token" in body
+    assert body["token_type"] == "bearer"
+    assert body["is_new"] is False
+
+
+async def test_register_creates_player_stats(client, make_user):
+    """Registration creates a matching PlayerStats row in the database."""
+    from app.db.base import get_db
+    from app.db.models import PlayerStats, User
+
+    data = make_user()
+    reg = await client.post("/auth/register", json=data)
+    assert reg.status_code == 201
+
+    async for db in get_db():
+        result = await db.execute(select(User).where(User.username == data["username"]))
+        user = result.scalar_one_or_none()
+        assert user is not None
+
+        stats = await db.execute(select(PlayerStats).where(PlayerStats.user_id == user.id))
+        assert stats.scalar_one_or_none() is not None, "PlayerStats row missing after registration"
+        break
+
+
+async def test_register_me_reflects_lang_pref(client, make_user):
+    """lang_pref sent at registration is returned by /auth/me."""
+    data = make_user()
+    data["lang_pref"] = "en"
+    reg = await client.post("/auth/register", json=data)
+    token = reg.json()["access_token"]
+    r = await client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert r.json()["lang_pref"] == "en"
+
+
+async def test_register_email_opt_in_defaults_false(client, make_user):
+    """Omitting email_opt_in defaults to False; /auth/me confirms it."""
+    data = make_user()
+    reg = await client.post("/auth/register", json=data)
+    token = reg.json()["access_token"]
+    r = await client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert r.json()["email_opt_in"] is False
+
+
+# ── Register — duplicate handling ─────────────────────────────────────────────
+
+async def test_register_duplicate_username_returns_409(client, make_user):
+    """Same username, different email → 409."""
+    import uuid
+    first = make_user()
+    await client.post("/auth/register", json=first)
+
+    second = make_user()
+    second["username"] = first["username"]  # same username, new email
+    r = await client.post("/auth/register", json=second)
+    assert r.status_code == 409
+
+
+async def test_register_duplicate_email_returns_409(client, make_user):
+    """Same email, different username → 409."""
+    first = make_user()
+    await client.post("/auth/register", json=first)
+
+    second = make_user()
+    second["email"] = first["email"]  # same email, new username
+    r = await client.post("/auth/register", json=second)
+    assert r.status_code == 409
+
+
+# ── Reset password — new password actually works ──────────────────────────────
+
+async def test_reset_password_new_password_enables_login(client, make_user):
+    """After a successful reset, the new password can be used to log in."""
+    data = make_user()
+    await client.post("/auth/register", json=data)
+
+    captured = []
+
+    async def capture(email, token, lang):
+        captured.append(token)
+
+    with patch("app.routers.auth.send_reset_email", side_effect=capture):
+        await client.post("/auth/forgot-password", json={"email": data["email"]})
+
+    new_password = "NewSecure1pass"
+    await client.post(
+        "/auth/reset-password",
+        json={"token": captured[0], "new_password": new_password},
+    )
+
+    r = await client.post("/auth/login", json={"email": data["email"], "password": new_password})
+    assert r.status_code == 200
+    assert "access_token" in r.json()
+
+
+async def test_reset_password_token_single_use(client, make_user):
+    """A reset token cannot be used a second time."""
+    data = make_user()
+    await client.post("/auth/register", json=data)
+
+    captured = []
+
+    async def capture(email, token, lang):
+        captured.append(token)
+
+    with patch("app.routers.auth.send_reset_email", side_effect=capture):
+        await client.post("/auth/forgot-password", json={"email": data["email"]})
+
+    payload = {"token": captured[0], "new_password": "NewSecure1pass"}
+    r1 = await client.post("/auth/reset-password", json=payload)
+    assert r1.status_code == 200
+
+    r2 = await client.post("/auth/reset-password", json=payload)
+    assert r2.status_code == 400

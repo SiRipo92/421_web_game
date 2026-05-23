@@ -24,7 +24,7 @@ def make_user():
         return {
             "username": f"{prefix}_{uid}",
             "email": f"{prefix}_{uid}@example.com",
-            "password": "testpassword123",
+            "password": "Testpassword1",
             "birthdate": "1990-01-01",
         }
 

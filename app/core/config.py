@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     retention_dry_run: bool = True
     deletion_grace_days: int = 30
     sentry_dsn: str = ""
+    google_client_id: str = ""
+    contact_email: str = ""
 
 
 settings = Settings()
