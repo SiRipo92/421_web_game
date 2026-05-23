@@ -265,9 +265,10 @@ function lobbyError(msg) {
 async function createGame() {
   const name = document.getElementById('nameInput').value.trim();
   if (!name) return lobbyError('Entrez votre nom');
-  const r = await fetch('/api/create').then(r => r.json());
+  const token = localStorage.getItem('token');
+  const r = await fetch(`/api/create${token ? '?token=' + token : ''}`).then(r => r.json());
   gameId = r.game_id;
-  const j = await fetch(`/api/join/${gameId}?name=${encodeURIComponent(name)}`).then(r => r.json());
+  const j = await fetch(`/api/join/${gameId}?name=${encodeURIComponent(name)}${token ? '&token=' + token : ''}`).then(r => r.json());
   if (j.error) return lobbyError(j.error);
   playerId = j.player_id;
   enterWaiting();
@@ -278,7 +279,8 @@ async function joinGame() {
   const code = document.getElementById('joinInput').value.trim();
   if (!name) return lobbyError('Entrez votre nom');
   if (!code) return lobbyError('Entrez un code de partie');
-  const j = await fetch(`/api/join/${code}?name=${encodeURIComponent(name)}`).then(r => r.json());
+  const token = localStorage.getItem('token');
+  const j = await fetch(`/api/join/${code}?name=${encodeURIComponent(name)}${token ? '&token=' + token : ''}`).then(r => r.json());
   if (j.error) return lobbyError(j.error);
   gameId = j.game_id;
   playerId = j.player_id;
@@ -304,7 +306,9 @@ function enterWaiting() {
 }
 
 function connectWS() {
-  ws = new WebSocket(`ws://${location.host}/ws/${gameId}/${playerId}`);
+  const token = localStorage.getItem('token');
+  const wsUrl = `ws://${location.host}/ws/${gameId}/${playerId}${token ? '?token=' + token : ''}`;
+  ws = new WebSocket(wsUrl);
   ws.onmessage = e => handleState(JSON.parse(e.data));
   ws.onclose   = () => setTimeout(connectWS, 2000);
 }

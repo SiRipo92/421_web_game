@@ -33,6 +33,9 @@ htmlcov/
 # Local tools
 .claude/
 
+# Local rules notes (cahier des charges scratch)
+cdc.txt
+
 # macOS
 .DS_Store
 
@@ -41,3 +44,8 @@ htmlcov/
 .idea/
 *.swp
 *.swo
+
+# Frontend
+frontend/node_modules/
+static/dist/
+prototype/
