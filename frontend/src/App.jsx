@@ -14,7 +14,9 @@ import { Rankings } from './pages/Rankings.jsx'
 import { Profile } from './pages/Profile.jsx'
 import { HowToPlay } from './pages/HowToPlay.jsx'
 import { Privacy } from './pages/Privacy.jsx'
+import { TermsAndConditions } from './pages/TermsAndConditions.jsx'
 import { CompleteProfile } from './pages/CompleteProfile.jsx'
+import { Contact } from './pages/Contact.jsx'
 
 export default function App() {
   const { user, token, loading, login, register, googleLogin, refreshUser, logout } = useAuth()
@@ -48,7 +50,9 @@ export default function App() {
             <Route path="/profile" element={<Profile user={user} token={token} onRefreshUser={refreshUser} onLogout={logout} />} />
             <Route path="/how-to-play" element={<HowToPlay />} />
             <Route path="/privacy" element={<Privacy />} />
+            <Route path="/terms" element={<TermsAndConditions />} />
             <Route path="/complete-profile" element={<CompleteProfile user={user} token={token} onRefreshUser={refreshUser} />} />
+            <Route path="/contact" element={<Contact />} />
           </Routes>
         </PageLayout>
       } />

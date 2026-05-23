@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { useLang } from '../context/LangContext.jsx'
 
 export function Privacy() {
@@ -11,7 +12,7 @@ export function Privacy() {
 
       <div className="ticket" style={{ padding: '2rem', lineHeight: 1.7 }}>
         <Section title="1. Responsable du traitement">
-          <p>421 Bistro — contact : ripochesierra@gmail.com</p>
+          <p>421 Bistro</p>
         </Section>
         <Section title="2. Données collectées">
           <ul>
@@ -34,14 +35,14 @@ export function Privacy() {
         <Section title="5. Vos droits">
           <p>
             Conformément au RGPD, vous disposez d'un droit d'accès, de rectification, d'effacement et de portabilité de vos données.
-            Pour exercer ces droits, utilisez le <a href="/#gdpr-contact" style={{ color: 'var(--rouge)' }}>formulaire de contact</a> en bas de page.
+            Pour exercer ces droits, utilisez le <Link to="/contact" style={{ color: 'var(--rouge)' }}>formulaire de contact</Link> en bas de page.
           </p>
         </Section>
         <Section title="6. Cookies">
           <p>Aucun cookie tiers. Seul un token d'authentification (localStorage) est utilisé pour maintenir votre session.</p>
         </Section>
         <Section title="7. Contact DPO">
-          <p>Pour toute question relative à vos données : ripochesierra@gmail.com</p>
+          <p>Pour toute question relative à vos données, utilisez le <Link to="/contact" style={{ color: 'var(--rouge)' }}>formulaire de contact</Link>.</p>
         </Section>
       </div>
     </div>

@@ -24,6 +24,7 @@ from app.db.base import engine
 from app.db.models import Base  # noqa: F401
 from app.game.ws import router as game_router
 from app.routers.auth import router as auth_router
+from app.routers.contact import router as contact_router
 from app.routers.rankings import router as rankings_router
 from app.routers.rooms import router as rooms_router
 
@@ -114,6 +115,7 @@ async def healthz():
 
 # game_router last: it contains GET /{full_path:path} which would shadow all routes below it
 app.include_router(auth_router)
+app.include_router(contact_router)
 app.include_router(rankings_router)
 app.include_router(rooms_router)
 app.include_router(game_router)
