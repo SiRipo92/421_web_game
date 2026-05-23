@@ -437,6 +437,105 @@ F. **Infrastructure**
 - G35 (IP tracking) for the `ip_at_send` audit column.
 - New `docs/MODERATION_POLICY.md` to back the UI rationale.
 
+### G36. Chat anti-spam / rate-limiter
+**Why:** Without active rate-limiting, a single user can flood the chat with thousands of messages — burning the moderator AI's API budget, blowing past Claude Haiku rate limits, and drowning the room. This complements G34's content classifier: G34 says "this message isn't allowed", G36 says "you can't send 50 messages in 5 seconds, no matter how clean each one is."
+
+**Scope:**
+
+A. **Server-side token bucket** (new `app/services/chat_ratelimit.py`)
+- Per `(user_id, game_id)` bucket: capacity 5 messages, refill 1 token / 2 s. Burst-friendly but caps sustained rate at 30 msg/min.
+- Per `user_id` global bucket (across all rooms): capacity 8 messages, refill 1 token / 1 s. Stops a single user spamming N rooms at once.
+- Buckets live in-process (no Redis dependency for v1); a memory check before each `chat_send` action. Lost on restart, which is fine — spammers are mostly real-time.
+- Hard length cap: 280 chars per message (enforced before calling G34's classifier — saves API calls on copy-paste novella spam).
+- Identical-message dedupe: same `(user_id, sha256(body))` within 60 s → silently drop with `{type: "chat_blocked", reason: "duplicate"}`.
+
+B. **Escalating cooldown**
+- 1st bucket trip in 5 min → 10 s cooldown, soft toast.
+- 2nd trip → 60 s cooldown, harsher toast.
+- 3rd trip → 5 min session mute + 1 strike against G34's strike system.
+- 4th trip → temp chat ban per G33 threshold review.
+
+C. **Frontend UX**
+- Chat input shows a small cooldown indicator (a thin shrinking bar above the input) when the user is rate-limited; submit button disabled.
+- Toast wording stays polite and rule-clear: « Doucement ! Vous pouvez envoyer un message toutes les X secondes. »
+- A user near their bucket limit (≤ 2 tokens left) sees a subtle color shift on the input border — no toast, just a warning.
+
+D. **Tests**
+- Bucket fills, drains, refills correctly under simulated time.
+- 6 rapid messages → 5 broadcast, 6th rejected with `rate_limited`.
+- Identical messages dedupe within window, separate after.
+- Cross-room cap: spamming room A counts against the user's global bucket → room B is also throttled.
+- Escalation: 3 trips in 5 min → session mute fires.
+
+**Acceptance:** Loading the chat with a `for (i=0; i<100; i++) ws.send(...)` script results in 5 messages broadcast then a clear cooldown UX; the room stays usable for everyone else.
+
+**Dependencies:** Item 8 (chat) — same ship train as G34. Strike-count interaction documented under G34.
+
+### G37. Peer-reporting + AI triage automation (admin-effort-minimal)
+**Why:** Two problems to solve together. (1) The host isn't always the offended party — any player in the room should be able to flag a single message for review. (2) Manually reviewing every report does not scale and is the explicit thing you want to avoid. So: any user reports → Claude Haiku triages the report against the message + nearby context → applies the verdict autonomously in 90%+ of cases → only ambiguous and high-severity (legal-review) cases land in a human queue. The reporter and reported user both get clear status updates without admin involvement. Your inbox should only see the cases AI can't resolve.
+
+**Scope:**
+
+A. **Peer-report UI**
+- Hover (desktop) / long-press (mobile) on any chat message reveals a ⚠ icon.
+- Click opens a modal with the same category dropdown as G33 (`harassment | hate_speech | sexual | csam_suspect | spam | doxxing | other`) + 140-char reason textarea.
+- One report per `(reporter, message)` (frontend disables the icon for already-reported messages; backend enforces uniqueness).
+- After submit: « Merci. Votre signalement a été reçu et sera examiné. » No verdict shown to reporter (privacy).
+- The reported user gets a notification (via G27) **only once a verdict is applied**, not at report time — prevents tip-off.
+
+B. **MessageReport table + AI triage job**
+- New `MessageReport(id, reporter_user_id, reported_user_id, message_id, room_code, category, reason_text, ip_at_report, created_at, ai_verdict, ai_confidence, ai_rationale, ai_triaged_at, human_verdict, human_verdict_at, human_verdict_by, status)`.
+- `status` ∈ {`pending_ai`, `auto_resolved`, `pending_human`, `human_resolved`, `appealed`, `appeal_resolved`}.
+- On report submit: row inserted with `status="pending_ai"`, background task `triage_report(report_id)` scheduled.
+- Triage prompt to Claude Haiku: reads the reported message + 5 messages before/after for context + reporter's category + reason + reported user's prior verdict count.
+- Haiku returns JSON: `{verdict, confidence, rationale, recommended_action}` where verdict ∈ {`dismiss`, `warn`, `temp_mute_30m`, `temp_mute_24h`, `escalate_chat_ban`, `human_review`}.
+
+C. **Auto-actions (no admin in the loop)**
+- `dismiss` (confidence ≥ 0.7) — `status = auto_resolved`, log, done. Reporter sees nothing more; reported sees nothing. If 3 consecutive dismisses on the same reporter in 30 d, their reports get `low_reliability=true` and de-prioritize in any human queue (reduces brigade-reporting).
+- `warn` — auto-warn the reported user via G27 ("Un message a été signalé comme [category]. Merci de respecter les règles."). No mute. `status = auto_resolved`.
+- `temp_mute_30m` / `temp_mute_24h` — set `User.chat_banned_until = now + N`. Notify reported user with reason. `status = auto_resolved`.
+- `escalate_chat_ban` — apply G33 auto-escalate (chat-ban perm or 365d). Notify. `status = auto_resolved` + `legal_review=true` for `csam_suspect`.
+- `human_review` — `status = pending_human`. Lands in the moderator dashboard `/admin/moderation`. **This is the only path that touches you.**
+
+D. **Two confidence rails**
+- Triage only auto-applies a verdict when `ai_confidence ≥ 0.75` for non-critical actions (warn / temp_mute_30m) and `≥ 0.85` for severe actions (temp_mute_24h / escalate_chat_ban). Below threshold → falls through to `human_review`.
+- Critical categories (`csam_suspect`, `doxxing` with named victim) **always** go to `human_review` even with high confidence, because the legal consequences of an AI false-positive are large.
+
+E. **Self-tuning feedback loop (optional v2)**
+- When an admin overturns an auto-resolved verdict on appeal, the system records a `triage_correction` row.
+- Nightly job: if the corrections show systematic over- or under-blocking by category, bump the per-category confidence threshold up or down by 0.05 (bounded between 0.6 and 0.95). Logs the change so you can audit.
+- This is optional for v1 — ships as a manual `ANTHROPIC_CONFIDENCE_THRESHOLD_<CATEGORY>` env override if the auto-tune feels too magical.
+
+F. **Reporter accountability (anti-abuse)**
+- 5 dismissed reports in 30 d → reporter's badge `low_reliability=true` (used to de-rank their reports in the human queue, but they can still report).
+- 3 confirmed-false reports (admin-overturned dismisses) → soft-warn the reporter via G27.
+- 5 confirmed-false reports → 24 h report-cooldown on that reporter.
+- Goal: the social cost of false reports stays non-zero without chilling legitimate ones.
+
+G. **Daily admin digest (optional but recommended)**
+- Nightly Resend email to all `User.role IN (moderator, admin)`: "Last 24h: X reports received, Y auto-resolved (% breakdown by verdict), Z pending human review, W appeals awaiting." Link to dashboard.
+- Lets you stay on top of the queue without polling the dashboard.
+
+H. **Tests**
+- Reporter submits → row created with `pending_ai` → background task runs → row updates to `auto_resolved` with verdict.
+- Critical category (`csam_suspect`) → always `pending_human` regardless of confidence.
+- Low confidence on warn-tier verdict → falls through to `pending_human`.
+- 5 dismisses on same reporter → `low_reliability` flag set.
+- Notification fires only after verdict, never on submit.
+
+**Acceptance & target metrics:**
+- ≥ 90% of reports auto-resolved without admin action.
+- Median time-to-verdict ≤ 30 s (AI triage latency).
+- Zero false negatives on the `csam_suspect` / `doxxing` paths (those always escalate to human).
+- Admin opens dashboard once a day, sees ≤ 5 items needing attention in a typical week of 1000 reports.
+
+**Dependencies:**
+- Item 8 (chat) for `message_id` foreign key.
+- G33 (chat-ban infrastructure) for verdict application.
+- G27 (notifications) for reporter and reported user notifications.
+- G34 (Claude Haiku integration) — reuses the same client setup.
+- Optional G35 for `ip_at_report`.
+
 ### G35. IP-based ban enforcement (room + global)
 **Why:** A banned user can open a private browsing window, create a second account, and rejoin the same room within seconds. IP-based enforcement closes that loop without turning the platform into a privacy nightmare.
 
@@ -481,7 +580,7 @@ D. **Tests**
 - Persistence: `ChatMessage` table (game_id, user_id, body, sent_at, moderation_verdict). Per-game retention (purge on game end).
 - Frontend: chat panel in `Game.jsx` toggle; basic message UI; redaction display for blocked messages.
 **Acceptance:** Players can chat; obviously toxic messages are blocked with a placeholder; moderator dashboard shows incidents.
-**Dependencies:** G34 (AI moderation) MUST ship alongside this, not after — chat without moderation is a liability. Item 9 (enforcement system) handles repeat-offender behavior; G33 is the room-host-driven realization of that.
+**Dependencies:** G34 (AI moderation), G36 (rate-limiter), G37 (peer-reporting) ALL ship alongside this — chat without those is a liability. Item 9 (enforcement system) handles repeat-offender behavior; G33 is the room-host-driven realization of that.
 
 ### 9. Player enforcement (warn / temp-ban / perm-ban)
 **Why:** Repeated chat violations or game-rule abuse need consequences without ops doing it by hand.
