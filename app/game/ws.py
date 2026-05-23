@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import random
+import time
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -246,10 +247,12 @@ async def _afk_tiebreak_timer(game: Game, player_id: str, game_id: str):
 def _schedule_afk(game: Game, game_id: str):
     """Start AFK timers for the players who need to act in the current phase."""
     if not game.afk_bot:
+        game.afk_started_at = None
         return
     if game.phase == GamePhase.INITIAL_ROLL:
         # Each player needs to roll once; one timer per pending player. Skip slots
         # that already have a live task (covers both first-roll and tie re-rolls).
+        game.afk_started_at = None
         for p in game.players:
             if game.initial_rolls.get(p.id) is not None:
                 continue
@@ -262,19 +265,24 @@ def _schedule_afk(game: Game, game_id: str):
     if game.phase == GamePhase.TIEBREAK and game.tiebreak:
         next_pid = game.tiebreak.get("next_pid")
         if not next_pid:
+            game.afk_started_at = None
             return
         _cancel_afk(game, next_pid)
         task = asyncio.create_task(_afk_tiebreak_timer(game, next_pid, game_id))
         game.afk_tasks[next_pid] = task
+        game.afk_started_at = int(time.time() * 1000)
         return
     if game.phase not in (GamePhase.CHARGE, GamePhase.DECHARGE):
+        game.afk_started_at = None
         return
     current = game.current_player()
     if not current:
+        game.afk_started_at = None
         return
     _cancel_afk(game, current.id)
     task = asyncio.create_task(_afk_timer(game, current.id, game_id))
     game.afk_tasks[current.id] = task
+    game.afk_started_at = int(time.time() * 1000)
 
 
 @router.post("/api/create")

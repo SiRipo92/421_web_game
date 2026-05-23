@@ -4,8 +4,8 @@ import pytest
 from jose import jwt
 
 from app.core.config import settings
-from app.game.logic import Player, PlayerTurn
-from app.game.ws import _bot_take_turn, _resolve_user_from_token
+from app.game.logic import Game, GamePhase, Player, PlayerTurn
+from app.game.ws import _bot_take_turn, _resolve_user_from_token, _schedule_afk
 
 
 class TestBotTakeTurn:
@@ -34,6 +34,69 @@ class TestBotTakeTurn:
         assert p.turn.combo != ""
         assert p.turn.rank > 0
         assert p.turn.fiches > 0
+
+
+class TestScheduleAfkStartedAt:
+    """G1: _schedule_afk stamps game.afk_started_at for per-turn phases only."""
+
+    def _make_game(self, phase: GamePhase) -> Game:
+        p1 = Player(id="p1", name="Alice")
+        p1.turn = PlayerTurn()
+        p2 = Player(id="p2", name="Bob")
+        p2.turn = PlayerTurn()
+        return Game(
+            id="TEST1234",
+            players=[p1, p2],
+            phase=phase,
+            current_index=0,
+            afk_seconds=45,
+            afk_bot=True,
+        )
+
+    async def test_charge_phase_stamps_started_at(self):
+        """CHARGE → afk_started_at gets a positive epoch-ms timestamp."""
+        game = self._make_game(GamePhase.CHARGE)
+        _schedule_afk(game, game.id)
+        assert game.afk_started_at is not None
+        assert game.afk_started_at > 0
+        for t in game.afk_tasks.values():
+            t.cancel()
+
+    async def test_decharge_phase_stamps_started_at(self):
+        game = self._make_game(GamePhase.DECHARGE)
+        _schedule_afk(game, game.id)
+        assert game.afk_started_at is not None
+        for t in game.afk_tasks.values():
+            t.cancel()
+
+    async def test_initial_roll_does_not_stamp_started_at(self):
+        """INITIAL_ROLL is per-player; the single shared field stays None."""
+        game = self._make_game(GamePhase.INITIAL_ROLL)
+        _schedule_afk(game, game.id)
+        assert game.afk_started_at is None
+        for t in game.afk_tasks.values():
+            t.cancel()
+
+    async def test_finished_phase_clears_started_at(self):
+        game = self._make_game(GamePhase.CHARGE)
+        _schedule_afk(game, game.id)
+        assert game.afk_started_at is not None
+        for t in game.afk_tasks.values():
+            t.cancel()
+        game.afk_tasks.clear()
+        game.phase = GamePhase.FINISHED
+        _schedule_afk(game, game.id)
+        assert game.afk_started_at is None
+
+    async def test_afk_bot_disabled_clears_started_at(self):
+        game = self._make_game(GamePhase.CHARGE)
+        _schedule_afk(game, game.id)
+        for t in game.afk_tasks.values():
+            t.cancel()
+        game.afk_tasks.clear()
+        game.afk_bot = False
+        _schedule_afk(game, game.id)
+        assert game.afk_started_at is None
 
 
 class TestResolveUserFromToken:

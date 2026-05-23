@@ -279,6 +279,11 @@ export function Game({ token }) {
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
                 maxWidth: '90%',
               }}>
+                {/* G5: badge legend — always visible while the player can choose
+                    which dice to lock, so the on-die ✓/↺ icons read at a glance. */}
+                {isMyTurn && hasRolled && !myTurn?.done && (myTurn?.rolls_left ?? 0) > 0 && (
+                  <KeepLegend t={t} />
+                )}
                 <div style={{ display: 'flex', gap: 14 }}>
                   {(myTurn?.dice || [0, 0, 0]).map((v, i) => (
                     <Die
@@ -298,21 +303,6 @@ export function Game({ token }) {
                     textShadow: '0 2px 8px rgba(0,0,0,0.5)',
                   }} className={myTurn.combo === '421' ? 'glow-421' : ''}>
                     {myTurn.combo} · <span className="mono">{myTurn.fiches}f</span>
-                  </div>
-                )}
-                {isMyTurn && hasRolled && !myTurn?.done && (myTurn?.rolls_left ?? 0) > 0 && (
-                  <div className="serif" style={{
-                    fontSize: '0.9rem',
-                    color: 'var(--brass-soft)',
-                    fontStyle: 'italic',
-                    textShadow: '0 1px 3px rgba(0,0,0,0.9)',
-                    padding: '0.4rem 0.75rem',
-                    background: 'rgba(0,0,0,0.5)',
-                    borderRadius: 4,
-                    textAlign: 'center',
-                    border: '1px solid rgba(212,171,103,0.3)',
-                  }}>
-                    💡 {t('dice_keep_hint')}
                   </div>
                 )}
               </div>
@@ -355,7 +345,10 @@ export function Game({ token }) {
                 : <span>{t('waiting_for')} <span className="mono pulse-soft">…</span></span>}
             </div>
             {showAfkBar && (
-              <AfkBar key={state.current_player_id} total={state.room.afk_seconds} />
+              <AfkBar
+                total={state.room.afk_seconds}
+                startedAtMs={state.afk_started_at}
+              />
             )}
           </div>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -368,7 +361,12 @@ export function Game({ token }) {
               maxThrows={state.max_throws ?? 3}
               bankRule={state.room?.bank_rule}
             />
-            <RollDots rollsLeft={myTurn?.rolls_left ?? 3} />
+            {/* G4: hide throw counter when the rhythm is locked at 1 (no choice
+                to display). Keep showing for the starter before they've set the
+                rhythm so they can see how many throws they have available. */}
+            {(state.max_throws > 1 || (isStarter && !hasRolled)) && (
+              <RollDots rollsLeft={myTurn?.rolls_left ?? 3} />
+            )}
             {isMyTurn && (
               <>
                 <button
@@ -420,7 +418,7 @@ export function Game({ token }) {
         </div>
         {logOpen && (
           <div ref={logRef} style={{ flex: 1, overflowY: 'auto', padding: '1rem 1.4rem' }}>
-            {formatLogEntries(state, t).map((text, i) => (
+            {formatLogEntries(state, t, me?.name).map((text, i) => (
               <div key={i} style={{
                 display: 'grid', gridTemplateColumns: '1fr',
                 padding: '0.45rem 0', borderBottom: '1px dashed var(--rule)',
@@ -816,14 +814,73 @@ function PisteSeat({ p, active, isSelf, x, y }) {
   )
 }
 
-function AfkBar({ total }) {
-  const [remaining, setRemaining] = useState(total)
+function KeepLegend({ t }) {
+  // G5: two-chip legend showing what the ✓ and ↺ corner badges mean. Sits just
+  // above the dice cluster so the player sees what each state will do BEFORE
+  // they click. Kept compact — single line, fits inside the felt at 90% maxWidth.
+  return (
+    <div
+      role="note"
+      aria-label={t('dice_keep_hint')}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        padding: '0.35rem 0.7rem',
+        background: 'rgba(0,0,0,0.55)',
+        border: '1px solid rgba(212,171,103,0.3)',
+        borderRadius: 4,
+        fontSize: '0.78rem',
+        color: 'var(--paper-deep)',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      <Chip bg="var(--brass)" label="✓" />
+      <span>{t('dice_legend_keep')}</span>
+      <span style={{ opacity: 0.45 }}>·</span>
+      <Chip bg="var(--rouge)" label="↺" />
+      <span>{t('dice_legend_reroll')}</span>
+    </div>
+  )
+}
+
+function Chip({ bg, label }) {
+  return (
+    <span
+      aria-hidden="true"
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 18,
+        height: 18,
+        borderRadius: '50%',
+        background: bg,
+        color: 'var(--paper)',
+        fontFamily: 'var(--mono)',
+        fontSize: '0.7rem',
+        fontWeight: 700,
+        border: '1.5px solid var(--paper-deep)',
+      }}
+    >
+      {label}
+    </span>
+  )
+}
+
+function AfkBar({ total, startedAtMs }) {
+  // G1: derive remaining time from the server-stamped `afk_started_at`. Every
+  // backend action (roll/keep/done) re-stamps it, so the bar visually resets
+  // the moment the server resets the timer. The 1 s tick is purely for the
+  // smooth countdown animation between server state broadcasts.
+  const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
-    const id = setInterval(() => {
-      setRemaining(r => (r > 0 ? r - 1 : 0))
-    }, 1000)
+    const id = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(id)
   }, [])
+  if (!startedAtMs) return null
+  const elapsed = Math.floor((now - startedAtMs) / 1000)
+  const remaining = Math.max(0, total - elapsed)
   if (remaining <= 0) return null
   return (
     <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1055,17 +1112,54 @@ function RollDots({ rollsLeft }) {
   )
 }
 
-function formatLogEntries(state, t) {
+function formatLogEntries(state, t, myName) {
   const events = state.log_events
   const raw = state.log || []
   if (events?.length) {
-    return [...events].reverse().map((ev, i) => {
-      if (!ev?.key) return raw[raw.length - 1 - i] ?? ''
-      const { key, ...params } = ev
-      if (params.dice && Array.isArray(params.dice)) params.dice = `[${params.dice.join('-')}]`
-      return t(key, params) || raw[raw.length - 1 - i] || ''
-    })
+    return [...events].reverse().map((ev, i) =>
+      renderLogEvent(ev, t, myName) || raw[raw.length - 1 - i] || '',
+    )
   }
   return [...raw].reverse()
+}
+
+// G6: swap to a second-person variant whenever the viewer is the subject of the
+// event. Helper tries the most specific `you_*` key first; falls back to the
+// neutral third-person key when no personalized variant exists.
+function renderLogEvent(ev, t, myName) {
+  if (!ev?.key) return null
+  const { key, ...params } = ev
+  if (params.dice && Array.isArray(params.dice)) params.dice = `[${params.dice.join('-')}]`
+
+  const tryYou = (suffix) => {
+    const youKey = `you_${suffix}`
+    const out = t(youKey, params)
+    return out && out !== youKey ? out : null
+  }
+
+  // Decharge has two distinct viewer perspectives.
+  if (key === 'log_decharge_gives' && myName) {
+    if (params.winner === myName) {
+      const out = tryYou('decharge_gives_winner')
+      if (out) return out
+    } else if (params.loser === myName) {
+      const out = tryYou('decharge_gives_loser')
+      if (out) return out
+    }
+  }
+
+  // Starter-tagged events (round start, new set): viewer is the donneur.
+  if ((key === 'log_round_start' || key === 'log_new_set') && params.starter === myName) {
+    const out = tryYou(key.slice(4))
+    if (out) return out
+  }
+
+  // Generic name-tagged events.
+  if (params.name && params.name === myName) {
+    const out = tryYou(key.slice(4))
+    if (out) return out
+  }
+
+  return t(key, params)
 }
 
