@@ -152,12 +152,12 @@ export function Game({ token }) {
             />
           )}
           <div style={{ position: 'relative', width: 'min(600px, 70vh, 92%)', aspectRatio: '1/1' }}>
-            <div className="piste" style={{ position: 'absolute', inset: 0 }} role="region" aria-label="Tapis de jeu">
+            <div className="piste" style={{ position: 'absolute', inset: 0 }} role="region" aria-label="Piste de jeu">
               <div style={{
                 position: 'absolute', top: '12%', left: '50%', transform: 'translateX(-50%)',
                 fontFamily: 'var(--display)', fontStyle: 'italic',
                 color: 'var(--paper-deep)', fontSize: '1rem', letterSpacing: '0.16em', whiteSpace: 'nowrap',
-              }} aria-hidden="true">❦  L E   T A P I S  ❦</div>
+              }} aria-hidden="true">❦  L A   P I S T E  ❦</div>
 
               {/* Dice in center */}
               <div style={{

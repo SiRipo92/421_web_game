@@ -42,7 +42,7 @@ export function CreateRoom({ token }) {
       </button>
       <div className="eyebrow">Nouvelle table</div>
       <h1 className="display" style={{ fontSize: 'clamp(2.4rem, 5vw, 3.2rem)', margin: '0.4rem 0 0.5rem' }}>
-        Préparez le <em style={{ color: 'var(--rouge)' }}>tapis</em>.
+        Préparez la <em style={{ color: 'var(--rouge)' }}>piste</em>.
       </h1>
       <p className="note">Choisissez vos règles. Les habitués savent que la maison ne tranche pas — c'est vous qui décidez.</p>
 

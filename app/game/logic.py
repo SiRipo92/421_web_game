@@ -289,7 +289,7 @@ def _do_start(game: Game):
     _log(
         game,
         "log_round_start",
-        f"Round {game.round_num} – Charge · {starter_name} donne le rythme",
+        f"Tour {game.round_num} – Charge · {starter_name} donne le rythme",
         num=game.round_num,
         phase="charge",
         starter=starter_name,
@@ -326,7 +326,7 @@ def _start_new_set(game: Game, set_loser_id: str):
     _log(
         game,
         "log_new_set",
-        f"Nouveau set · Round {game.round_num} · {loser_name} donne le rythme",
+        f"Nouvelle manche · Tour {game.round_num} · {loser_name} donne le rythme",
         num=game.round_num,
         starter=loser_name,
     )
@@ -416,14 +416,14 @@ async def _resolve_tiebreak(game: Game) -> None:
         _log(
             game,
             "log_charge_takes",
-            f"{loser.name} (départage) prend {taken} jeton(s) · Pool: {game.pool}",
+            f"{loser.name} (départage) prend {taken} jeton(s) · Banque : {game.pool}",
             name=loser.name,
             n=taken,
             pool=game.pool,
         )
         if game.pool == 0:
             game.phase = GamePhase.DECHARGE
-            _log(game, "log_pool_empty", "Pool vide → Décharge !")
+            _log(game, "log_pool_empty", "Banque vide → Décharge !")
         else:
             game.phase = GamePhase.CHARGE
     else:  # DECHARGE
@@ -459,7 +459,7 @@ async def _finalize_cycle(game: Game, next_starter_id: Optional[str]) -> None:
                 _log(
                     game,
                     "log_player_sits_out",
-                    f"{p.name} n'a plus de fiches — pause jusqu'au prochain match.",
+                    f"{p.name} n'a plus de fiches — pause jusqu'à la prochaine manche.",
                     name=p.name,
                 )
 
@@ -484,7 +484,7 @@ async def _finalize_cycle(game: Game, next_starter_id: Optional[str]) -> None:
             _log(
                 game,
                 "log_round_point",
-                f"{manche.name} prend un point de round ({rp_count}).",
+                f"{manche.name} prend un point de partie ({rp_count}).",
                 name=manche.name,
                 count=rp_count,
             )
@@ -507,7 +507,7 @@ async def _finalize_cycle(game: Game, next_starter_id: Optional[str]) -> None:
     _log(
         game,
         "log_round_start",
-        f"Round {game.round_num} · {starter_name} donne le rythme",
+        f"Tour {game.round_num} · {starter_name} donne le rythme",
         num=game.round_num,
         phase=game.phase.value,
         starter=starter_name,
@@ -604,14 +604,14 @@ async def _resolve_round(game: Game):
         _log(
             game,
             "log_charge_takes",
-            f"{loser.name} prend {taken} jeton(s) · Pool: {game.pool}",
+            f"{loser.name} prend {taken} jeton(s) · Banque : {game.pool}",
             name=loser.name,
             n=taken,
             pool=game.pool,
         )
         if game.pool == 0:
             game.phase = GamePhase.DECHARGE
-            _log(game, "log_pool_empty", "Pool vide → Décharge !")
+            _log(game, "log_pool_empty", "Banque vide → Décharge !")
     else:  # DECHARGE
         # Multiple winners → no transfer this cycle (tied-winner tiebreak is the
         # next commit). Single winner → standard transfer.

@@ -114,6 +114,47 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 - Options: (a) accept it as dev-only noise and document; (b) move WS open/close out of useEffect into a useRef-guarded singleton per (gameId, playerId, token) tuple; (c) keep StrictMode but make the WS connect lazy + idempotent.
 - Doesn't affect production behavior, so low-priority.
 
+### G19. TopBar responsive layout for 641–835px breakpoint
+**Why:** Reported. The TopBar's content (logo, nav links, lang/theme toggles, user menu) gets pushed off-screen to the right between roughly 641px and 835px wide. Mobile burger kicks in below 640px, desktop layout above ~835px, but the in-between range has no specific treatment.
+**Scope:**
+- Add a media-query band (or use a tighter desktop breakpoint, e.g. `@media (max-width: 900px)`) that:
+  - Collapses the lang/theme toggles into a single dropdown OR moves them into the burger drawer at that width.
+  - Shortens or icon-only the nav link labels.
+  - Or: simply lower the burger threshold from 640 to ~860 so all narrow widths use the drawer.
+- Verify on 641 / 720 / 768 / 834 / 900 px.
+
+### G20. Game-screen bottom bar polish + prominent quit
+**Why:** Reported. The action-bar text under the piste is small and hard to scan during play; the « Quitter » link is tiny and unremarkable. The host's ⚙ Room rules pill blends in.
+**Scope:**
+- Bump font-sizes in the action bar (eyebrow + serif lines) by ~15–20%.
+- Make the « Quitter » a small but clear button with an icon (door / exit) instead of a tiny link.
+- Make the ⚙ Room rules pill visibly button-shaped for the host.
+- Possibly split the action bar into a fixed two-row layout on narrow screens so the buttons don't wrap into the player's status text.
+
+### G21. Live play commentary + score-to-beat banner
+**Why:** Reported. Even when it's not your turn, you should know what's happening: who's playing, what they rolled, what the highest score to beat is, how many chips are in play. After your own turn you want a friendly summary ("You just lost the manche. You took 3 chips from Player_1. Better luck next time. Your turn to start!").
+**Scope:**
+- New persistent panel (left of piste, see G14) that shows:
+  - "Score à battre : 421 (8 fiches) — Sierra · 2 lancers utilisés"
+  - "Banque : N · Pénalité en jeu : Mf"
+  - "Vous : votre dernier coup, votre rang dans le tour de table"
+- After each cycle, a flash notification ("toast" style, bottom-center or piste-overlay) with a personalized French/English message:
+  - "Vous avez perdu la manche · vous prenez 3 jetons de la banque. À vous le rythme !"
+  - "Vous avez gagné le tour · Player_1 reçoit 2 jetons."
+- Tone: playful, "bistrot" voice. Include the « Bonne chance » / « Tournée du patron » type flourishes.
+- Use `state.current_round_plays` + `state.last_round_plays` to build the score-to-beat and player-rank info.
+- Personalization rule: when a `params.name` matches the viewer's player name, swap to "vous"/"you".
+- Toast should auto-dismiss after ~5s; can be paused on hover.
+- This subsumes part of G6 ("Vous/You" personalization) and G10 (commentary ticker).
+
+### G22. French vocabulary review — manche / partie / banque / piste
+**Why:** Reported. The French i18n was mixing English-ish vocabulary ("match", "round", "pool", "Tapis") with proper French terms. The proper mapping is:
+- "match" (English) → « manche » (féminin: une manche)
+- "round" (English) → « partie » (féminin: une partie)
+- "pool" (English) → « banque » (la banque)
+- "Le Tapis" → « La piste »
+**Scope:** Full grep + replace across `i18n/index.js` (FR section), `Game.jsx`, `CreateRoom.jsx`, backend French log strings in `logic.py` / `ws.py`. **Status:** Landed in this batch's vocab commit; remaining cleanup is mostly docstring/comment normalization (R3 follow-up).
+
 ### G18. Round-point persistence trigger
 **Why:** With no auto-game-end, `_persist_game` only fires for the lone-survivor edge case. Logged-in users' round points accumulated in a session are lost when the room dissolves.
 **Scope:** Trigger persistence (1) when a player leaves the room mid-game, (2) when the room dissolves (last player leaves or host migrates). Write `round_points[pid]` to `GamePlayer.round_points` and update `PlayerStats`.
