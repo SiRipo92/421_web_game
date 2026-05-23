@@ -163,6 +163,19 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 - Frontend: small kick button next to each player strip when (viewer is host) AND (target's connected state has been false for ≥ N seconds OR the bot has played their last cycle). Confirm modal.
 - Log: `log_player_kicked` event ("X a été expulsé par l'hôte.").
 
+### G32. Host: ban player from this room
+**Why:** G24 lets the host kick a disruptive player, but the kick is one-shot — nothing prevents them from rejoining a second later. The host needs the option to permanently exclude a specific user from this specific room.
+**Scope:**
+- Backend: new WS action `ban {target_id, reason?, report?: bool}` (host-only, can't ban self). Behaves like `kick` (drops player from `players`, closes their WS, runs the same cleanup) AND records the ban.
+- New table `RoomBan(id, game_code, banned_user_id, banned_ip, banned_by_user_id, reason, report, created_at)`. Indexed on `(game_code, banned_user_id)` and `(game_code, banned_ip)`.
+- WS join handler: before accepting a connection, look up `RoomBan` for `(game_code, joining_user_id)` AND `(game_code, joining_ip)`. If either matches an active row → send `{type: "join_rejected", reason: "banned"}` and close.
+- Frontend: in the per-player controls (next to G24's ✕ kick), add a 🚫 ban button (host-only). ConfirmModal explains the consequence — « Cette personne ne pourra plus rejoindre cette partie. » Optional checkbox: « Signaler ce joueur » triggers the G33 escalation in the same flow.
+- KickedOverlay variant for banned-rejoin attempts: « Vous avez été banni de cette partie. »
+- New `log_player_banned` journal event.
+- Backend tests: ban-then-rejoin-rejected (same account), ban-while-not-host-rejected, ban-self-rejected, banned-IP-rejection (with G35), ban survives WS reconnect.
+**Acceptance:** Host bans a player → that player's WS closes → re-joining (same account or same IP, per G35) returns a clear rejection. Host's settings panel lists current bans with an "Unban" affordance.
+**Dependencies:** None — extends G24's kick plumbing. Foundation for G33 + G35. Alembic migration for `RoomBan`.
+
 ### G25. Persistent manché / round-points indicators on player strip
 **Why:** Reported. Today nothing visually flags which players have lost matches/rounds during the current session — the banner pops briefly then disappears.
 **Scope:**
@@ -340,15 +353,135 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 
 ## Later
 
+### G33. Host: report player → escalate to global chat-ban
+**Why:** A serial offender shouldn't only be banned from one room. The host needs to **report** a banned player to platform moderation, and a verified report should remove that player's ability to chat in any room — but they keep play access. We don't lock people out of the *game*; we lock them out of *social surfaces* (chat, friends, public-room discoverability). This matches what we already do for image moderation on avatars: filter the harmful surface without account-banning the user outright.
+**Scope:**
+- The `RoomBan` table (G32) already carries a `report: bool` flag. When set, also create a `ModerationReport(id, reporter_user_id, reported_user_id, room_code, category, reason_text, ip_at_offense, created_at, verdict, verdict_at, verdict_by, legal_review)` row.
+- `category` is a fixed enum picked by the host: `harassment | hate_speech | sexual | csam_suspect | spam | cheating | other`. Same taxonomy as the AI classifier in G34. Translated labels via i18n.
+- Three verdict paths:
+  1. **Auto-escalate** — categories `csam_suspect` and `hate_speech` (host-flagged) skip review and immediately set `User.chat_banned_until = now() + 365 days` (configurable). `legal_review=true` for `csam_suspect` triggers an out-of-band incident response.
+  2. **Threshold review** — a 3rd report on the same `reported_user_id` within 30 days from **distinct reporters** auto-applies a 30-day chat ban (escalates: 30 / 90 / permanent).
+  3. **Human review** — everything else lands in a moderator queue at `/admin/moderation`. Admin sets verdict in (`dismiss | warn | chat_ban_temp | chat_ban_perm | account_ban`).
+- New columns: `User.chat_banned_until: datetime | None`, `User.role: enum(player | moderator | admin)` (only `moderator`+ can read the dashboard).
+- Chat WS action (G34) checks `chat_banned_until` before relaying. Game actions remain unaffected — banned-from-chat users still see the table, play turns, and see other players' messages; their own messages are silently dropped (returned to them with `{type: "chat_blocked", reason: "muted"}`).
+- Notification (G27) fires to the reported user when a verdict is applied, explaining the reason + appeal contact at `/contact`.
+- Frontend: when the host checks « Signaler ce joueur » on the G32 ban modal, expand it to show the category dropdown + a 140-char reason textarea. Submit fires the same `ban` WS action with `report: true` + payload.
+- Backend tests: report creates `ModerationReport` row; `hate_speech`/`csam_suspect` set `chat_banned_until` immediately; threshold (3 distinct reporters / 30 days) triggers temp ban; non-host can't report.
+**Acceptance:** Host bans + reports a player for `hate_speech` → that player can still play games, but every chat message they send is dropped server-side with a polite refusal toast. The reported user receives a notification explaining the verdict and how to appeal.
+**Dependencies:** G27 (notifications) for verdict pings; G34 (chat) for the chat-mute enforcement point; G35 (IP capture) for `ip_at_offense`.
+
+### G34. AI chat content moderation — pre-send classifier + audit trail
+**Why:** Once in-room chat ships (item 8), every message is a potential vector for hate speech, harassment, sexual content involving minors, doxxing, and spam. French law (LCEN art. 6, DSA implementation via DDADUE 2024), EU law (DSA art. 14/16/17/24 transparency and notice-and-action), and US norms (Section 230 safe harbor + COPPA + standard platform expectations) all expect the platform to actively moderate user-generated content **at the surface level**. We do that with a Claude-Haiku classifier inline before broadcasting any chat message; flagged messages are blocked at the source, never relayed, and the offender's strike count goes up — repeat strikes feed G33's report ledger.
+
+**Scope:**
+
+A. **Inline classifier (request path)**
+- New service `app/services/chat_moderation.py` exposing `classify_message(text: str, locale: str) -> ModerationVerdict`.
+- Calls Claude Haiku (`CHAT_MODERATION_MODEL=claude-haiku-4-5` env var, reuses existing `ANTHROPIC_API_KEY` from avatar moderation). System prompt asks for a JSON verdict: `{verdict: "safe"|"warn"|"block", category: <one of G33's enum>, confidence: 0..1, rationale: "..."}`.
+- Locale-aware: prompt switches between French and English so it understands slang, slurs, and culturally specific expressions (a French-tuned pass catches verlan slurs that an English-only classifier misses).
+- Latency budget: chat WS action awaits the classifier; if Haiku is slow (> 1.5 s timeout), fall back to a conservative regex deny-list (`app/services/chat_moderation_denylist.py`, curated + versioned) and log the timeout for ops follow-up.
+
+B. **What gets blocked (rule set, anchored to law + norms)**
+- **Always block** (any locale, any context):
+  - CSAM-suspect content (grooming language, sexual content referencing minors)
+  - Explicit sexual content targeting a named individual
+  - Doxxing (real phone / address / full-name + location combination)
+  - Credible threats of violence
+  - Slurs targeting protected classes — race, religion, national origin, sexual orientation, gender identity, disability (French loi Pléven / loi Gayssot scope + EU framework decision 2008/913/JHA)
+- **Warn + block** (single-strike):
+  - Persistent harassment (name-calling, targeted insults)
+  - Spam / flood (≥ 5 identical messages in 60 s)
+  - Off-topic flooding
+- **Warn-only** (allow):
+  - Mild profanity in casual context ("merde", "fuck this dice roll")
+  - In-game trash talk that doesn't target identity
+- Policy boundary documented in a new `docs/MODERATION_POLICY.md`, linked from `/terms` and `/privacy`, so users see what is blocked and why — a DSA art. 14 transparency requirement.
+
+C. **Block UX**
+- WS broadcasts `{type: "chat_blocked", reason_key, category, strike_count}` **only to the sender** (not the room) — others see nothing, the bad message never relays.
+- Sender sees an inline toast: « Ce message enfreint les règles ([category]). Avertissement X/3. »
+- 3rd strike inside 24 h → auto temp-mute for the rest of the session (chat-only, game continues normally).
+- Critical categories (`csam_suspect`, `hate_speech` with confidence ≥ 0.85) skip the strike system entirely and:
+  1. Block the message
+  2. Auto-create a `ModerationReport` with `reporter_user_id = SYSTEM_USER_UUID`, `legal_review=true` for csam_suspect
+  3. Apply the G33 auto-escalate chat ban immediately
+
+D. **Audit + transparency (DSA-aligned)**
+- Every classification (block AND allow) persists to `ChatModerationLog(id, user_id, game_code, message_hash, locale, verdict, category, confidence, classifier_version, ip_at_send, created_at)`. By default we store the **hash only**, not the body. Body retained only when verdict ∈ {`warn`, `block`}, with 90-day retention after which the body field is null'd (DSA art. 17.2 — minimum retention to enable appeal).
+- DSA art. 17: users can request their moderation history via the existing `GET /auth/export` endpoint (extend the export to include `chat_moderation_log` rows for the requesting user).
+- DSA art. 24 transparency reports: nightly cron aggregates counts by category → exposed at `/admin/moderation/stats` (admin-only). Annual export of this data satisfies the platform-transparency reporting obligation.
+- Appeal flow: every block-toast includes a « Contester » link that opens `/contact` pre-filled with the message hash + verdict. Admins can review at the dashboard and overturn (which deletes the strike + restores the message hash).
+
+E. **Privacy + legal posture**
+- Lawful basis (GDPR art. 6.1.f): legitimate interest in preventing abuse, balanced against the user's rights by: limited retention (above), explicit disclosure on Privacy page, redress path via /contact.
+- French LCEN art. 6.I.7: as a hosting provider we have a duty to "prevent" certain content (apologie d'actes terroristes, pornographie enfantine, incitation à la haine raciale) — the always-block list above covers this.
+- EU DSA: notice-and-action mechanism (G33's reporter flow), transparency reports (D above), out-of-court dispute settlement contact in `/terms`.
+- US COPPA: minors disclosure already on register; chat is gated behind the existing age confirmation. Csam_suspect verdicts trigger an internal incident-response procedure (documented separately, not in code).
+- The Claude moderation call sends only the message text + locale; no PII, no user_id, no game context. (Audit log on our side does link user_id; that stays internal and is covered by the export above.)
+
+F. **Infrastructure**
+- Rate-limit Anthropic calls per `(user_id, minute)` — 30 calls / minute / user — to mitigate abuse of the classifier as a paid resource.
+- Failure modes: if Anthropic is down for > 60 s, fall back to deny-list-only and broadcast a system banner in chat ("Modération IA dégradée — règles strictes appliquées").
+- Tests: 25+ unit tests across English and French covering each category (mocked Claude responses) + a small live-call smoke test gated by `RUN_LIVE_MODERATION_TESTS=1` for nightly CI.
+
+**Acceptance:**
+- Sending "you're trash, [slur]" in chat → message never broadcasts; sender sees the toast; strike +1.
+- 3 strikes in 24 h → auto-mute for the session.
+- Sending csam_suspect text → message blocked, `ModerationReport` created with `legal_review=true`, user globally chat-banned via G33 auto-escalate.
+- Clean messages relay with < 200 ms p50 added latency on the happy path.
+- Moderation history exportable via `/auth/export`.
+
+**Dependencies:**
+- Item 8 (chat itself) ships **alongside** this — the gate exists from day one of chat, not as a follow-up.
+- G33 (report + chat-ban) for the escalation target.
+- G35 (IP tracking) for the `ip_at_send` audit column.
+- New `docs/MODERATION_POLICY.md` to back the UI rationale.
+
+### G35. IP-based ban enforcement (room + global)
+**Why:** A banned user can open a private browsing window, create a second account, and rejoin the same room within seconds. IP-based enforcement closes that loop without turning the platform into a privacy nightmare.
+
+**Scope:**
+
+A. **What we capture**
+- WS handshake: capture `request.client.host` (FastAPI exposes via ASGI scope), respecting `X-Forwarded-For` **only** when the source matches an `TRUSTED_PROXY_IPS` env-gated allowlist of our known proxies/load balancers. Never trust client-sent IPs otherwise.
+- Auth register + login: same capture; stored as `User.last_ip` (rolling, single field — we don't need a full history).
+- Ban-time IP: when G32 ban or G33 chat-ban applies, snapshot the IP at offense into `RoomBan.banned_ip` / `ModerationReport.ip_at_offense`.
+
+B. **Enforcement at three boundaries**
+- **WS join handler**: look up `(game_code, current_ip)` against `RoomBan`. If matched → reject with `{type: "join_rejected", reason: "banned_ip"}`.
+- **WS chat send** (G34 integration): look up `current_ip` against active `ModerationReport.ip_at_offense` where verdict ∈ {`chat_ban_perm`, `chat_ban_temp` and not expired}. If matched → drop with `{type: "chat_blocked", reason: "banned_ip"}`.
+- **Account creation** (`POST /auth/register`): look up `current_ip` against active global chat-bans; if matched, the new account is created with `chat_banned_until` set to mirror the source ban (anti-evasion). The new user can play, just can't chat.
+
+C. **Privacy posture (GDPR-conscious)**
+- IP is personal data under GDPR. Lawful basis: legitimate interest in abuse prevention, narrowly tailored.
+- Retention: `RoomBan.banned_ip` kept until ban expires + 30 days; `User.last_ip` overwritten on every login (no history); `ModerationReport.ip_at_offense` kept 365 days then null'd by a daily cleanup job (verdict stays, IP doesn't).
+- Privacy page (item 3) updated to disclose IP capture, retention windows, and the GDPR art. 17 right to deletion (modulo legal-hold exceptions).
+- **CGN / VPN false-positive guard**: when a join is rejected by IP **alone** (no user_id match) and the joining user has a verified account in good standing (no prior reports), surface a « Pensez-vous que c'est une erreur ? » link that opens `/contact` pre-filled with the room code. Manual unblock at the moderator dashboard.
+- We match **exact IP only**, never CIDR ranges — this is enough to deter casual evasion (private window, fresh signup) without over-blocking shared exits.
+
+D. **Tests**
+- Ban → rejoin same browser (same IP) → rejected by IP match.
+- Ban → rejoin different IP same account → rejected by user_id match.
+- Ban → rejoin different IP + private browsing (new account) → allowed, but with `chat_banned_until` propagated if the IP matches a global chat-ban.
+- Trusted proxy: `X-Forwarded-For` honored when peer IP is in `TRUSTED_PROXY_IPS`, ignored otherwise.
+- IP retention: a `ModerationReport` row older than 365 days has its `ip_at_offense` field nulled by the cleanup job.
+
+**Acceptance:** A banned player can't trivially evade by opening a private window. Legitimate users sharing an exit IP (CGN, university, café Wi-Fi) can appeal and get unblocked manually.
+
+**Dependencies:**
+- G32 + G33 produce the records this checks against.
+- Privacy page (item 3) needs the disclosure copy update.
+- `TRUSTED_PROXY_IPS` env var set in production before this matters — without it, every request looks like it comes from the load balancer's internal IP.
+
 ### 8. In-room chat with AI moderation
 **Why:** Public rooms benefit from chat for vibe; need toxic-content filtering and a graduated enforcement model.
 **Scope:**
 - WS subprotocol for chat: new actions `chat_send`, `chat_history`. Rate-limit per player.
-- Moderation pass: Claude Haiku content classification (same pattern as avatar moderation in `app/routers/auth.py::_moderate_image`). Classify each message as safe/warn/block.
+- Moderation pass: Claude Haiku content classification (same pattern as avatar moderation in `app/routers/auth.py::_moderate_image`). Classify each message as safe/warn/block — **see G34 for the full classifier + audit-trail plan**.
 - Persistence: `ChatMessage` table (game_id, user_id, body, sent_at, moderation_verdict). Per-game retention (purge on game end).
 - Frontend: chat panel in `Game.jsx` toggle; basic message UI; redaction display for blocked messages.
 **Acceptance:** Players can chat; obviously toxic messages are blocked with a placeholder; moderator dashboard shows incidents.
-**Dependencies:** Item 9 (enforcement system) handles repeat-offender behavior.
+**Dependencies:** G34 (AI moderation) MUST ship alongside this, not after — chat without moderation is a liability. Item 9 (enforcement system) handles repeat-offender behavior; G33 is the room-host-driven realization of that.
 
 ### 9. Player enforcement (warn / temp-ban / perm-ban)
 **Why:** Repeated chat violations or game-rule abuse need consequences without ops doing it by hand.
