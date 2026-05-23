@@ -194,6 +194,32 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 - UI: follow button on `/profile/{username}`; followers/following count + list on own profile.
 - Privacy: respect a future `User.profile_visibility` setting (defer).
 
+### G31. 3D dice animation + organized combo banner + sound
+**Why:** The current dice are flat 2D images that snap to a new value with no animation, and the player has to scan the values and remember the hierarchy table to know what they rolled (was 1-1-3 worth 3 chips? a basic? 11x?). User wants a more immersive feel — visible dice tumble, a sorted result banner that names the combo, and a "shake" sound before the throw so it feels like real dice in a hand.
+**Scope:**
+- **3D dice rendering.** Two options to weigh during research:
+  - CSS 3D transforms (lightweight, no extra deps; ~12 keyframes per face): faster to ship, narrow visual ceiling.
+  - Three.js or react-three-fiber (~150 KB gzip): richer physics, more polish, larger bundle.
+  - Decision criterion: visual quality vs. bundle size budget. Default lean: CSS 3D first; promote to Three.js only if the look falls short.
+- **Adaptive sizing.** On mount of `Game.jsx`, measure the piste container via a `ResizeObserver` and pass dimensions down to the dice area so the throw fills the available space instead of being capped at 600×600 (this also helps G14). Re-measure on viewport resize.
+- **Animation flow per throw:**
+  1. **Shake** (~1 s): kept dice slide to a side panel inside the piste; remaining dice cluster centre, shake in place with audio loop.
+  2. **Throw** (~600 ms): dice tumble across the piste in 3D, settling to their final value.
+  3. **Banner** (~3 s, then collapses): organized post-roll banner above/below the dice with the dice sorted high → low and the combo name + chip value pulled from `classify()` server-side (already in `state.players[me].turn.combo` / `.fiches`). Example: « **4-2-1** · 421 · 8 fiches ».
+- **Audio.**
+  - Three short clips: `shake.mp3` (loop), `throw.mp3` (one-shot), `settle.mp3` (one-shot).
+  - Use Web Audio API or `<audio>` tags; prefer Web Audio for precise scheduling.
+  - Per-user toggle in localStorage (`sound_enabled: true | false`), default `true`.
+  - Sound toggle exposed in the TopBar (next to theme toggle) AND in the Room settings panel.
+  - Respect `prefers-reduced-motion` and `Mute` audio API hint to default off if the browser/OS suggests.
+- **Selected-dice layout.** When the player clicks a die to keep it (current click-to-keep semantics): the kept die animates to a side rail inside the piste (top-right by default). The remaining unkept dice cluster centre for the next throw. After the throw, dice that were kept return to the inline display.
+- **Accessibility:** keep `<Die>` keyboard-focus + Enter/Space behaviour intact even when 3D. Animation skipped entirely when `prefers-reduced-motion: reduce`.
+- **Performance:** all animation runs on `transform` + `opacity` (GPU-composited). No layout thrashing. Pause animation when the tab is hidden (`document.visibilityState`).
+
+**Research first.** This item carries enough unknowns (3D library choice, audio asset sourcing, mobile perf) that the first PR should be a research note + tiny prototype, not the production drop. Split it: G31a (research + prototype) → G31b (production implementation).
+
+**Dependencies:** ideally lands alongside G14 (piste sizing) since both touch the piste container measurement. G16 (hint text) and G15 (rhythm indicator) won't fight with the new dice but their placement might need tweaking once the dice area grows.
+
 ### G30. External invite delivery — email / SMS / WhatsApp link
 **Why:** Beyond the in-app friend invites (G29), the user wants to share a private-room join link via outside channels. "Tap to copy a link", "send via email", "send via WhatsApp" — invitee clicks the link, lands on the room with the code pre-filled, joins.
 **Scope (sketch only):**
@@ -407,7 +433,32 @@ Past commits that captured incorrect rules — superseded by **R1**, **R2**, **R
 When picking up an item:
 1. Move it to **Now** if it isn't already.
 2. Create a Plan-mode plan file or AskUserQuestion to confirm intent before coding.
-3. Branch off `develop`, ship behind logical commits, push.
-4. Update this file: status → **Done**, add the commit SHA.
+3. **Cut a new branch from `develop`** using a Conventional-Commits-style slug:
+   - `feature/<slug>` for new features
+   - `fix/<slug>` for bug fixes
+   - `chore/<slug>` for docs / roadmap / CI tweaks
+   - `refactor/<slug>` / `test/<slug>` for those respectively
+4. Ship commits on that branch. Run the full gates before pushing:
+   - `pytest tests/ --cov=app --cov-fail-under=80`
+   - `ruff check app/ tests/` + `ruff format --check app/ tests/`
+   - `npm --prefix frontend run lint` + `npm --prefix frontend run build`
+5. `git push -u origin <branch>` (NOT to develop directly).
+6. Open a PR into `develop` with this body shape:
+   ```
+   ## Summary
+   - <1–3 bullets>
+
+   ## Changes
+   - <file/area> — <what>
+
+   ## Test plan
+   - [ ] <how to verify, locally and in CI>
+
+   ## Roadmap
+   - Closes G<n>  (or: addresses part of G<n>; full scope in G<m>)
+   ```
+7. After merge, update this file: status → **Done**, add the commit SHA.
 
 When adding a new idea: drop it in **Maybe** with a one-line *Why*. Promote it once we've thought through scope.
+
+**Branch protection rule of thumb:** `develop` is the integration branch; nothing lands there without a PR. `main` is stable; only merges from `develop`. Hotfixes can branch from `main` (`hotfix/<slug>`) and back-merge to both.
