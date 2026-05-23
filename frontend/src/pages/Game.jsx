@@ -23,6 +23,8 @@ export function Game({ token }) {
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false)
   const [matchEnd, setMatchEnd] = useState(null) // {name, count} for the G13 banner
   const lastMatchEndFpRef = useRef(null)
+  const [selfPlay, setSelfPlay] = useState(null) // G23: self-play toast {dice, combo, fiches, isBot, next}
+  const selfTurnsSeenRef = useRef(0)
 
   const me = state.players?.find(p => p.id === playerId)
   const isHost = state.room?.host_player_id === playerId
@@ -62,6 +64,35 @@ export function Game({ token }) {
     const id = setTimeout(() => setMatchEnd(null), 4500)
     return () => clearTimeout(id)
   }, [matchEnd])
+
+  // G23: pop a small bottom-right toast when MY turn ends (manual or auto-validate
+  // or AFK-bot takeover). We count how many log_turn-style events have my name on
+  // them; when the count goes up, fire a new toast. Dedup via ref-counter.
+  useEffect(() => {
+    if (!me?.name) return
+    const events = state.log_events || []
+    const mine = events.filter(
+      (e) => (e?.key === 'log_turn' || e?.key === 'log_afk_turn') && e?.name === me.name,
+    )
+    if (mine.length > selfTurnsSeenRef.current) {
+      selfTurnsSeenRef.current = mine.length
+      const latest = mine[mine.length - 1]
+      const nextPlayer = state.players?.find((p) => p.id === state.current_player_id)
+      setSelfPlay({
+        dice: latest.dice,
+        combo: latest.combo,
+        fiches: latest.fiches,
+        isBot: latest.key === 'log_afk_turn',
+        nextName: nextPlayer && nextPlayer.id !== playerId ? nextPlayer.name : null,
+      })
+    }
+  }, [state.log_events, me?.name, state.players, state.current_player_id, playerId])
+
+  useEffect(() => {
+    if (!selfPlay) return
+    const id = setTimeout(() => setSelfPlay(null), 5000)
+    return () => clearTimeout(id)
+  }, [selfPlay])
 
   if (state.phase === 'finished') {
     return <FinishedScreen state={state} playerId={playerId} t={t} navigate={navigate} />
@@ -402,6 +433,18 @@ export function Game({ token }) {
           onCancel={() => setShowLeaveConfirm(false)}
         />
       )}
+
+      {selfPlay && (
+        <SelfPlayToast
+          t={t}
+          dice={selfPlay.dice}
+          combo={selfPlay.combo}
+          fiches={selfPlay.fiches}
+          isBot={selfPlay.isBot}
+          nextName={selfPlay.nextName}
+          onClose={() => setSelfPlay(null)}
+        />
+      )}
     </div>
   )
 }
@@ -707,6 +750,52 @@ function AfkBar({ total }) {
         {remaining}s
       </span>
     </div>
+  )
+}
+
+function SelfPlayToast({ t, dice, combo, fiches, isBot, nextName, onClose }) {
+  const diceDisplay = Array.isArray(dice) ? `[${dice.join('-')}]` : ''
+  const playLine = t(isBot ? 'self_play_bot_played' : 'self_play_you_played', {
+    dice: diceDisplay,
+    combo,
+    fiches,
+  })
+  const nextLine = nextName ? t('self_play_next_up', { name: nextName }) : t('self_play_cycle_resolves')
+  return (
+    <button
+      type="button"
+      onClick={onClose}
+      aria-label={t('close')}
+      style={{
+        position: 'fixed',
+        right: '1.2rem',
+        bottom: '1.2rem',
+        zIndex: 60,
+        maxWidth: 360,
+        padding: '0.85rem 1.1rem',
+        background: 'var(--paper)',
+        border: '1px solid var(--brass-deep)',
+        borderLeft: '4px solid var(--brass)',
+        borderRadius: 4,
+        textAlign: 'left',
+        cursor: 'pointer',
+        boxShadow: '0 10px 28px rgba(0,0,0,0.32)',
+        animation: 'slideUp 0.28s ease-out',
+        fontFamily: 'var(--body)',
+        color: 'var(--ink)',
+      }}
+    >
+      <div className="eyebrow" style={{ color: 'var(--brass-deep)', marginBottom: 4, fontSize: '0.62rem' }}>
+        {isBot ? t('self_play_bot_eyebrow') : t('self_play_you_eyebrow')}
+      </div>
+      <div className="serif" style={{ fontSize: '0.95rem', margin: 0 }}>
+        {playLine}
+      </div>
+      <div className="serif" style={{ fontStyle: 'italic', color: 'var(--ink-mute)', fontSize: '0.85rem', marginTop: 4 }}>
+        {nextLine}
+      </div>
+      <style>{`@keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }`}</style>
+    </button>
   )
 }
 

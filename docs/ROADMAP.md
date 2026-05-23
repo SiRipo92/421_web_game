@@ -147,7 +147,7 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 - Toast should auto-dismiss after ~5s; can be paused on hover.
 - This subsumes part of G6 ("Vous/You" personalization) and G10 (commentary ticker).
 
-### G23. Self-play toast after auto-validate
+### G23. (DONE) Self-play toast after auto-validate
 **Why:** When a player's turn auto-validates (rolls_left hit 0, or sec/max throws reached), they don't get a "you sent X to the table" summary — they just see the next player start. Reported as confusing.
 **Scope:**
 - New frontend `SelfPlayToast` component: pops bottom-right of the piste when the local player's turn just transitioned from `!done` → `done` (or the cycle advanced past them).
@@ -331,6 +331,7 @@ Past commits that captured incorrect rules — superseded by **R1**, **R2**, **R
 ## Done
 
 - **2026-05-23** `63733a4` — G20: action-bar eyebrow + serif text bumped to readable sizes (0.78rem / 1.05rem; ink-soft instead of ink-mute). Top-panel control buttons (host's ⚙ Room rules and everyone's 🚪 Quitter) are now proper rounded pill buttons with hover states — Quitter is rouge-bordered and fills rouge on hover for visibility; Room rules is neutral. Both stay compact and wrap cleanly on narrow widths.
+- **2026-05-23** _(pending SHA)_ — G23: SelfPlayToast. Bottom-right brass-bordered notification pops when the local player's turn ends (manual done OR auto-validate OR AFK bot taking over for them). Reads: "Vous avez joué [4-2-1] → 421 (8f). À NextPlayer de jouer." Different copy when the bot took the turn ("Coup joué par le bot"). Auto-dismiss 5s, click to dismiss. Triggers off log_turn/log_afk_turn events where `name === me.name`, dedup via ref-counter.
 - **2026-05-23** `fee800a` — Round-loss banner differentiation (count=2 shows "X a perdu la partie !" with stronger styling instead of repeating "X est manché"). Manche + round-point pips (💀 / 🏷) on PlayerStrip and PisteSeat so every seat shows their losses at a glance. New `log_afk_takeover` event surfaced before the bot turn so the table knows who stepped away. Roadmap items G23 (self-play toast), G24 (host kick), G25 (manche markers — done in this batch) added.
 - **2026-05-23** `63733a4` — G20: action-bar polish + Quitter/Room rules pills.
 - **2026-05-23** `0483a74` — G19: raised TopBar burger threshold from 640px → 880px so the 641–835 zone no longer overflows. Desktop nav (logo + 3 links + 2 dividers + lang + theme + user menu) needs ~720px minimum, plus padding; anything narrower now uses the drawer. Tablet-portrait lands in the drawer (still very usable).
