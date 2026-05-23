@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { useLang } from '../context/useLang.js'
 import { resetPassword } from '../api/auth.js'
+import { PasswordChecklist } from '../components/shared/PasswordChecklist.jsx'
+import { isPwdValid } from '../utils/pwdChecks.js'
 
 export function ResetPassword() {
   const { t } = useLang()
@@ -17,8 +19,8 @@ export function ResetPassword() {
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
-    if (password !== confirm) { setError('Les mots de passe ne correspondent pas.'); return }
-    if (password.length < 8) { setError(t('err_weak_password')); return }
+    if (password !== confirm) { setError(t('err_passwords_dont_match')); return }
+    if (!isPwdValid(password)) { setError(t('err_weak_password')); return }
     setLoading(true)
     try {
       await resetPassword(token, password)
@@ -45,27 +47,28 @@ export function ResetPassword() {
       <Link to="/login" className="btn-link" style={{ marginBottom: 24, display: 'inline-block' }}>
         ← {t('back_to_login')}
       </Link>
-      <div className="eyebrow" style={{ marginBottom: 12 }}>Nouveau mot de passe</div>
+      <div className="eyebrow" style={{ marginBottom: 12 }}>{t('reset_password_eyebrow')}</div>
       <h1 className="display" style={{ fontSize: '2.8rem', margin: '0 0 0.5rem', lineHeight: 0.95 }}>
-        Choisissez<br /><em style={{ color: 'var(--rouge)' }}>votre mot de passe</em>.
+        {t('reset_password_h1_pre')}<br /><em style={{ color: 'var(--rouge)' }}>{t('reset_password_h1_em')}</em>.
       </h1>
 
       <div className="ticket" style={{ marginTop: '2rem', padding: '2rem' }}>
         {done ? (
           <p className="serif" style={{ color: 'var(--felt-deep)', fontStyle: 'italic' }}>
-            Mot de passe mis à jour ! Redirection…
+            {t('password_updated_redirecting')}
           </p>
         ) : (
           <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.2rem' }}>
             <div>
               <label className="field-label" htmlFor="new-password">{t('new_password')}</label>
-              <input id="new-password" className="input" type="password" required minLength={8}
+              <input id="new-password" className="input" type="password" required
                 value={password} onChange={e => setPassword(e.target.value)}
                 placeholder="••••••••" autoComplete="new-password" />
+              <PasswordChecklist password={password} />
             </div>
             <div>
-              <label className="field-label" htmlFor="confirm-password">{t('confirm_password')}</label>
-              <input id="confirm-password" className="input" type="password" required minLength={8}
+              <label className="field-label" htmlFor="confirm-password">{t('confirm_new_password')}</label>
+              <input id="confirm-password" className="input" type="password" required
                 value={confirm} onChange={e => setConfirm(e.target.value)}
                 placeholder="••••••••" autoComplete="new-password" />
             </div>

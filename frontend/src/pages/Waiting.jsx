@@ -129,8 +129,7 @@ export function Waiting({ token }) {
             <SummaryRow icon="🎲" label={t('distribution_label')}
               value={
                 state.room?.bank_rule === 'sec' ? t('sec_jusqu_banque')
-                  : state.room?.bank_rule === 'one' ? t('one_throw')
-                    : t('free_play')
+                  : t('free_play')
               } />
             <SummaryRow icon="⏱" label={t('inactivity_label')}
               value={`${state.room?.afk_seconds ?? 45}s · ${t('bot_takes_over')}`} />

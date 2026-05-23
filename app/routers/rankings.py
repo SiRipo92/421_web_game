@@ -90,7 +90,7 @@ async def profile(username: str, db: AsyncSession = Depends(get_db)):
                 placement=gp.placement,
                 total_players=total,
                 final_tokens=gp.final_tokens,
-                sets_lost=gp.sets_lost,
+                round_points=gp.round_points,
                 total_rounds=game_rec.total_rounds,
             )
         )

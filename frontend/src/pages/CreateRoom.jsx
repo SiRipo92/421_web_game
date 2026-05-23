@@ -42,7 +42,7 @@ export function CreateRoom({ token }) {
       </button>
       <div className="eyebrow">Nouvelle table</div>
       <h1 className="display" style={{ fontSize: 'clamp(2.4rem, 5vw, 3.2rem)', margin: '0.4rem 0 0.5rem' }}>
-        Préparez le <em style={{ color: 'var(--rouge)' }}>tapis</em>.
+        Préparez la <em style={{ color: 'var(--rouge)' }}>piste</em>.
       </h1>
       <p className="note">Choisissez vos règles. Les habitués savent que la maison ne tranche pas — c'est vous qui décidez.</p>
 
@@ -68,8 +68,6 @@ export function CreateRoom({ token }) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }} role="radiogroup" aria-label={t('bank_rules')}>
             <RadioRow value={bankRule} setVal={setBankRule} k="sec"
               label={t('sec_jusqu_banque')} desc={t('sec_desc')} />
-            <RadioRow value={bankRule} setVal={setBankRule} k="one"
-              label={t('one_throw')} desc={t('one_desc')} />
             <RadioRow value={bankRule} setVal={setBankRule} k="free"
               label={t('free_play')} desc={t('free_desc')} />
           </div>

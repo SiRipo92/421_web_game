@@ -17,7 +17,7 @@ def _finished_game(game_id: str, players: list[Player], user_ids: dict) -> Game:
     for p in players:
         p.turn = PlayerTurn(done=True, dice=[4, 2, 1], rank=9000, fiches=8)
         game.players.append(p)
-        game.sets_lost[p.id] = 0
+        game.match_losses[p.id] = 0
     game.user_ids = user_ids
     game.round_num = 5
     return game
@@ -29,7 +29,7 @@ async def test_persist_game_all_guests(client):
     p0 = Player(id="gA", name="Guest A", tokens=0)
     p1 = Player(id="gB", name="Guest B", tokens=11)
     game = _finished_game(gid, [p0, p1], {"gA": None, "gB": None})
-    game.sets_lost["gB"] = 2
+    game.match_losses["gB"] = 2
 
     await persist_completed_game(game)
 
@@ -50,7 +50,7 @@ async def test_persist_game_with_registered_user(client, make_user):
     p0 = Player(id="rA", name=data["username"], tokens=0)
     p1 = Player(id="rB", name="Guest", tokens=11)
     game = _finished_game(gid, [p0, p1], {"rA": user_id, "rB": None})
-    game.sets_lost["rB"] = 2
+    game.match_losses["rB"] = 2
 
     await persist_completed_game(game)
 

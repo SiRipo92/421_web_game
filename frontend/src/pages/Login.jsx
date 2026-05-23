@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { GoogleLogin } from '@react-oauth/google'
 import { useLang } from '../context/useLang.js'
+import { PasswordChecklist } from '../components/shared/PasswordChecklist.jsx'
+import { isPwdValid } from '../utils/pwdChecks.js'
 
 export function Login({ onLogin, onRegister, onGoogleLogin }) {
   const { t, lang } = useLang()
@@ -140,15 +142,6 @@ const EMAIL_RE = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/
 const MIN_AGE_YEARS = 15
 const minBirthdate = () => new Date(Date.now() - MIN_AGE_YEARS * 365.25 * 86400000).toISOString().split('T')[0]
 
-function pwdChecks(pwd) {
-  return {
-    length: pwd.length >= 8,
-    upper: /[A-Z]/.test(pwd),
-    special: /[\d\W]/.test(pwd),
-    maxlen: new TextEncoder().encode(pwd).length <= 72,
-  }
-}
-
 function SsoButtons({ t, lang, onGoogleSuccess, mode }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -186,11 +179,9 @@ function RegisterForm({ t, lang, onRegister, onGoogleLogin, onSwitch, onNav }) {
   const [acceptCgu, setAcceptCgu] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-  const [pwdTouched, setPwdTouched] = useState(false)
   const [emailError, setEmailError] = useState('')
 
-  const checks = pwdChecks(password)
-  const pwdValid = checks.length && checks.upper && checks.special && checks.maxlen
+  const pwdValid = isPwdValid(password)
   const maxBirthdate = useMemo(() => minBirthdate(), [])
 
   const validateEmailFormat = (v) => {
@@ -247,28 +238,9 @@ function RegisterForm({ t, lang, onRegister, onGoogleLogin, onSwitch, onNav }) {
         <label className="field-label" htmlFor="reg-password">{t('password')}</label>
         <input id="reg-password" className="input" type="password" required
           value={password}
-          onChange={e => { setPassword(e.target.value); setPwdTouched(true) }}
-          onBlur={() => setPwdTouched(true)}
+          onChange={e => setPassword(e.target.value)}
           placeholder="••••••••" autoComplete="new-password" />
-        {pwdTouched && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 6 }}>
-            {[
-              { key: 'length', label: t('pwd_req_length') },
-              { key: 'upper',  label: t('pwd_req_upper') },
-              { key: 'special', label: t('pwd_req_special') },
-              { key: 'maxlen', label: t('pwd_req_maxlen') },
-            ].map(r => (
-              <div key={r.key} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.8rem' }}>
-                <span style={{ color: checks[r.key] ? 'var(--felt-deep)' : 'var(--ink-fade)', fontWeight: 700, lineHeight: 1 }}>
-                  {checks[r.key] ? '✓' : '○'}
-                </span>
-                <span style={{ color: checks[r.key] ? 'var(--ink-soft)' : 'var(--ink-fade)' }} className="serif">
-                  {r.label}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
+        <PasswordChecklist password={password} />
       </div>
       <div>
         <label className="field-label" htmlFor="reg-birthdate">{t('birthdate')}</label>

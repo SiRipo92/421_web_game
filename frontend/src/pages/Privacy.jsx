@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import { useLang } from '../context/useLang.js'
+import { clearCookieConsent, getCookieConsent } from '../utils/consent.js'
 
 export function Privacy() {
   const { t } = useLang()
@@ -38,8 +39,26 @@ export function Privacy() {
             Pour exercer ces droits, utilisez le <Link to="/contact" style={{ color: 'var(--rouge)' }}>formulaire de contact</Link> en bas de page.
           </p>
         </Section>
-        <Section title="6. Cookies">
-          <p>Aucun cookie tiers. Seul un token d'authentification (localStorage) est utilisé pour maintenir votre session.</p>
+        <Section title="6. Cookies & stockage local">
+          <p>
+            Aucun cookie tiers, aucun script de suivi publicitaire. Le site utilise
+            uniquement le <code>localStorage</code> de votre navigateur pour des fonctions
+            essentielles : votre jeton d'authentification, votre langue et votre thème.
+          </p>
+          <p style={{ marginTop: '0.5rem' }}>
+            Si nous ajoutons à l'avenir des outils statistiques anonymes, ils ne se
+            chargeront que si vous avez accepté via la bannière de consentement.
+            État actuel de votre choix :{' '}
+            <strong>{getCookieConsent() ?? 'non défini'}</strong>.{' '}
+            <button
+              type="button"
+              onClick={() => { clearCookieConsent(); window.location.reload() }}
+              className="btn-link"
+              style={{ fontSize: '0.9rem' }}
+            >
+              Modifier mon choix
+            </button>
+          </p>
         </Section>
         <Section title="7. Contact DPO">
           <p>Pour toute question relative à vos données, utilisez le <Link to="/contact" style={{ color: 'var(--rouge)' }}>formulaire de contact</Link>.</p>

@@ -311,7 +311,11 @@ async def export_data(
         if stats
         else None,
         "games": [
-            {"placement": g.placement, "final_tokens": g.final_tokens, "sets_lost": g.sets_lost}
+            {
+                "placement": g.placement,
+                "final_tokens": g.final_tokens,
+                "round_points": g.round_points,
+            }
             for g in games
         ],
     }

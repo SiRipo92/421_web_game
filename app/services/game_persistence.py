@@ -71,7 +71,7 @@ async def _write(game: Game, db: AsyncSession) -> None:
                 user_id=uuid.UUID(user_id_str) if user_id_str else None,
                 display_name=p.name,
                 final_tokens=p.tokens,
-                sets_lost=game.sets_lost.get(p.id, 0),
+                round_points=game.round_points.get(p.id, 0),
                 placement=placement,
             )
         )

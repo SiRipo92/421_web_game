@@ -144,6 +144,7 @@ export function Profile({ user, token, onRefreshUser, onLogout }) {
 }
 
 function EditProfileCard({ user, token, onRefreshUser, t }) {
+  const { setLang } = useLang()
   const [username, setUsername] = useState(user?.username || '')
   const [langPref, setLangPref] = useState(user?.lang_pref || 'fr')
   const [saving, setSaving] = useState(false)
@@ -213,6 +214,8 @@ function EditProfileCard({ user, token, onRefreshUser, t }) {
     setSaving(true)
     try {
       await authApi.updateMe(token, { username, lang_pref: langPref })
+      // Sync the site language with the saved preference so the UI flips immediately.
+      setLang(langPref)
       await onRefreshUser?.(token)
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)

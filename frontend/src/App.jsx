@@ -2,6 +2,7 @@ import { Routes, Route } from 'react-router-dom'
 import { GoogleOAuthProvider } from '@react-oauth/google'
 import { useAuth } from './hooks/useAuth.js'
 import { PageLayout } from './components/layout/PageLayout.jsx'
+import { CookieBanner } from './components/shared/CookieBanner.jsx'
 import { Home } from './pages/Home.jsx'
 import { Login } from './pages/Login.jsx'
 import { ForgotPassword } from './pages/ForgotPassword.jsx'
@@ -33,6 +34,7 @@ export default function App() {
 
   return (
     <GoogleOAuthProvider clientId={import.meta.env.VITE_GOOGLE_CLIENT_ID ?? ''}>
+    <CookieBanner />
     <Routes>
       {/* Game uses full viewport — no layout chrome */}
       <Route path="/game/:gameId" element={<Game token={token} />} />
