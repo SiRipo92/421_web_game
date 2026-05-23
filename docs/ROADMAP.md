@@ -15,6 +15,43 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 
 ## Now
 
+### G1. AFK-timer reset on every player interaction (not just per-turn)
+**Why:** Reported by playtest. Today the AfkBar countdown only resets when the current player changes — but selecting dice (`keep` action) on the backend DOES reset the AFK timer, so the displayed countdown is misleading. The user sees the timer ticking down even though they're actively interacting.
+**Scope:**
+- Server: emit `afk_started_at` (epoch ms) in `game_state`. Update it whenever `_schedule_afk` (re-)starts the current player's timer (roll/keep/done/tiebreak_roll).
+- Client: `AfkBar` reads `state.afk_started_at` + `state.room.afk_seconds` and computes remaining time. Re-mounts naturally when the value changes.
+**Acceptance:** A player can hover/click dice for 60+ seconds without the AFK bot taking over.
+
+### G2. Bot-handback flow when a player returns
+**Why:** Today, once the AFK bot takes a turn, the cycle advances and the player who came back can't "reclaim" their seat for the current cycle. Per the spec the bot should hold the player's slot for a couple seconds to allow a comeback before fully resolving.
+**Scope:** Defer the bot's `advance() → _resolve_round` chain by 2–3 seconds. If the human reconnects via any WS action in that window, abort the bot's pending advance and restore the player's normal turn.
+**Acceptance:** Player AFKs through one bot turn, returns mid-cycle, and is back in control immediately for the next throw.
+
+### G3. Auto-validate `done` when the player is at max throws with no choice left
+**Why:** If a non-starter has used the starter's max throws and can't roll anymore, the "Done" button is the only action and should fire automatically.
+**Scope:** In the `roll`/`keep` handlers, after applying state, check whether `rolls_used >= max_throws_this_round` AND there are no kept-out dice. If so, treat as if the player called `done`.
+**Acceptance:** Starter rolls once + clicks done → other players auto-validate after their single throw, no extra click needed.
+
+### G4. Hide the throw counter when there's only one throw to make
+**Why:** Showing "0/3 throws" before the starter has set the rhythm is fine; showing "0/1" or hiding altogether once the starter capped the rhythm at 1 makes the UI cleaner.
+**Scope:** In `Game.jsx`'s `RollDots`: render only when `max_throws_this_round > 1` OR for the starter when the rhythm isn't yet set.
+
+### G5. Clarify "keep vs reroll" affordance on dice selection
+**Why:** Reported. Today clicking a die toggles `reroll[i]` but the visual encoding isn't clear about what each state means.
+**Scope:** Add an on-die badge/icon (✓ for "keep", ↺ for "reroll"). Add a one-line legend above the dice row ("Cliquez pour relancer / Click to re-roll").
+
+### G6. Personalize log entries with "Vous" / "You" for the current viewer
+**Why:** Reported. "TheWitch donne 1 jeton(s) à Sisi" reads as third-person even when you are TheWitch.
+**Scope:** Frontend `formatLogEntries`: when `params.name` (or `winner`/`loser`/`starter`) matches the local `playerId`'s name, substitute the `you_*` i18n string. Could also display contextual flash messages: "You just received 2 chips. Your turn."
+
+### G7. Tied winners in décharge → winner-tiebreak (R1 follow-up)
+**Why:** R1 covered tied losers. Exact-same-combo tied winners in décharge still take the "no transfer this cycle" path. Per the spec, they should re-roll to pick the giver.
+**Scope:** Mirror the loser-tiebreak code path with `purpose="winner"`. `_resolve_tiebreak` picks HIGHEST rank (giver) instead of lowest. Winner gives `original_penalty` chips to the original loser.
+
+### G8. Round-point persistence trigger
+**Why:** With no auto-game-end, `_persist_game` only fires for the lone-survivor edge case. Logged-in users' round points accumulated in a session are lost when the room dissolves.
+**Scope:** Trigger persistence (1) when a player leaves the room mid-game, (2) when the room dissolves (last player leaves or host migrates). Write `round_points[pid]` to `GamePlayer.round_points` and update `PlayerStats`.
+
 ### R1. Rewrite `_resolve_round` for correct one-loser-per-cycle + tiebreak mechanic
 **Why:** Commit `5d8bd45` ("rule correctness") shipped tie behavior that doesn't match the actual rules. The real rules: there is **always exactly one loser** per table cycle. Tied losers (or tied top players in discharge when combos are exactly equal) trigger a **tiebreak re-throw** — tied players re-roll three dice in reverse turn order, lowest hand by the combo hierarchy loses, recursive if still tied. The penalty stays the value of the original winning combo. My current code's "all-tied → no transfer" and "tied winners → no transfer" paths are wrong and need removal.
 **Scope:**
@@ -161,6 +198,10 @@ Past commits that captured incorrect rules — superseded by **R1**, **R2**, **R
 
 ## Done
 
+- **2026-05-23** _(pending SHA)_ — TIEBREAK frontend (`TiebreakScreen` in `Game.jsx`, `tiebreakRoll` action in `useGame.js`) + AFK bot for TIEBREAK phase (`_afk_tiebreak_timer`, scheduled by `_schedule_afk`). Added missing i18n keys for `log_match_lost`, `log_round_point`, `log_player_sits_out`, `log_tiebreak_start`, `log_tiebreak_throw`, `log_afk_initial`, `log_round_all_tie`. Always-call `_schedule_afk` after `_resolve_round` so the new phase's timer is set up.
+- **2026-05-23** `bef1248` — Backend TIEBREAK phase + `tiebreak_roll` action + `_resolve_tiebreak` (tied losers only; tied winners deferred to G7).
+- **2026-05-23** `a905ae3` — match_losses + round_points accounting; no game-end on 2 losses; `GamePlayer.sets_lost` → `round_points` DB migration.
+- **2026-05-23** `5246fb5` — Match-end at 11 chips (was at any-player-zero, broken in N-player); sit-out at 0 chips during décharge.
 - **2026-05-23** `2048dae` — Rewrote `/how-to-play` and README "How to play" with the correct vocabulary (throw / match / manché / round / round point) and corrected tie behavior (always one loser, tiebreak re-throw, recursive). New "Vocabulary" section at the top of the page.
 - **2026-05-23** `4071313` — Room ownership transfer + read-only host settings panel. Added `Player.joined_at` so the leave handler picks the longest-tenured remaining seat (the players list can be reordered by the initial-roll sort, so list position is unreliable). New `RoomSettingsPanel.jsx` modal triggered by a host-only "⚙ Room rules" button in `Game.jsx` — shows the config the creator picked, read-only. 3 new unit tests in `test_host_migration.py`.
 - **2026-05-23** `fdd8033` — Cookie consent banner. New `<CookieBanner />` mounted in `App.jsx`; `utils/consent.js` exposes `getCookieConsent`/`hasAnalyticsConsent`/`setCookieConsent`/`clearCookieConsent` for future analytics gating (item 10). Privacy page rewritten with current consent state + a "change my choice" reset button.

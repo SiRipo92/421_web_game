@@ -194,6 +194,47 @@ def _cancel_afk(game: Game, player_id: str):
         task.cancel()
 
 
+async def _afk_tiebreak_timer(game: Game, player_id: str, game_id: str):
+    """Roll a tiebreak die for an AFK tied player; resolve if last to throw."""
+    from app.game.logic import _resolve_tiebreak
+
+    await asyncio.sleep(game.afk_seconds)
+    if game.phase != GamePhase.TIEBREAK or not game.tiebreak:
+        return
+    if player_id != game.tiebreak.get("next_pid"):
+        return
+    player = next((p for p in game.players if p.id == player_id), None)
+    if not player:
+        return
+    dice = [random.randint(1, 6) for _ in range(3)]
+    combo, rank, fiches = classify(dice)
+    game.tiebreak["throws"][player_id] = {
+        "dice": dice,
+        "combo": combo,
+        "rank": rank,
+        "fiches": fiches,
+    }
+    sorted_dice = sorted(dice, reverse=True)
+    _log(
+        game,
+        "log_tiebreak_throw",
+        f"{player.name} (AFK, départage) : {sorted_dice} → {combo} ({fiches}f)",
+        name=player.name,
+        dice=sorted_dice,
+        combo=combo,
+        fiches=fiches,
+    )
+    tied = game.tiebreak["tied_pids"]
+    idx = tied.index(player_id) + 1
+    if idx >= len(tied):
+        game.tiebreak["next_pid"] = None
+        await _resolve_tiebreak(game)
+    else:
+        game.tiebreak["next_pid"] = tied[idx]
+    await manager.broadcast(game_id, game_state(game))
+    _schedule_afk(game, game_id)
+
+
 def _schedule_afk(game: Game, game_id: str):
     """Start AFK timers for the players who need to act in the current phase."""
     if not game.afk_bot:
@@ -209,6 +250,14 @@ def _schedule_afk(game: Game, game_id: str):
                 continue
             task = asyncio.create_task(_afk_initial_timer(game, p.id, game_id))
             game.afk_tasks[p.id] = task
+        return
+    if game.phase == GamePhase.TIEBREAK and game.tiebreak:
+        next_pid = game.tiebreak.get("next_pid")
+        if not next_pid:
+            return
+        _cancel_afk(game, next_pid)
+        task = asyncio.create_task(_afk_tiebreak_timer(game, next_pid, game_id))
+        game.afk_tasks[next_pid] = task
         return
     if game.phase not in (GamePhase.CHARGE, GamePhase.DECHARGE):
         return
@@ -520,10 +569,7 @@ async def websocket_endpoint(
                     game.advance()
                     if game.all_done():
                         await _resolve_round(game)
-                    else:
-                        _schedule_afk(game, game_id)
-                else:
-                    _schedule_afk(game, game_id)
+                _schedule_afk(game, game_id)
                 await manager.broadcast(game_id, game_state(game))
 
             elif action == "keep":
@@ -573,8 +619,7 @@ async def websocket_endpoint(
                 game.advance()
                 if game.all_done():
                     await _resolve_round(game)
-                else:
-                    _schedule_afk(game, game_id)
+                _schedule_afk(game, game_id)
                 await manager.broadcast(game_id, game_state(game))
 
             elif action == "tiebreak_roll":
@@ -582,6 +627,7 @@ async def websocket_endpoint(
                     continue
                 if player_id != game.tiebreak.get("next_pid"):
                     continue
+                _cancel_afk(game, player_id)
                 dice = [random.randint(1, 6) for _ in range(3)]
                 combo, rank, fiches = classify(dice)
                 game.tiebreak["throws"][player_id] = {
@@ -608,6 +654,7 @@ async def websocket_endpoint(
                     await _resolve_tiebreak(game)
                 else:
                     game.tiebreak["next_pid"] = tied[idx]
+                _schedule_afk(game, game_id)
                 await manager.broadcast(game_id, game_state(game))
 
     except WebSocketDisconnect:

@@ -14,7 +14,7 @@ export function Game({ token }) {
   const [params] = useSearchParams()
   const playerId = params.get('pid')
   const navigate = useNavigate()
-  const { state, roll, keep, done, initialRoll, leave } = useGame(gameId, playerId, token)
+  const { state, roll, keep, done, initialRoll, tiebreakRoll, leave } = useGame(gameId, playerId, token)
   const logRef = useRef(null)
 
   const [logOpen, setLogOpen] = useState(true)
@@ -40,6 +40,10 @@ export function Game({ token }) {
 
   if (state.phase === 'initial_roll' || state.phase === 'waiting') {
     return <InitialRollScreen state={state} playerId={playerId} t={t} onRoll={initialRoll} />
+  }
+
+  if (state.phase === 'tiebreak') {
+    return <TiebreakScreen state={state} playerId={playerId} t={t} onRoll={tiebreakRoll} />
   }
 
   return (
@@ -317,6 +321,82 @@ function InitialRollScreen({ state, playerId, t, onRoll }) {
       </div>
     </div>
   )
+}
+
+function TiebreakScreen({ state, playerId, t, onRoll }) {
+  const tb = state.tiebreak || {}
+  const tied = tb.tied_pids || []
+  const throws = tb.throws || {}
+  const nextPid = tb.next_pid
+  const isMyTurn = nextPid === playerId
+  const isTied = tied.includes(playerId)
+  const playerById = (pid) => state.players?.find(p => p.id === pid)
+
+  return (
+    <div style={{ maxWidth: 640, margin: '4rem auto', padding: '0 1.5rem', textAlign: 'center' }}>
+      <div className="eyebrow" style={{ marginBottom: 16 }}>{t('tiebreak_label')}</div>
+      <h1 className="display" style={{ fontSize: 'clamp(2.4rem, 5vw, 3rem)', margin: '0 0 1rem' }}>
+        {t('tiebreak_title')}
+      </h1>
+      <p className="serif" style={{ color: 'var(--ink-mute)', fontStyle: 'italic', margin: '0 0 1rem' }}>
+        {t('tiebreak_subtitle')}
+      </p>
+      <div className="ticket" style={{ marginTop: '1.5rem', padding: '2rem' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: '1.5rem' }}>
+          {tied.map(pid => {
+            const p = playerById(pid)
+            if (!p) return null
+            const th = throws[pid]
+            const waiting = !th
+            const isUp = pid === nextPid
+            return (
+              <div key={pid} style={{
+                display: 'flex', alignItems: 'center', gap: 14, justifyContent: 'space-between',
+                padding: '0.6rem 0.8rem',
+                background: isUp ? 'rgba(var(--rouge-rgb, 180,40,40), 0.06)' : 'transparent',
+                borderRadius: 4,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <Avatar name={p.name} userId={p.user_id} hasAvatar={p.has_avatar ?? false}
+                          isSelf={pid === playerId} size={2.2} />
+                  <span className="serif">
+                    {p.name}
+                    {pid === playerId && (
+                      <em style={{ fontSize: '0.85rem', color: 'var(--ink-mute)', marginLeft: 6 }}>
+                        {t('you_label')}
+                      </em>
+                    )}
+                  </span>
+                </div>
+                <div className="mono" style={{ fontWeight: 700, fontSize: '1rem' }}>
+                  {th ? `${sortDesc(th.dice).join('-')} → ${th.combo} (${th.fiches}f)`
+                      : isUp ? <span className="pulse-soft" style={{ color: 'var(--rouge)' }}>{t('tiebreak_their_turn')}</span>
+                      : waiting ? <span style={{ color: 'var(--ink-fade)' }}>…</span>
+                      : ''}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+        {isTied && isMyTurn && (
+          <button type="button" onClick={onRoll} className="btn btn-rouge"
+                  style={{ width: '100%', justifyContent: 'center', minHeight: 48 }}>
+            🎲 {t('tiebreak_roll_btn')}
+          </button>
+        )}
+        {isTied && !isMyTurn && (
+          <p className="note">{t('tiebreak_waiting_other')}</p>
+        )}
+        {!isTied && (
+          <p className="note">{t('tiebreak_spectate')}</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function sortDesc(arr) {
+  return [...(arr || [])].sort((a, b) => b - a)
 }
 
 function FinishedScreen({ state, playerId, t, navigate }) {

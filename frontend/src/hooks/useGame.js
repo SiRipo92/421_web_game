@@ -58,8 +58,9 @@ export function useGame(gameId, playerId, token) {
   const keep = useCallback((index) => send({ action: 'keep', index }), [send])
   const done = useCallback(() => send({ action: 'done' }), [send])
   const initialRoll = useCallback(() => send({ action: 'initial_roll' }), [send])
+  const tiebreakRoll = useCallback(() => send({ action: 'tiebreak_roll' }), [send])
   const start = useCallback(() => send({ action: 'start' }), [send])
   const leave = useCallback(() => send({ action: 'leave' }), [send])
 
-  return { state, roll, keep, done, initialRoll, start, leave }
+  return { state, roll, keep, done, initialRoll, tiebreakRoll, start, leave }
 }
