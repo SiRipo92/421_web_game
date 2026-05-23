@@ -15,20 +15,6 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 
 ## Now
 
-### 1. Document in-game rules on `/how-to-play`
-**Why:** The current page is sparse. New players don't know how charge/decharge works, how points/fiches are tracked, what happens on a tie, or the game objective.
-**Scope:** `frontend/src/pages/HowToPlay.jsx` — add sections covering:
-- Game objective (be the player who reaches 0 fiches in decharge; survive two set losses to win)
-- Initial banker roll (lowest die starts; ties re-roll among lowest)
-- Charge phase: pool fills, round loser takes fiches
-- Decharge phase: pool empties, winners pass fiches to losers
-- Bank rules (`sec` vs `free`)
-- Tie handling (all-tied = no transfer; tied losers split; tied winners no transfer in decharge)
-- Combo ranking table (already partly in `ComboTable.jsx` — link or embed)
-- AFK bot behavior
-**Acceptance:** A first-time player can read the page and play a full game without help.
-**Dependencies:** None.
-
 ### 2. Strong-password UX + clearer prompts
 **Why:** The validator already enforces 8+ chars, uppercase, digit-or-special, ≤72 bytes (bcrypt limit) — but the user must hit "Submit" and parse a backend error to learn what's missing. The Login page has live checks (`pwdChecks`) but the requirements aren't visible *before* the user starts typing.
 **Scope:**
@@ -162,6 +148,7 @@ The web frontend is responsive; a native shell would enable push notifications f
 
 ## Done
 
+- **2026-05-23** _(pending SHA)_ — `/how-to-play` rule documentation: objective, banker roll, starter rotation, charge/décharge, bank rules, tie handling, AFK bot, winning the game. Also fixed `how_to_play_eyquitebrow` typo in the English locale.
 - **2026-05-23** `bf9f77b` — Removed `bank_rule="one"` (duplicate of `"sec"`)
 - **2026-05-23** `82d4731` — WS hardening (player_id auth, dup-connection kick, atomic join, msg size cap, JSON parse safety, leave handler cleanup, INITIAL_ROLL AFK)
 - **2026-05-23** `5d8bd45` — Game-logic rule correctness (starter rotation, tie handling, initial-roll lowest-tie, single-survivor auto-end)
