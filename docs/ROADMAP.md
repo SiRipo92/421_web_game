@@ -15,16 +15,6 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 
 ## Now
 
-### 2. Strong-password UX + clearer prompts
-**Why:** The validator already enforces 8+ chars, uppercase, digit-or-special, ≤72 bytes (bcrypt limit) — but the user must hit "Submit" and parse a backend error to learn what's missing. The Login page has live checks (`pwdChecks`) but the requirements aren't visible *before* the user starts typing.
-**Scope:**
-- `frontend/src/pages/Login.jsx` (register tab): show all four requirements as a static checklist on focus/mount, with the live ✓/○ marks already implemented; consider a strength meter (weak / fair / strong) computed from the same checks.
-- Same checklist on `CompleteProfile.jsx` if it ever adds a password (it doesn't today; flag if it changes).
-- Same UX on `ResetPassword.jsx`.
-- i18n keys exist for the four rules (`pwd_req_length`, `pwd_req_upper`, `pwd_req_special`, `pwd_req_maxlen`). Reuse them.
-**Acceptance:** A user sees what's required before typing; checkmarks flip green in real time; backend rejection only triggers on edge cases (disposable email, taken username).
-**Dependencies:** None.
-
 ### 3. Cookies consent banner (CNIL / GDPR)
 **Why:** The site uses `localStorage` for the auth token and theme/lang prefs. Per CNIL guidance, even functional storage benefits from a transparent notice; if we add any analytics later we'll need a proper consent flow already in place.
 **Scope:**
@@ -148,6 +138,7 @@ The web frontend is responsive; a native shell would enable push notifications f
 
 ## Done
 
+- **2026-05-23** _(pending SHA)_ — Strong-password UX. Extracted `pwdChecks`/`isPwdValid`/`pwdStrength` to `utils/pwdChecks.js`; new shared `PasswordChecklist` component with a 3-segment strength meter that's visible on mount (no longer hidden behind `pwdTouched`). Used on Login register tab + ResetPassword.
 - **2026-05-23** `aec1c44` — `/how-to-play` rule documentation: objective, banker roll, starter rotation, charge/décharge, bank rules, tie handling, AFK bot, winning the game. Also fixed `how_to_play_eyquitebrow` typo in the English locale.
 - **2026-05-23** `bf9f77b` — Removed `bank_rule="one"` (duplicate of `"sec"`)
 - **2026-05-23** `82d4731` — WS hardening (player_id auth, dup-connection kick, atomic join, msg size cap, JSON parse safety, leave handler cleanup, INITIAL_ROLL AFK)
