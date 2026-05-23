@@ -172,6 +172,37 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 - Use icons (e.g., 💀 for manches, 🏷️ for round points) or compact "M:1 · P:0" text.
 **Status:** Landing in the current commit batch.
 
+### G26. Profile: site language follows account preference at login
+**Why:** Reported. Today the site language is held entirely in `LangContext` (localStorage). The logged-in user's `lang_pref` exists in the DB but doesn't drive the site language at all — change FR→EN in the profile, the UI stays French until you also flip the TopBar toggle. Partially fixed in the lang-update commit (post-save, we now call `setLang` to sync), but on initial login we still ignore the persisted preference.
+**Scope:**
+- When `useAuth` first fetches `/auth/me` and gets a `lang_pref`, dispatch into `LangContext.setLang` once. Guard against overwriting the user's mid-session toggle by only doing it on first login of the session.
+- When the lang toggle flips while logged in, optimistically write to localStorage AND fire `updateMe({lang_pref})` in the background so the server's copy stays in sync (so a fresh session in another browser starts in the right language).
+
+### G27. Notifications inbox
+**Why:** Captured for future. User wants a place in the profile to see in-app notifications (friend request, game invite, "Sierra joined a public room", etc.).
+**Scope (sketch only):**
+- New table `Notification(user_id, kind, payload jsonb, read_at, created_at)`.
+- Endpoints: `GET /api/notifications`, `POST /api/notifications/{id}/read`, WS push channel on the user's auth WS (or SSE).
+- Profile page: notifications bell with unread count + a panel that lists recent.
+- First populators: G28 (friends) and G29 (invites).
+
+### G28. Friends / follow system
+**Why:** Captured for future. User wants the ability to follow other accounts to see what they're up to and quickly invite them to a game.
+**Scope (sketch only):**
+- Table `Follow(follower_id, followee_id, created_at)`. Both-direction or one-way? Spec'd as "follow" (one-way), but a mutual-follow shortcut might be nice (think "friends").
+- Endpoints: `POST /api/follow/{user_id}`, `DELETE /api/follow/{user_id}`, `GET /api/me/following`, `GET /api/me/followers`.
+- UI: follow button on `/profile/{username}`; followers/following count + list on own profile.
+- Privacy: respect a future `User.profile_visibility` setting (defer).
+
+### G29. Invite friends to play
+**Why:** Captured for future. User wants to send a game invite to a follower from inside the room ("Inviter") and have them get a notification + one-tap join.
+**Scope (sketch only):**
+- New `GameInvite(from_user, to_user, game_id, code, created_at, status)` row keyed by code (with TTL).
+- Backend: `POST /api/games/{game_id}/invite` (host-only, must be following or mutual), `POST /api/invites/{code}/accept`.
+- Notification created on send; accepting fires a `/api/join/{game_id}` and navigates the invitee into the waiting room.
+- Email backup if invitee is offline + opted in.
+- Depends on G27 (notifications) and G28 (friends).
+
 ### G22. French vocabulary review — manche / partie / banque / piste
 **Why:** Reported. The French i18n was mixing English-ish vocabulary ("match", "round", "pool", "Tapis") with proper French terms. The proper mapping is:
 - "match" (English) → « manche » (féminin: une manche)
@@ -331,6 +362,7 @@ Past commits that captured incorrect rules — superseded by **R1**, **R2**, **R
 ## Done
 
 - **2026-05-23** `63733a4` — G20: action-bar eyebrow + serif text bumped to readable sizes (0.78rem / 1.05rem; ink-soft instead of ink-mute). Top-panel control buttons (host's ⚙ Room rules and everyone's 🚪 Quitter) are now proper rounded pill buttons with hover states — Quitter is rouge-bordered and fills rouge on hover for visibility; Room rules is neutral. Both stay compact and wrap cleanly on narrow widths.
+- **2026-05-23** _(pending SHA)_ — Fixed `PATCH /auth/me` returning 422: the `req()` wrapper in `api/auth.js` was spreading `opts` AFTER its own headers, so the `Authorization: Bearer ...` from callers stripped the `Content-Type: application/json`. FastAPI then couldn't parse the JSON body. One-line fix: spread `opts` first, build headers second. Also: after a successful lang_pref save, the profile now calls `setLang()` so the UI flips language immediately (G26 partial — full login-time sync still queued). G26 (lang follows profile), G27 (notifications), G28 (friends/follow), G29 (invite-friends) added to roadmap. G18 still covers the empty-stats issue (round_points / games_played never persist because game-end no longer auto-fires).
 - **2026-05-23** `c664399` — G24: host kick. New WS action `kick {target_id, reason}` (host-only, can't kick self). Sends `{type:"kicked", reason}` to target's socket before closing it, then runs the same cleanup as leave (drops them from players/match_losses/round_points/etc., reassigns round_starter / current_index, resolves cycle if all_done). New `log_player_kicked` journal event. Frontend: small ✕ kick pill on each non-self player strip (host-only); confirms via ConfirmModal; KickedOverlay on the kicked client explains the reason (default "absence prolongée du clavier"; structured for future chat-moderation reasons — toxic/spam/default keys already in i18n).
 - **2026-05-23** `3f56da9` — G23: SelfPlayToast. Bottom-right brass-bordered notification pops when the local player's turn ends (manual done OR auto-validate OR AFK bot taking over for them). Reads: "Vous avez joué [4-2-1] → 421 (8f). À NextPlayer de jouer." Different copy when the bot took the turn ("Coup joué par le bot"). Auto-dismiss 5s, click to dismiss. Triggers off log_turn/log_afk_turn events where `name === me.name`, dedup via ref-counter.
 - **2026-05-23** `fee800a` — Round-loss banner differentiation (count=2 shows "X a perdu la partie !" with stronger styling instead of repeating "X est manché"). Manche + round-point pips (💀 / 🏷) on PlayerStrip and PisteSeat so every seat shows their losses at a glance. New `log_afk_takeover` event surfaced before the bot turn so the table knows who stepped away. Roadmap items G23 (self-play toast), G24 (host kick), G25 (manche markers — done in this batch) added.

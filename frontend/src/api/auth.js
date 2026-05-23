@@ -1,7 +1,11 @@
 async function req(path, opts = {}) {
+  // Order matters: spread opts FIRST, then build the final headers object so the
+  // Authorization: Bearer ... passed by callers doesn't overwrite Content-Type
+  // (which would cause FastAPI to 422 PATCH /auth/me & POST /auth/complete-profile
+  // because the body isn't parsed as JSON without the Content-Type header).
   const res = await fetch(path, {
-    headers: { 'Content-Type': 'application/json', ...opts.headers },
     ...opts,
+    headers: { 'Content-Type': 'application/json', ...opts.headers },
   })
   const body = await res.json().catch(() => ({}))
   if (!res.ok) {
