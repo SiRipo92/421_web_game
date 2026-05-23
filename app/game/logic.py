@@ -1,7 +1,6 @@
 """Core game logic: scoring, game/player dataclasses, round resolution."""
 
 import asyncio
-from collections import Counter  # used by _finalize_order
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Optional
@@ -101,7 +100,7 @@ class Game:
     # Room configuration
     is_public: bool = False
     max_players: int = 5
-    bank_rule: str = "free"  # "sec" | "one" | "free"
+    bank_rule: str = "free"  # "sec" | "free"
     afk_seconds: int = 45
     afk_bot: bool = True
     allow_spectators: bool = True
@@ -198,16 +197,17 @@ def _start_initial_roll(game: Game):
 
 
 def _finalize_order(game: Game):
-    """Sort players by initial-roll result; re-roll tied players until clear."""
+    """Sort players by initial-roll result; re-roll only players tied for the lowest."""
     rolls = game.initial_rolls
-    counts = Counter(rolls[p.id] for p in game.players)
-    tied_vals = {v for v, c in counts.items() if c > 1}
+    values = [rolls[p.id] for p in game.players]
+    min_val = min(values)
+    low_tied_ids = {p.id for p in game.players if rolls[p.id] == min_val}
 
-    if tied_vals:
-        for p in game.players:
-            if rolls[p.id] in tied_vals:
-                game.initial_rolls[p.id] = None
-        tied_names = ", ".join(p.name for p in game.players if game.initial_rolls[p.id] is None)
+    if len(low_tied_ids) > 1:
+        # Only the players tied for the lowest re-roll; higher rolls stand.
+        for pid in low_tied_ids:
+            game.initial_rolls[pid] = None
+        tied_names = ", ".join(p.name for p in game.players if p.id in low_tied_ids)
         _log(game, "log_tie", f"Égalité ! {tied_names} doivent relancer.", names=tied_names)
         return
 
@@ -285,6 +285,19 @@ async def _resolve_round(game: Game):
     """Settle fiche transfers after all players have played; handle set/game end."""
     players = game.players
 
+    # E1: only one player remaining (everyone else left/disconnected) → they win
+    if len(players) == 1:
+        survivor = players[0]
+        game.phase = GamePhase.FINISHED
+        _log(
+            game,
+            "log_game_over",
+            f"Fin de partie ! {survivor.name} gagne (seul restant).",
+            winner=survivor.name,
+        )
+        asyncio.create_task(_persist_game(game))
+        return
+
     game.last_round_plays = [
         {
             "player_id": p.id,
@@ -301,73 +314,97 @@ async def _resolve_round(game: Game):
     ]
 
     ranks = [(p, p.turn.rank) for p in players]
-    winner = max(ranks, key=lambda x: x[1])[0]
-    loser = min(ranks, key=lambda x: x[1])[0]
-    penalty = max(winner.turn.fiches, 1)
+    max_rank = max(r for _, r in ranks)
+    min_rank = min(r for _, r in ranks)
 
-    if game.phase == GamePhase.CHARGE:
-        if game.pool > 0:
-            taken = min(penalty, game.pool)
-            loser.tokens += taken
-            game.pool -= taken
-            _log(
-                game,
-                "log_charge_takes",
-                f"{loser.name} prend {taken} jeton(s) · Pool: {game.pool}",
-                name=loser.name,
-                n=taken,
-                pool=game.pool,
-            )
-        if game.pool == 0:
-            game.phase = GamePhase.DECHARGE
-            _log(game, "log_pool_empty", "Pool vide → Décharge !")
+    next_starter_id: str | None = None  # set if a loser is determined
 
-    else:  # DECHARGE
-        if winner.id != loser.id:
-            transfer = min(penalty, winner.tokens)
-            winner.tokens -= transfer
-            loser.tokens += transfer
-            _log(
-                game,
-                "log_decharge_gives",
-                f"{winner.name} donne {transfer} jeton(s) à {loser.name}",
-                winner=winner.name,
-                n=transfer,
-                loser=loser.name,
-            )
+    if max_rank == min_rank:
+        # B3: everyone tied → no transfer, starter unchanged
+        _log(game, "log_round_all_tie", "Manche annulée — tous à égalité.", rank=max_rank)
+    else:
+        winners = [p for p, r in ranks if r == max_rank]
+        losers = [p for p, r in ranks if r == min_rank]
+        penalty = max(winners[0].turn.fiches, 1)
 
-        set_winner = next((p for p in players if p.tokens == 0), None)
-        if set_winner:
-            set_loser = max(players, key=lambda p: p.tokens)
-            sl_id = set_loser.id
-            game.sets_lost[sl_id] = game.sets_lost.get(sl_id, 0) + 1
-            sl_count = game.sets_lost[sl_id]
-            _admit_waiting(game)
-            _log(
-                game,
-                "log_set_lost",
-                f"{set_loser.name} a les 11 jetons — set perdu ({sl_count}/2) · "
-                f"{set_loser.name} donne le rythme au prochain set.",
-                name=set_loser.name,
-                count=sl_count,
-            )
-            if sl_count >= 2:
-                game.phase = GamePhase.FINISHED
+        if game.phase == GamePhase.CHARGE:
+            # B3: each tied loser takes `penalty` from the pool, until empty
+            for loser in losers:
+                if game.pool <= 0:
+                    break
+                taken = min(penalty, game.pool)
+                loser.tokens += taken
+                game.pool -= taken
                 _log(
                     game,
-                    "log_game_over",
-                    f"Fin de partie ! {set_winner.name} gagne !",
-                    winner=set_winner.name,
+                    "log_charge_takes",
+                    f"{loser.name} prend {taken} jeton(s) · Pool: {game.pool}",
+                    name=loser.name,
+                    n=taken,
+                    pool=game.pool,
                 )
-                asyncio.create_task(_persist_game(game))
+            if game.pool == 0:
+                game.phase = GamePhase.DECHARGE
+                _log(game, "log_pool_empty", "Pool vide → Décharge !")
+
+        else:  # DECHARGE
+            # B3: single winner gives to each tied loser (split if >1 loser).
+            # Multiple winners (tied at top) → no transfer this round.
+            if len(winners) == 1:
+                winner = winners[0]
+                each = max(penalty // len(losers), 1) if len(losers) > 1 else penalty
+                for loser in losers:
+                    if winner.tokens <= 0:
+                        break
+                    transfer = min(each, winner.tokens)
+                    winner.tokens -= transfer
+                    loser.tokens += transfer
+                    _log(
+                        game,
+                        "log_decharge_gives",
+                        f"{winner.name} donne {transfer} jeton(s) à {loser.name}",
+                        winner=winner.name,
+                        n=transfer,
+                        loser=loser.name,
+                    )
+
+            set_winner = next((p for p in players if p.tokens == 0), None)
+            if set_winner:
+                set_loser = max(players, key=lambda p: p.tokens)
+                sl_id = set_loser.id
+                game.sets_lost[sl_id] = game.sets_lost.get(sl_id, 0) + 1
+                sl_count = game.sets_lost[sl_id]
+                _admit_waiting(game)
+                _log(
+                    game,
+                    "log_set_lost",
+                    f"{set_loser.name} a les 11 jetons — set perdu ({sl_count}/2) · "
+                    f"{set_loser.name} donne le rythme au prochain set.",
+                    name=set_loser.name,
+                    count=sl_count,
+                )
+                if sl_count >= 2:
+                    game.phase = GamePhase.FINISHED
+                    _log(
+                        game,
+                        "log_game_over",
+                        f"Fin de partie ! {set_winner.name} gagne !",
+                        winner=set_winner.name,
+                    )
+                    asyncio.create_task(_persist_game(game))
+                    return
+                _start_new_set(game, sl_id)
                 return
-            _start_new_set(game, sl_id)
-            return
+
+        # B2: loser of the round becomes next round's starter (first by index if tied)
+        next_starter_id = losers[0].id
 
     # Normal next round
     game.round_num += 1
     game.max_throws_this_round = 3
-    game.round_starter_id = game.current_player().id if game.current_player() else ""
+    if next_starter_id is not None:
+        game.round_starter_id = next_starter_id
+        game.current_index = next((i for i, p in enumerate(players) if p.id == next_starter_id), 0)
     for p in players:
         p.turn = new_turn()
     starter_name = next((p.name for p in game.players if p.id == game.round_starter_id), "")

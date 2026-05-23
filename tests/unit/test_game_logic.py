@@ -150,18 +150,30 @@ def test_finalize_order_tie_resets():
 
 
 def test_finalize_order_three_players_partial_tie():
-    """Tied players are reset; non-tied player keeps their original roll."""
+    """Ties above the lowest don't trigger a re-roll — the lowest is unambiguous."""
     game = _make_game(3)
     _start_initial_roll(game)
     game.initial_rolls["p0"] = 3
     game.initial_rolls["p1"] = 3
     game.initial_rolls["p2"] = 1
     _finalize_order(game)
+    # p2 alone has the lowest roll → game starts; the 3-3 tie is irrelevant
+    assert game.phase == GamePhase.CHARGE
+    assert game.players[0].id == "p2"
+
+
+def test_finalize_order_tie_only_at_lowest_triggers_reroll():
+    """Tie at the lowest score forces just those players to re-roll."""
+    game = _make_game(3)
+    _start_initial_roll(game)
+    game.initial_rolls["p0"] = 2
+    game.initial_rolls["p1"] = 2
+    game.initial_rolls["p2"] = 5
+    _finalize_order(game)
     assert game.phase == GamePhase.INITIAL_ROLL
-    # p0 and p1 tied — they get reset; p2 keeps their roll (non-tied)
     assert game.initial_rolls["p0"] is None
     assert game.initial_rolls["p1"] is None
-    assert game.initial_rolls["p2"] == 1
+    assert game.initial_rolls["p2"] == 5  # non-tied (higher) keeps their roll
 
 
 # ---------------------------------------------------------------------------
@@ -350,3 +362,117 @@ def test_game_state_no_current_player_when_empty():
     game = Game(id="EMPTY")
     state = game_state(game)
     assert state["current_player_id"] is None
+
+
+# ---------------------------------------------------------------------------
+# _resolve_round — new behaviors (starter rotation, tie handling, auto-end)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_resolve_round_loser_becomes_next_starter():
+    """B2: the loser of a charge round becomes the starter of the next round."""
+    game = _make_game(3)
+    game.phase = GamePhase.CHARGE
+    game.pool = 11
+    game.round_num = 1
+    game.current_index = 0
+    game.round_starter_id = "p0"
+    # p0 wins (421), p2 loses (lowest rank), p1 in the middle
+    game.players[0].turn = _done_turn(9000, 8)
+    game.players[1].turn = _done_turn(2200, 2)
+    game.players[2].turn = _done_turn(100, 1)
+    await _resolve_round(game)
+    assert game.round_starter_id == "p2"
+    assert game.players[game.current_index].id == "p2"
+    assert game.round_num == 2
+
+
+@pytest.mark.asyncio
+async def test_resolve_round_charge_tied_losers_both_take_from_pool():
+    """B3: when multiple players tie at the lowest rank, each takes the penalty."""
+    game = _make_game(3)
+    game.phase = GamePhase.CHARGE
+    game.pool = 11
+    game.round_num = 1
+    game.round_starter_id = "p0"
+    # p0 wins with 8 fiches; p1 and p2 tied at the lowest rank
+    game.players[0].turn = _done_turn(9000, 8)
+    game.players[1].turn = _done_turn(100, 1)
+    game.players[2].turn = _done_turn(100, 1)
+    await _resolve_round(game)
+    # Both losers should have taken 8 each, but pool only had 11 → first takes 8, second takes 3
+    assert game.players[1].tokens + game.players[2].tokens == 11
+    assert game.pool == 0
+    assert game.phase == GamePhase.DECHARGE  # pool emptied
+
+
+@pytest.mark.asyncio
+async def test_resolve_round_all_tied_no_transfer():
+    """B3: when all players tie on rank, no transfer happens and starter stays."""
+    game = _make_game(3)
+    game.phase = GamePhase.CHARGE
+    game.pool = 11
+    game.round_num = 1
+    game.round_starter_id = "p1"
+    # All three roll the same rank
+    for p in game.players:
+        p.turn = _done_turn(2200, 2)
+    await _resolve_round(game)
+    assert game.pool == 11
+    assert all(p.tokens == 0 for p in game.players)
+    assert game.round_starter_id == "p1"  # starter unchanged when no loser exists
+
+
+@pytest.mark.asyncio
+async def test_resolve_round_decharge_tied_losers_split_transfer():
+    """B3: single winner gives split shares to each tied loser in DECHARGE."""
+    game = _make_game(3)
+    game.phase = GamePhase.DECHARGE
+    game.round_num = 1
+    game.players[0].tokens = 8
+    game.players[1].tokens = 3
+    game.players[2].tokens = 0
+    game.players[0].turn = _done_turn(9000, 8)
+    game.players[1].turn = _done_turn(100, 1)
+    game.players[2].turn = _done_turn(100, 1)
+    game.round_starter_id = "p0"
+    p0_before = game.players[0].tokens
+    await _resolve_round(game)
+    # The winner gave some tokens; both tied losers received something
+    assert game.players[0].tokens < p0_before
+
+
+@pytest.mark.asyncio
+async def test_resolve_round_decharge_tied_winners_no_transfer():
+    """B3: multiple winners tied at the top → no transfer this round."""
+    game = _make_game(3)
+    game.phase = GamePhase.DECHARGE
+    game.round_num = 1
+    game.players[0].tokens = 5
+    game.players[1].tokens = 5
+    game.players[2].tokens = 1
+    # p0 and p1 tied at top; p2 alone at bottom
+    game.players[0].turn = _done_turn(9000, 8)
+    game.players[1].turn = _done_turn(9000, 8)
+    game.players[2].turn = _done_turn(100, 1)
+    game.round_starter_id = "p0"
+    await _resolve_round(game)
+    assert game.players[0].tokens == 5
+    assert game.players[1].tokens == 5
+    # p2 still gets named next starter (they're the round loser)
+    assert game.round_starter_id == "p2"
+
+
+@pytest.mark.asyncio
+async def test_resolve_round_single_player_auto_ends_game():
+    """E1: if everyone else left, the lone survivor wins immediately."""
+    game = _make_game(1)
+    game.phase = GamePhase.CHARGE
+    game.round_num = 4
+    game.players[0].turn = _done_turn(2200, 2)
+    await _resolve_round(game)
+    await asyncio.sleep(0)  # let the persist task start
+    assert game.phase == GamePhase.FINISHED
+    # last log_events entry names the survivor as winner
+    assert any(e.get("key") == "log_game_over" for e in game.log_events)
