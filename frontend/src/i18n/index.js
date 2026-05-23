@@ -277,6 +277,22 @@ const I18N = {
     log_afk_initial: "{name} (AFK) lance {roll}",
     log_round_all_tie: "Tous à égalité au rang {rank} — pas de transfert.",
 
+    // Commentary ticker (G21) — left rail with rolling headline events
+    ticker_eyebrow: "EN DIRECT",
+    ticker_title: "Le fil de la table",
+    ticker_aria: "Commentaires en direct",
+    ticker_empty: "En attente du prochain événement…",
+    ticker_label_match: "MANCHE",
+    ticker_label_tiebreak: "DÉPARTAGE",
+    ticker_label_player: "JOUEUR",
+    ticker_label_afk: "AFK",
+    ticker_label_phase: "PHASE",
+    ticker_label_round: "PARTIE",
+    ticker_label_event: "ÉVÉNEMENT",
+    score_to_beat_label: "Score à battre",
+    score_to_beat_in_throws: "{n} lancers",
+    score_to_beat_aria: "Score à battre : {name} avec {combo} ({fiches} fiches)",
+
     // Privacy & Terms
     privacy_title: "Politique de confidentialité",
     terms_eyebrow: "Règles de la maison",
@@ -728,6 +744,22 @@ const I18N = {
     log_afk_turn: "{name} (AFK): {dice} → {combo} ({fiches}f)",
     log_afk_initial: "{name} (AFK) rolls {roll}",
     log_round_all_tie: "All tied at rank {rank} — no transfer.",
+
+    // Commentary ticker (G21)
+    ticker_eyebrow: "LIVE",
+    ticker_title: "Table feed",
+    ticker_aria: "Live commentary",
+    ticker_empty: "Waiting for the next event…",
+    ticker_label_match: "MATCH",
+    ticker_label_tiebreak: "TIEBREAK",
+    ticker_label_player: "PLAYER",
+    ticker_label_afk: "AFK",
+    ticker_label_phase: "PHASE",
+    ticker_label_round: "ROUND",
+    ticker_label_event: "EVENT",
+    score_to_beat_label: "Score to beat",
+    score_to_beat_in_throws: "{n} throws",
+    score_to_beat_aria: "Score to beat: {name} with {combo} ({fiches} chips)",
 
     // Privacy & Terms
     privacy_title: "Privacy Policy",
