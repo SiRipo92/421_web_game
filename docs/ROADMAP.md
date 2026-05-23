@@ -114,7 +114,7 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 - Options: (a) accept it as dev-only noise and document; (b) move WS open/close out of useEffect into a useRef-guarded singleton per (gameId, playerId, token) tuple; (c) keep StrictMode but make the WS connect lazy + idempotent.
 - Doesn't affect production behavior, so low-priority.
 
-### G19. TopBar responsive layout for 641–835px breakpoint
+### G19. (DONE) TopBar responsive layout for 641–835px breakpoint
 **Why:** Reported. The TopBar's content (logo, nav links, lang/theme toggles, user menu) gets pushed off-screen to the right between roughly 641px and 835px wide. Mobile burger kicks in below 640px, desktop layout above ~835px, but the in-between range has no specific treatment.
 **Scope:**
 - Add a media-query band (or use a tighter desktop breakpoint, e.g. `@media (max-width: 900px)`) that:
@@ -305,6 +305,7 @@ Past commits that captured incorrect rules — superseded by **R1**, **R2**, **R
 
 ## Done
 
+- **2026-05-23** _(pending SHA)_ — G19: raised TopBar burger threshold from 640px → 880px so the 641–835 zone no longer overflows. Desktop nav (logo + 3 links + 2 dividers + lang + theme + user menu) needs ~720px minimum, plus padding; anything narrower now uses the drawer. Tablet-portrait lands in the drawer (still very usable).
 - **2026-05-23** `efd0be5` — French vocabulary review (G22). Replaced "match" → « manche », "round" → « partie », "pool" → « banque », "Le Tapis" → « La piste » across `i18n/index.js` (FR section), `Game.jsx` piste banner, `CreateRoom.jsx` title, backend French log fallback strings in `logic.py`. English copy unchanged.
 - **2026-05-23** `c3ba8f1` — Match-end banner (G13), rhythm indicator (G15), bigger keep-hint (G16).
 - **2026-05-23** `ec71db8` — Defensive try/except around WS action dispatch — bug in any handler no longer drops the socket. Extracted `_dispatch` helper.

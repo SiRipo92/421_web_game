@@ -679,8 +679,12 @@ input, textarea, select { font-family: inherit; }
   display: none;
 }
 
-/* ── Mobile breakpoint ───────────────────────────────────────────────── */
-@media (max-width: 640px) {
+/* ── Mobile + narrow-tablet breakpoint ─────────────────────────────────── */
+/* Anything under 880px gets the burger drawer. Below ~860px the desktop nav
+   gets crowded (logo + 3 links + 2 rules + lang + theme + user menu = ~720px
+   minimum) and elements were spilling off-screen in the 641–835 range. The
+   drawer is more usable than a half-cut-off nav. */
+@media (max-width: 880px) {
   .topbar {
     padding: 1rem 1.25rem;
     position: relative;
