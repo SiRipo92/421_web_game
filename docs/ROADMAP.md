@@ -147,6 +147,31 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 - Toast should auto-dismiss after ~5s; can be paused on hover.
 - This subsumes part of G6 ("Vous/You" personalization) and G10 (commentary ticker).
 
+### G23. Self-play toast after auto-validate
+**Why:** When a player's turn auto-validates (rolls_left hit 0, or sec/max throws reached), they don't get a "you sent X to the table" summary — they just see the next player start. Reported as confusing.
+**Scope:**
+- New frontend `SelfPlayToast` component: pops bottom-right of the piste when the local player's turn just transitioned from `!done` → `done` (or the cycle advanced past them).
+- Content: `"Vous avez joué [4-2-1] → 421 (8 fiches). À X de jouer."` — playful bistrot voice.
+- Triggers off log_events for self (`log_turn` with name === viewer's name).
+- Auto-dismiss ~4s, click to dismiss.
+- Subsumes part of G21.
+
+### G24. Host: kick AFK player
+**Why:** Reported. When a player goes AFK and the bot keeps playing for them, the host wants the option to free the seat for someone else instead of waiting through the timeout cycle.
+**Scope:**
+- Backend: new WS action `kick` accepting `target_id`. Validates the sender is `game.host_player_id` AND target isn't the host themselves. Treats it like the target's `leave` action (cleanup state, broadcast, close the target's WS).
+- Frontend: small kick button next to each player strip when (viewer is host) AND (target's connected state has been false for ≥ N seconds OR the bot has played their last cycle). Confirm modal.
+- Log: `log_player_kicked` event ("X a été expulsé par l'hôte.").
+
+### G25. Persistent manché / round-points indicators on player strip
+**Why:** Reported. Today nothing visually flags which players have lost matches/rounds during the current session — the banner pops briefly then disappears.
+**Scope:**
+- PlayerStrip + PisteSeat: render two small pip rows per player:
+  - `match_losses` (0–1 — resets to 0 when 2 hit and round-point taken)
+  - `round_points` cumulative count
+- Use icons (e.g., 💀 for manches, 🏷️ for round points) or compact "M:1 · P:0" text.
+**Status:** Landing in the current commit batch.
+
 ### G22. French vocabulary review — manche / partie / banque / piste
 **Why:** Reported. The French i18n was mixing English-ish vocabulary ("match", "round", "pool", "Tapis") with proper French terms. The proper mapping is:
 - "match" (English) → « manche » (féminin: une manche)
@@ -306,6 +331,8 @@ Past commits that captured incorrect rules — superseded by **R1**, **R2**, **R
 ## Done
 
 - **2026-05-23** `63733a4` — G20: action-bar eyebrow + serif text bumped to readable sizes (0.78rem / 1.05rem; ink-soft instead of ink-mute). Top-panel control buttons (host's ⚙ Room rules and everyone's 🚪 Quitter) are now proper rounded pill buttons with hover states — Quitter is rouge-bordered and fills rouge on hover for visibility; Room rules is neutral. Both stay compact and wrap cleanly on narrow widths.
+- **2026-05-23** _(pending SHA)_ — Round-loss banner differentiation (count=2 shows "X a perdu la partie !" with stronger styling instead of repeating "X est manché"). Manche + round-point pips (💀 / 🏷) on PlayerStrip and PisteSeat so every seat shows their losses at a glance. New `log_afk_takeover` event surfaced before the bot turn so the table knows who stepped away. Roadmap items G23 (self-play toast), G24 (host kick), G25 (manche markers — done in this batch) added.
+- **2026-05-23** `63733a4` — G20: action-bar polish + Quitter/Room rules pills.
 - **2026-05-23** `0483a74` — G19: raised TopBar burger threshold from 640px → 880px so the 641–835 zone no longer overflows. Desktop nav (logo + 3 links + 2 dividers + lang + theme + user menu) needs ~720px minimum, plus padding; anything narrower now uses the drawer. Tablet-portrait lands in the drawer (still very usable).
 - **2026-05-23** `efd0be5` — French vocabulary review (G22). Replaced "match" → « manche », "round" → « partie », "pool" → « banque », "Le Tapis" → « La piste » across `i18n/index.js` (FR section), `Game.jsx` piste banner, `CreateRoom.jsx` title, backend French log fallback strings in `logic.py`. English copy unchanged.
 - **2026-05-23** `c3ba8f1` — Match-end banner (G13), rhythm indicator (G15), bigger keep-hint (G16).

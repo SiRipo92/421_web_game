@@ -600,10 +600,44 @@ function PlayerStrip({ p, active, isSelf }) {
         <span className="serif" style={{ fontWeight: 600, fontSize: '0.85rem' }}>{p.name}{isSelf ? ' ★' : ''}</span>
         <span className="mono" style={{ fontSize: '0.65rem', opacity: 0.7 }}>{p.tokens ?? 0} fiches</span>
       </div>
+      <ScorePips matchLosses={p.match_losses ?? 0} roundPoints={p.round_points ?? 0} active={active} />
       {p.turn?.done && p.turn.dice && (
         <div style={{ display: 'flex', gap: 2, marginLeft: 4 }}>
           {p.turn.dice.map((v, i) => <Die key={i} value={v} mini />)}
         </div>
+      )}
+    </div>
+  )
+}
+
+function ScorePips({ matchLosses, roundPoints, active }) {
+  // Compact loss markers shown next to the player name. We always render both
+  // counters (even at 0) so the player can see their position at a glance —
+  // 💀 = manche perdue ce round, 🏷 = points de partie cumulés.
+  if (!matchLosses && !roundPoints) return null
+  return (
+    <div
+      style={{
+        display: 'inline-flex',
+        gap: 4,
+        marginLeft: 4,
+        fontSize: '0.7rem',
+        fontFamily: 'var(--mono)',
+        color: active ? 'var(--paper)' : 'var(--ink-soft)',
+      }}
+      aria-label={`Manches perdues: ${matchLosses} · Points de partie: ${roundPoints}`}
+    >
+      {matchLosses > 0 && (
+        <span style={{
+          padding: '1px 5px', borderRadius: 8, background: active ? 'rgba(255,255,255,0.18)' : 'var(--paper)',
+          border: '1px solid var(--rule)', fontWeight: 700, color: 'var(--rouge)',
+        }} title="Manches perdues ce round">💀 {matchLosses}</span>
+      )}
+      {roundPoints > 0 && (
+        <span style={{
+          padding: '1px 5px', borderRadius: 8, background: active ? 'rgba(255,255,255,0.18)' : 'var(--paper)',
+          border: '1px solid var(--rule)', fontWeight: 700, color: 'var(--brass-deep)',
+        }} title="Points de partie">🏷 {roundPoints}</span>
       )}
     </div>
   )
@@ -625,9 +659,11 @@ function PisteSeat({ p, active, isSelf, x, y }) {
         padding: '0.3rem 0.7rem', borderRadius: 2,
         fontFamily: 'var(--display)', fontWeight: 700, fontSize: '0.9rem',
         whiteSpace: 'nowrap',
+        display: 'flex', alignItems: 'center', gap: 6,
         boxShadow: active ? '0 4px 0 rgba(0,0,0,0.3)' : '0 2px 0 rgba(0,0,0,0.1)',
       }}>
-        {p.name}{isSelf ? ' ★' : ''}
+        <span>{p.name}{isSelf ? ' ★' : ''}</span>
+        <ScorePips matchLosses={p.match_losses ?? 0} roundPoints={p.round_points ?? 0} active={active} />
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <div style={{
@@ -675,6 +711,10 @@ function AfkBar({ total }) {
 }
 
 function MatchEndBanner({ t, name, count, onClose }) {
+  // count >= 2 means this is the SECOND manche of the round → that player
+  // takes a round-point and a new round starts. Use heavier copy + a stronger
+  // visual treatment so it's distinct from a "just lost a manche" banner.
+  const isRoundLoss = count >= 2
   return (
     <button
       type="button"
@@ -686,7 +726,7 @@ function MatchEndBanner({ t, name, count, onClose }) {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        background: 'rgba(20,15,12,0.55)',
+        background: isRoundLoss ? 'rgba(20,15,12,0.7)' : 'rgba(20,15,12,0.55)',
         border: 'none',
         cursor: 'pointer',
         animation: 'fadeIn 0.25s ease-out',
@@ -697,21 +737,22 @@ function MatchEndBanner({ t, name, count, onClose }) {
         className="ticket"
         style={{
           background: 'var(--paper)',
-          border: '2px solid var(--rouge)',
+          border: `${isRoundLoss ? '3px double' : '2px solid'} var(--rouge)`,
           padding: '1.6rem 2.4rem',
           textAlign: 'center',
-          maxWidth: 460,
+          maxWidth: 480,
           boxShadow: '0 18px 48px rgba(0,0,0,0.45)',
         }}
       >
         <div className="eyebrow" style={{ color: 'var(--rouge)', marginBottom: 8 }}>
-          {t('match_end_eyebrow')}
+          {isRoundLoss ? t('round_end_eyebrow') : t('match_end_eyebrow')}
         </div>
         <h2 className="display" style={{ fontSize: '1.8rem', margin: '0 0 0.5rem' }}>
-          <em style={{ color: 'var(--rouge)' }}>{name}</em> {t('match_end_is_manche')}
+          <em style={{ color: 'var(--rouge)' }}>{name}</em>{' '}
+          {isRoundLoss ? t('round_end_verdict') : t('match_end_is_manche')}
         </h2>
-        <p className="serif" style={{ color: 'var(--ink-mute)', margin: '0 0 0.3rem' }}>
-          {t('match_end_count', { count, total: 2 })}
+        <p className="serif" style={{ color: 'var(--ink-soft)', margin: '0 0 0.3rem' }}>
+          {isRoundLoss ? t('round_end_detail') : t('match_end_count', { count, total: 2 })}
         </p>
         <p className="serif" style={{ fontSize: '0.8rem', color: 'var(--ink-fade)', fontStyle: 'italic', margin: 0 }}>
           {t('match_end_dismiss_hint')}

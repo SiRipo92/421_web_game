@@ -143,6 +143,14 @@ async def _afk_timer(game: Game, player_id: str, game_id: str):
         return
     if game.current_player() and game.current_player().id != player_id:
         return
+    # Surface the AFK takeover separately from the bot's actual play so the table
+    # sees who stepped away before the throw appears in the log.
+    _log(
+        game,
+        "log_afk_takeover",
+        f"{player.name} est AFK — le bot prend la main.",
+        name=player.name,
+    )
     _bot_take_turn(player)
     t = player.turn
     dice_sorted = sorted(t.dice, reverse=True)
