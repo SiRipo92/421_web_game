@@ -2,6 +2,7 @@
 
 import asyncio
 from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Optional
 
@@ -75,6 +76,10 @@ class Player:
     tokens: int = 0
     connected: bool = True
     turn: Optional[PlayerTurn] = None
+    # Wall-clock join time. Used to pick the longest-tenured player when the
+    # host leaves mid-game; `game.players` may have been reordered by the
+    # initial-roll sort, so list position is unreliable for tenure.
+    joined_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 @dataclass

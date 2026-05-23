@@ -4,6 +4,7 @@ import { Die } from '../components/shared/Die.jsx'
 import { Avatar } from '../components/shared/Avatar.jsx'
 import { ChipStack } from '../components/shared/ChipStack.jsx'
 import { ComboTable } from '../components/shared/ComboTable.jsx'
+import { RoomSettingsPanel } from '../components/shared/RoomSettingsPanel.jsx'
 import { useGame } from '../hooks/useGame.js'
 import { useLang } from '../context/useLang.js'
 
@@ -17,8 +18,10 @@ export function Game({ token }) {
   const logRef = useRef(null)
 
   const [logOpen, setLogOpen] = useState(true)
+  const [showRoomSettings, setShowRoomSettings] = useState(false)
 
   const me = state.players?.find(p => p.id === playerId)
+  const isHost = state.room?.host_player_id === playerId
   const isMyTurn = state.current_player_id === playerId
   const myTurn = me?.turn
   const rollsUsed = myTurn ? 3 - myTurn.rolls_left : 0
@@ -83,6 +86,15 @@ export function Game({ token }) {
 
           <div style={{ display: 'flex', gap: 20, alignItems: 'center' }}>
             <CounterChip label={t('pool')} value={state.pool ?? 0} accent="var(--rouge)" />
+            {isHost && (
+              <button
+                type="button"
+                className="btn-link"
+                onClick={() => setShowRoomSettings(true)}
+                style={{ fontSize: '0.75rem', color: 'var(--ink-mute)' }}
+                aria-label={t('room_rules_button')}
+              >⚙ {t('room_rules_button')}</button>
+            )}
             <button
               type="button"
               className="btn-link"
@@ -259,6 +271,14 @@ export function Game({ token }) {
           .die-tumble, .pulse-soft, .glow-421 { animation: none !important; }
         }
       `}</style>
+
+      {showRoomSettings && (
+        <RoomSettingsPanel
+          room={state.room}
+          hostName={state.players?.find(p => p.id === state.room?.host_player_id)?.name}
+          onClose={() => setShowRoomSettings(false)}
+        />
+      )}
     </div>
   )
 }

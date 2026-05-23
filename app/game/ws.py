@@ -449,9 +449,12 @@ async def websocket_endpoint(
                 if game.round_starter_id == player_id and game.players:
                     game.round_starter_id = game.players[game.current_index].id
 
-                # Host migration: if the host left after the game started, promote the next player
+                # Host migration: longest-tenured remaining player takes over. We sort by
+                # joined_at because the players list may have been reordered by the
+                # initial-roll sort, so [0] is not reliably the oldest seat.
                 if game.host_player_id == player_id and game.players:
-                    game.host_player_id = game.players[0].id
+                    longest = min(game.players, key=lambda p: p.joined_at)
+                    game.host_player_id = longest.id
 
                 if game.all_done():
                     await _resolve_round(game)

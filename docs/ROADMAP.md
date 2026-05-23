@@ -21,19 +21,6 @@ _All initial Now items shipped. Pick the next batch from Next._
 
 ## Next
 
-### 4. Persistent room ownership + transfer when host leaves
-**Why:** Currently the host can change room config only at create time and via the WS layer; if the host leaves during `WAITING`, the room dissolves. The spec is: rules are set once at create time; if the host leaves while the room is active, ownership transfers to the **longest-tenured remaining player** (not just `players[0]`). Public rooms also need an explicit `max_players` field — confirmed currently present (1–5) but should default sensibly and be required in the UI.
-**Scope:**
-- `app/game/ws.py` leave handler: when host leaves *after* the game has started, transfer `host_player_id` to the player with the earliest join timestamp. Today we just take `game.players[0].id`, which is correct *if* players are appended in join order — verify and add a comment, or add a `joined_at` timestamp to `Player` for explicitness.
-- Host-only "Room settings" panel: a slide-out or modal accessible from the in-game top bar (host only) that shows current `bank_rule`, `afk_seconds`, `allow_spectators`, `max_players`. The spec says these are set once — so the panel is **read-only** for the host. Add a "Leave room" action.
-- Frontend: new component `RoomSettingsPanel.jsx`; trigger button visible only when `state.room.host_player_id === playerId`.
-- Public rooms: `CreateRoom.jsx` already exposes `max_players` (2–5). Verify the validation message is clear; ensure it's surfaced in `Lobby.jsx`'s room card.
-**Acceptance:**
-1. Host leaves an active game → next-longest-tenured player becomes host; broadcast reflects the change.
-2. Host sees a "Room rules" button in the game UI that opens a read-only panel showing all config values.
-3. Lobby card for a public room shows `max_players`.
-**Dependencies:** None. (B5/E2 leave-handler work from commit `82d4731` already covers most plumbing.)
-
 ### 5. Per-match win/loss tracking + achievement badges
 **Why:** Stats today (`PlayerStats.elo`, `games_played`, `wins`, `losses`) update only at game end via `_persist_game`. The user wants per-**match** and per-**round** tracking too, and badges that unlock at thresholds (first win, 10 wins, perfect game, etc.).
 **Scope:**
@@ -129,6 +116,7 @@ The web frontend is responsive; a native shell would enable push notifications f
 
 ## Done
 
+- **2026-05-23** _(pending SHA)_ — Room ownership transfer + read-only host settings panel. Added `Player.joined_at` so the leave handler picks the longest-tenured remaining seat (the players list can be reordered by the initial-roll sort, so list position is unreliable). New `RoomSettingsPanel.jsx` modal triggered by a host-only "⚙ Room rules" button in `Game.jsx` — shows the config the creator picked, read-only. 3 new unit tests in `test_host_migration.py`.
 - **2026-05-23** `fdd8033` — Cookie consent banner. New `<CookieBanner />` mounted in `App.jsx`; `utils/consent.js` exposes `getCookieConsent`/`hasAnalyticsConsent`/`setCookieConsent`/`clearCookieConsent` for future analytics gating (item 10). Privacy page rewritten with current consent state + a "change my choice" reset button.
 - **2026-05-23** `3ec3127` — Strong-password UX. Extracted `pwdChecks`/`isPwdValid`/`pwdStrength` to `utils/pwdChecks.js`; new shared `PasswordChecklist` component with a 3-segment strength meter that's visible on mount (no longer hidden behind `pwdTouched`). Used on Login register tab + ResetPassword.
 - **2026-05-23** `aec1c44` — `/how-to-play` rule documentation: objective, banker roll, starter rotation, charge/décharge, bank rules, tie handling, AFK bot, winning the game. Also fixed `how_to_play_eyquitebrow` typo in the English locale.
