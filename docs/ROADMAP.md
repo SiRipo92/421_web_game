@@ -123,7 +123,7 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
   - Or: simply lower the burger threshold from 640 to ~860 so all narrow widths use the drawer.
 - Verify on 641 / 720 / 768 / 834 / 900 px.
 
-### G20. Game-screen bottom bar polish + prominent quit
+### G20. (DONE) Game-screen bottom bar polish + prominent quit
 **Why:** Reported. The action-bar text under the piste is small and hard to scan during play; the « Quitter » link is tiny and unremarkable. The host's ⚙ Room rules pill blends in.
 **Scope:**
 - Bump font-sizes in the action bar (eyebrow + serif lines) by ~15–20%.
@@ -305,6 +305,7 @@ Past commits that captured incorrect rules — superseded by **R1**, **R2**, **R
 
 ## Done
 
+- **2026-05-23** _(pending SHA)_ — G20: action-bar eyebrow + serif text bumped to readable sizes (0.78rem / 1.05rem; ink-soft instead of ink-mute). Top-panel control buttons (host's ⚙ Room rules and everyone's 🚪 Quitter) are now proper rounded pill buttons with hover states — Quitter is rouge-bordered and fills rouge on hover for visibility; Room rules is neutral. Both stay compact and wrap cleanly on narrow widths.
 - **2026-05-23** `0483a74` — G19: raised TopBar burger threshold from 640px → 880px so the 641–835 zone no longer overflows. Desktop nav (logo + 3 links + 2 dividers + lang + theme + user menu) needs ~720px minimum, plus padding; anything narrower now uses the drawer. Tablet-portrait lands in the drawer (still very usable).
 - **2026-05-23** `efd0be5` — French vocabulary review (G22). Replaced "match" → « manche », "round" → « partie », "pool" → « banque », "Le Tapis" → « La piste » across `i18n/index.js` (FR section), `Game.jsx` piste banner, `CreateRoom.jsx` title, backend French log fallback strings in `logic.py`. English copy unchanged.
 - **2026-05-23** `c3ba8f1` — Match-end banner (G13), rhythm indicator (G15), bigger keep-hint (G16).

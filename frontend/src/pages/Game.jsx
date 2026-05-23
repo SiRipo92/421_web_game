@@ -117,23 +117,67 @@ export function Game({ token }) {
             ))}
           </div>
 
-          <div style={{ display: 'flex', gap: 20, alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <CounterChip label={t('pool')} value={state.pool ?? 0} accent="var(--rouge)" />
             {isHost && (
               <button
                 type="button"
-                className="btn-link"
                 onClick={() => setShowRoomSettings(true)}
-                style={{ fontSize: '0.75rem', color: 'var(--ink-mute)' }}
                 aria-label={t('room_rules_button')}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '0.4rem 0.75rem',
+                  fontSize: '0.82rem',
+                  fontFamily: 'var(--body)',
+                  color: 'var(--ink-soft)',
+                  background: 'var(--paper)',
+                  border: '1px solid var(--rule)',
+                  borderRadius: 999,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                  transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'var(--paper-deep)'
+                  e.currentTarget.style.color = 'var(--ink)'
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'var(--paper)'
+                  e.currentTarget.style.color = 'var(--ink-soft)'
+                }}
               >⚙ {t('room_rules_button')}</button>
             )}
             <button
               type="button"
-              className="btn-link"
               onClick={() => setShowLeaveConfirm(true)}
-              style={{ fontSize: '0.75rem', color: 'var(--ink-mute)' }}
-            >← {t('leave')}</button>
+              aria-label={t('leave')}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '0.4rem 0.85rem',
+                fontSize: '0.82rem',
+                fontFamily: 'var(--body)',
+                fontWeight: 600,
+                color: 'var(--rouge)',
+                background: 'var(--paper)',
+                border: '1px solid var(--rouge)',
+                borderRadius: 999,
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+                transition: 'background 0.15s, color 0.15s',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'var(--rouge)'
+                e.currentTarget.style.color = 'var(--paper)'
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'var(--paper)'
+                e.currentTarget.style.color = 'var(--rouge)'
+              }}
+            >🚪 {t('leave')}</button>
           </div>
         </div>
 
@@ -238,10 +282,10 @@ export function Game({ token }) {
           gap: 16, flexWrap: 'wrap',
         }} role="region" aria-label="Contrôles">
           <div>
-            <div className="eyebrow">
+            <div className="eyebrow" style={{ fontSize: '0.78rem' }}>
               {isMyTurn ? t('your_turn') : `${t('waiting_turn')} — ${state.players?.find(p => p.id === state.current_player_id)?.name || ''}`}
             </div>
-            <div className="serif" style={{ fontStyle: 'italic', color: 'var(--ink-mute)', marginTop: 4 }}>
+            <div className="serif" style={{ fontStyle: 'italic', color: 'var(--ink-soft)', marginTop: 6, fontSize: '1.05rem' }}>
               {isMyTurn
                 ? !hasRolled ? t('keep_hint') : `${myTurn?.rolls_left ?? 0} ${t('rolls_left')}.`
                 : <span>{t('waiting_for')} <span className="mono pulse-soft">…</span></span>}
