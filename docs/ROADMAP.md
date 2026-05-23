@@ -194,6 +194,16 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 - UI: follow button on `/profile/{username}`; followers/following count + list on own profile.
 - Privacy: respect a future `User.profile_visibility` setting (defer).
 
+### G30. External invite delivery — email / SMS / WhatsApp link
+**Why:** Beyond the in-app friend invites (G29), the user wants to share a private-room join link via outside channels. "Tap to copy a link", "send via email", "send via WhatsApp" — invitee clicks the link, lands on the room with the code pre-filled, joins.
+**Scope (sketch only):**
+- Backend: `POST /api/games/{game_id}/share` returns a one-shot signed link `https://APP_URL/join?code=ABC123&t=<signed-token>` that auto-fills the join screen. Optional `via=email|sms|whatsapp` lets the server send the link directly (Resend for email, Twilio/Vonage for SMS, WhatsApp Cloud API for WA — each gated by env keys).
+- Email template: same Resend pipeline as password reset. Subject line includes inviter's name.
+- WhatsApp / SMS: open the user's native share intent client-side via `window.open('https://wa.me/?text=' + ...)` and `sms:?body=...` URI as no-server-cost fallbacks; full server-side delivery is opt-in (env-gated).
+- Per-room rate limit on share API to prevent spam.
+- UI: existing « Inviter » in the waiting room opens a small modal with copy-link + share-via buttons.
+- Depends on G29 for the join-screen plumbing; can ship the copy-link variant independently first.
+
 ### G29. Invite friends to play
 **Why:** Captured for future. User wants to send a game invite to a follower from inside the room ("Inviter") and have them get a notification + one-tap join.
 **Scope (sketch only):**
@@ -362,6 +372,7 @@ Past commits that captured incorrect rules — superseded by **R1**, **R2**, **R
 ## Done
 
 - **2026-05-23** `63733a4` — G20: action-bar eyebrow + serif text bumped to readable sizes (0.78rem / 1.05rem; ink-soft instead of ink-mute). Top-panel control buttons (host's ⚙ Room rules and everyone's 🚪 Quitter) are now proper rounded pill buttons with hover states — Quitter is rouge-bordered and fills rouge on hover for visibility; Room rules is neutral. Both stay compact and wrap cleanly on narrow widths.
+- **2026-05-23** _(pending SHA)_ — Test coverage backfill (CI gate was failing at 77%). Added 8 WS integration tests covering the new actions in `_dispatch`: `initial_roll`, `roll`, `keep`, `done`, plus `kick` (non-host rejected, host removes target, can't target self, missing target_id is no-op) and a CHARGE-phase seed helper. Coverage back to 83.99% (≥ 80% gate). Added roadmap G30: external invite delivery (copy link + email/SMS/WhatsApp).
 - **2026-05-23** `38421d9` — Fixed `PATCH /auth/me` returning 422: the `req()` wrapper in `api/auth.js` was spreading `opts` AFTER its own headers, so the `Authorization: Bearer ...` from callers stripped the `Content-Type: application/json`. FastAPI then couldn't parse the JSON body. One-line fix: spread `opts` first, build headers second. Also: after a successful lang_pref save, the profile now calls `setLang()` so the UI flips language immediately (G26 partial — full login-time sync still queued). G26 (lang follows profile), G27 (notifications), G28 (friends/follow), G29 (invite-friends) added to roadmap. G18 still covers the empty-stats issue (round_points / games_played never persist because game-end no longer auto-fires).
 - **2026-05-23** `c664399` — G24: host kick. New WS action `kick {target_id, reason}` (host-only, can't kick self). Sends `{type:"kicked", reason}` to target's socket before closing it, then runs the same cleanup as leave (drops them from players/match_losses/round_points/etc., reassigns round_starter / current_index, resolves cycle if all_done). New `log_player_kicked` journal event. Frontend: small ✕ kick pill on each non-self player strip (host-only); confirms via ConfirmModal; KickedOverlay on the kicked client explains the reason (default "absence prolongée du clavier"; structured for future chat-moderation reasons — toxic/spam/default keys already in i18n).
 - **2026-05-23** `3f56da9` — G23: SelfPlayToast. Bottom-right brass-bordered notification pops when the local player's turn ends (manual done OR auto-validate OR AFK bot taking over for them). Reads: "Vous avez joué [4-2-1] → 421 (8f). À NextPlayer de jouer." Different copy when the bot took the turn ("Coup joué par le bot"). Auto-dismiss 5s, click to dismiss. Triggers off log_turn/log_afk_turn events where `name === me.name`, dedup via ref-counter.

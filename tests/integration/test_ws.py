@@ -16,7 +16,7 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 
-from app.game.logic import Player
+from app.game.logic import GamePhase, Player, new_turn
 from app.game.state import games
 from app.main import app
 
@@ -196,3 +196,168 @@ def test_spectator_rejected_when_disabled(tc):
     with pytest.raises(Exception):
         with tc.websocket_connect(f"/ws/{gid}/spectate") as ws:
             ws.receive_text()
+
+
+# ── Active-game actions (initial_roll / roll / done / kick / tiebreak_roll) ──
+
+
+def _seed_charge_phase(gid: str, first_id: str, second_id: str):
+    """Drive a fresh room straight into CHARGE so we can exercise roll/done/etc.
+
+    Bypasses the normal start → initial_roll dance: we just hand-set the phase,
+    drop a fresh turn on every player, and pick the starter. The WS handlers
+    don't care how we got here — they validate against game.phase + the player's
+    turn state, both of which we've set up correctly.
+    """
+    game = games[gid]
+    game.phase = GamePhase.CHARGE
+    game.round_num = 1
+    game.pool = 11
+    game.max_throws_this_round = 3
+    # Ensure first_id is at index 0 so current_player() returns them
+    game.players.sort(key=lambda p: 0 if p.id == first_id else 1)
+    game.current_index = 0
+    game.round_starter_id = first_id
+    for p in game.players:
+        p.turn = new_turn()
+        p.tokens = 0
+
+
+def test_initial_roll_action_records_die(tc):
+    """initial_roll fills in the player's initial_rolls entry with a 1–6 value."""
+    gid = _create_room(tc)
+    host = _join(tc, gid, "Alice")
+    other = _join(tc, gid, "Bob")
+    game = games[gid]
+    game.phase = GamePhase.INITIAL_ROLL
+    game.initial_rolls = {host: None, other: None}
+
+    with tc.websocket_connect(f"/ws/{gid}/{host}") as ws:
+        _recv(ws)
+        ws.send_text(json.dumps({"action": "initial_roll"}))
+        _recv(ws)
+    rolled = game.initial_rolls[host]
+    assert isinstance(rolled, int) and 1 <= rolled <= 6
+    assert game.initial_rolls[other] is None  # Bob hasn't rolled yet
+
+
+def test_roll_action_decrements_rolls_left(tc):
+    """A 'roll' action consumes one throw of three and fills in dice."""
+    gid = _create_room(tc)
+    host = _join(tc, gid, "Alice")
+    _other = _join(tc, gid, "Bob")
+    _seed_charge_phase(gid, host, _other)
+
+    with tc.websocket_connect(f"/ws/{gid}/{host}") as ws:
+        _recv(ws)
+        ws.send_text(json.dumps({"action": "roll"}))
+        state = _recv(ws)
+
+    me = next(p for p in state["players"] if p["id"] == host)
+    assert me["turn"]["rolls_left"] == 2
+    assert all(1 <= d <= 6 for d in me["turn"]["dice"])
+
+
+def test_keep_action_toggles_reroll_flag(tc):
+    """Clicking a die toggles its reroll flag (false → true → false)."""
+    gid = _create_room(tc)
+    host = _join(tc, gid, "Alice")
+    _other = _join(tc, gid, "Bob")
+    _seed_charge_phase(gid, host, _other)
+    # Pre-roll so the keep handler isn't blocked by rolls_left == 3
+    games[gid].players[0].turn.dice = [3, 4, 5]
+    games[gid].players[0].turn.rolls_left = 2
+
+    with tc.websocket_connect(f"/ws/{gid}/{host}") as ws:
+        _recv(ws)
+        ws.send_text(json.dumps({"action": "keep", "index": 0}))
+        s1 = _recv(ws)
+        ws.send_text(json.dumps({"action": "keep", "index": 0}))
+        s2 = _recv(ws)
+
+    me1 = next(p for p in s1["players"] if p["id"] == host)
+    me2 = next(p for p in s2["players"] if p["id"] == host)
+    assert me1["turn"]["reroll"][0] is True
+    assert me2["turn"]["reroll"][0] is False
+
+
+def test_done_action_marks_turn_done_and_advances(tc):
+    """`done` flips turn.done True and advances current_index."""
+    gid = _create_room(tc)
+    host = _join(tc, gid, "Alice")
+    other = _join(tc, gid, "Bob")
+    _seed_charge_phase(gid, host, other)
+    games[gid].players[0].turn.dice = [4, 2, 1]
+    games[gid].players[0].turn.rolls_left = 2  # has rolled at least once
+
+    with tc.websocket_connect(f"/ws/{gid}/{host}") as ws:
+        _recv(ws)
+        ws.send_text(json.dumps({"action": "done"}))
+        state = _recv(ws)
+
+    me = next(p for p in state["players"] if p["id"] == host)
+    assert me["turn"]["done"] is True
+    assert state["current_player_id"] != host  # advanced to next player
+
+
+def test_kick_requires_host(tc):
+    """A non-host player sending kick is silently ignored — target stays."""
+    gid = _create_room(tc)
+    host = _join(tc, gid, "Alice")
+    other = _join(tc, gid, "Bob")
+
+    with tc.websocket_connect(f"/ws/{gid}/{other}") as ws:
+        _recv(ws)
+        ws.send_text(json.dumps({"action": "kick", "target_id": host, "reason": "afk"}))
+        # The handler `return`s with no broadcast, so we don't try to recv —
+        # just verify the state directly.
+
+    assert any(p.id == host for p in games[gid].players)
+
+
+def test_kick_by_host_removes_target(tc):
+    """Host kicking a non-host removes that player from the game state."""
+    gid = _create_room(tc)
+    host = _join(tc, gid, "Alice")
+    other = _join(tc, gid, "Bob")
+
+    with tc.websocket_connect(f"/ws/{gid}/{host}") as host_ws:
+        _recv(host_ws)
+        host_ws.send_text(json.dumps({"action": "kick", "target_id": other, "reason": "afk"}))
+        # Drain the broadcast that the kick triggered (state minus the kicked player).
+        try:
+            state = _recv(host_ws)
+            assert not any(p["id"] == other for p in state["players"])
+        except Exception:
+            pass
+
+    assert not any(p.id == other for p in games[gid].players)
+    assert any(p.id == host for p in games[gid].players)  # host stays
+
+
+def test_kick_cannot_target_self(tc):
+    """Host trying to kick themselves is a no-op."""
+    gid = _create_room(tc)
+    host = _join(tc, gid, "Alice")
+    _join(tc, gid, "Bob")
+
+    with tc.websocket_connect(f"/ws/{gid}/{host}") as ws:
+        _recv(ws)
+        ws.send_text(json.dumps({"action": "kick", "target_id": host, "reason": "afk"}))
+
+    assert any(p.id == host for p in games[gid].players)
+
+
+def test_kick_missing_target_id_is_noop(tc):
+    """`kick` without a target_id is silently ignored (no crash)."""
+    gid = _create_room(tc)
+    host = _join(tc, gid, "Alice")
+    other = _join(tc, gid, "Bob")
+
+    with tc.websocket_connect(f"/ws/{gid}/{host}") as ws:
+        _recv(ws)
+        ws.send_text(json.dumps({"action": "kick", "reason": "afk"}))
+
+    # Both players still present
+    assert any(p.id == host for p in games[gid].players)
+    assert any(p.id == other for p in games[gid].players)
