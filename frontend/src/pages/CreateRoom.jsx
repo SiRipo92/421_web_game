@@ -68,8 +68,6 @@ export function CreateRoom({ token }) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }} role="radiogroup" aria-label={t('bank_rules')}>
             <RadioRow value={bankRule} setVal={setBankRule} k="sec"
               label={t('sec_jusqu_banque')} desc={t('sec_desc')} />
-            <RadioRow value={bankRule} setVal={setBankRule} k="one"
-              label={t('one_throw')} desc={t('one_desc')} />
             <RadioRow value={bankRule} setVal={setBankRule} k="free"
               label={t('free_play')} desc={t('free_desc')} />
           </div>

@@ -111,10 +111,8 @@ export function Lobby({ token }) {
               <div className="mono" style={{ fontSize: '0.9rem', whiteSpace: 'nowrap' }}>
                 {room.player_count}/{room.max_players} {t('players_label')}
               </div>
-              <span className={`tag ${room.bank_rule === 'sec' ? 'tag-rouge' : room.bank_rule === 'one' ? 'tag-brass' : 'tag-felt'}`}>
-                {room.bank_rule === 'sec' ? 'Sec'
-                  : room.bank_rule === 'one' ? '1×'
-                    : t('free_play').split(' ')[0]}
+              <span className={`tag ${room.bank_rule === 'sec' ? 'tag-rouge' : 'tag-felt'}`}>
+                {room.bank_rule === 'sec' ? 'Sec' : t('free_play').split(' ')[0]}
               </span>
               <button
                 type="button"
