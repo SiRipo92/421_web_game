@@ -440,6 +440,46 @@ This block ships in coordination with the chat-moderation suite (G32–G37 in th
 **Acceptance:** Host bans a player → 3 weeks later wants to give them another chance → goes to MyRoomBans → clicks "Lift this ban" → user can re-join. If a moderator had upheld it in the meantime, the Lift button is disabled with copy explaining why and how to appeal.
 **Dependencies:** G32 (RoomBan table), G38 (moderator role), G39 (inbox).
 
+### G43. Chat access tiers — registered-only send, guest-only react
+**Why:** Anonymous free-text chat is the moderation-impossible mode. Forcing message-send to a registered account makes every offence directly attributable to a user_id, which makes G35 IP capture, G37 peer reports, G40 strikes, and G42 login gate all meaningfully enforceable. Guests still feel social via a small reaction set without opening the abuse vector. This is a deliberately family-friendly default — not a friction-for-friction's-sake choice.
+
+**Scope:**
+
+A. **Three access tiers**
+- **Tier 0 — banned-from-chat user** (`User.chat_banned_until > now()`): can read messages, cannot send, cannot react. UI shows their muted state with the time remaining + reason.
+- **Tier 1 — guest / unregistered** (no JWT on WS handshake): can read messages, can fire from a fixed reaction palette (👏 🍷 🎲 🔥 😂 ❦ — 6 buttons, no custom emoji), cannot send free-text.
+- **Tier 2 — registered user** (`User.chat_banned_until` null or expired): full send + react. Rate-limits per G36.
+
+B. **WS enforcement**
+- `chat_send` action requires authenticated user. Guest socket sending `chat_send` gets `{type: "chat_blocked", reason: "guest_send_disabled", hint: "Register or log in to chat."}`.
+- New `chat_react` action accepts `{emoji}` where `emoji` must match one of the 6 preset codepoints (server-side whitelist). Anything else → `{type: "chat_blocked", reason: "invalid_reaction"}`.
+- Reactions broadcast as `{type: "reaction", from_display, emoji, message_id_target}`; they overlay the targeted message (or attach to the room if no target).
+- Rate limit (G36 extension): guest react bucket is tighter — capacity 3 reactions / 10 s, refill 1 / 4 s. Same global anti-spam cap as registered users.
+
+C. **Frontend**
+- Chat input shows different UI per tier:
+  - Tier 0: input replaced with a calm rouge banner « Vous êtes en pause de chat jusqu'au {date}. » + a /contact appeal link.
+  - Tier 1: input replaced with the 6-emoji palette row + a brass-bordered « Inscrivez-vous pour écrire » CTA linking to `/login?tab=register`.
+  - Tier 2: normal text input.
+- Reaction palette is keyboard-navigable (arrow keys + Enter).
+- Reaction overlays auto-fade after 4 s; multiple identical reactions in 2 s stack into a `×N` chip rather than spawning separate floats.
+
+D. **Why guests aren't completely locked out**
+- The bistrot atmosphere wants a low-friction "drop in, watch a hand" feel — kicking guests out of chat entirely kills that. Reactions are the compromise: enough social presence to feel like a room, not enough abuse surface to need full moderation.
+- Guests still have their IP captured at WS handshake (G35). A guest who spams reactions to evasion levels gets the same IP-ban treatment as a registered user — they just hit the limit faster because their bucket is tighter.
+
+E. **Edge cases**
+- A guest gets a reaction-IP-ban → all sockets from that IP get `{type: "chat_blocked", reason: "banned_ip"}` for reactions AND view (we don't want the IP loitering on chat). Game still plays — the ban is chat-only.
+- A registered user gets `chat_banned_until` mid-game → next `chat_send` returns the banned response; reactions continue to work because reactions are a Tier 1 affordance and chat-ban is specifically about text. (Alternative: treat reactions as Tier 2 too — TBD when we ship.)
+- Logged-out-mid-session: WS handshake re-evaluates tier on reconnect. If the user logs out, they're back to Tier 1 until they log back in.
+
+**Acceptance:**
+- Guest opens a game → sees other players' messages → sees the emoji palette → can fire reactions → cannot type free text. Registration CTA visible.
+- Registered user → full chat. Strike + ban → tier drops to 0 with the banner.
+- Spamming guest hits IP-ban → reactions stop landing, view also drops.
+
+**Dependencies:** Item 8 (chat), G34 (moderation), G35 (IP), G36 (rate-limiter), G42 (ban-state messaging copy).
+
 ### G42. Login-time ban gate (clear messaging + cool-down reminder)
 **Why:** A banned user trying to log in should get a clear, kind explanation — not a generic "invalid credentials." Temp-banned users should see when they can come back + a reminder of the rules. Permanently banned users should see the reason category + an appeal link. The mistake to avoid: silently letting them in with chat broken or letting their account vanish without explanation.
 **Scope:**
