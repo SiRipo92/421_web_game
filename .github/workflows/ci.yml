@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, develop, "feature/**"]
+    branches: [main, develop]
   pull_request:
     branches: [main, develop]
 
@@ -18,6 +18,15 @@ jobs:
       - run: pip install ruff
       - run: ruff check app/ tests/
       - run: ruff format --check app/ tests/
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run lint
+        working-directory: frontend
 
   unit-tests:
     name: Unit tests
@@ -29,16 +38,16 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt -r requirements-dev.txt
-      - run: pytest tests/unit/ -v --cov=app --cov-report=xml --cov-report=term-missing
+      - run: pytest tests/unit/ -v
         env:
           DATABASE_URL: "postgresql+asyncpg://app:test@localhost:5432/fourtwentyone"
           SECRET_KEY: "ci-test-secret-key-not-for-production"
           DEBUG: "true"
 
   integration-tests:
-    name: Integration tests
+    name: Integration tests + coverage ≥ 80%
     runs-on: ubuntu-latest
-    needs: [lint, unit-tests]
+    needs: unit-tests
     services:
       postgres:
         image: postgres:16-alpine
@@ -58,49 +67,44 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -r requirements.txt -r requirements-dev.txt psycopg2-binary
+      - run: pip install -r requirements.txt -r requirements-dev.txt
       - name: Run Alembic migrations
         run: alembic upgrade head
         env:
           DATABASE_URL: "postgresql+asyncpg://app:test@localhost:5432/fourtwentyone"
-      - run: pytest tests/integration/ -v --cov=app --cov-append --cov-report=xml --cov-report=term-missing
+      - name: Run all tests with coverage
+        run: pytest tests/ -v --cov=app --cov-fail-under=80 --cov-report=xml --cov-report=term-missing
         env:
           DATABASE_URL: "postgresql+asyncpg://app:test@localhost:5432/fourtwentyone"
           SECRET_KEY: "ci-test-secret-key-not-for-production"
           DEBUG: "true"
 
-  coverage-gate:
-    name: Coverage ≥ 80%
+  docker:
+    name: Build & push Docker image
     runs-on: ubuntu-latest
-    needs: [unit-tests, integration-tests]
+    needs: integration-tests
+    if: github.event_name == 'push'
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Set image tags
+        id: tags
+        run: |
+          SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          REPO="siripo92/421-game"
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "tags=${REPO}:latest,${REPO}:${SHA}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tags=${REPO}:develop,${REPO}:${SHA}" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: docker/login-action@v3
         with:
-          python-version: "3.12"
-      - run: pip install -r requirements.txt -r requirements-dev.txt psycopg2-binary
-      - name: Run Alembic migrations
-        run: alembic upgrade head
-        env:
-          DATABASE_URL: "postgresql+asyncpg://app:test@localhost:5432/fourtwentyone"
-      - name: Re-run all tests with combined coverage
-        run: pytest tests/ --cov=app --cov-fail-under=80 --cov-report=term-missing
-        env:
-          DATABASE_URL: "postgresql+asyncpg://app:test@localhost:5432/fourtwentyone"
-          SECRET_KEY: "ci-test-secret-key-not-for-production"
-          DEBUG: "true"
-        continue-on-error: false
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: app
-          POSTGRES_PASSWORD: test
-          POSTGRES_DB: fourtwentyone
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U app"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

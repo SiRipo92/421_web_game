@@ -1,5 +1,7 @@
 # 421
 
+[![CI](https://github.com/SiRipo92/421_web_game/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/SiRipo92/421_web_game/actions/workflows/ci.yml)
+
 Multiplayer dice game playable in the browser. Create an account or join as a guest, create or join a game room, and play 421 in real time with friends.
 
 ## How to play
@@ -35,9 +37,11 @@ The round starter's number of rolls sets the maximum for all other players that 
 | Backend | Python 3.12, FastAPI, uvicorn |
 | Database | PostgreSQL 16, SQLAlchemy 2 async, Alembic |
 | Auth | JWT (python-jose), bcrypt (passlib), Resend (email) |
-| Frontend | Vite 6, React 18, react-router-dom v6 |
+| Frontend | Vite 8, React 19, react-router-dom v7 |
 | Real-time | WebSocket |
 | Container | Docker, docker-compose |
+
+See [`frontend/README.md`](frontend/README.md) for the frontend-specific setup, translation system, and component structure.
 
 ## Local setup
 
@@ -57,7 +61,8 @@ Edit `.env` and fill in at minimum:
 
 ```
 SECRET_KEY=          # generate with: openssl rand -hex 32
-DATABASE_URL=postgresql+asyncpg://app:change_me@localhost:5432/fourtwentyone
+POSTGRES_PASSWORD=change_me
+DATABASE_URL=postgresql+asyncpg://app:change_me@db:5432/fourtwentyone
 RESEND_API_KEY=      # from resend.com — required for password reset emails
 APP_URL=http://localhost:8421
 ```
@@ -70,7 +75,9 @@ docker compose up --build
 
 Open [http://localhost:8421](http://localhost:8421).
 
-> **Note:** The first run applies database migrations automatically via the entrypoint script.
+> **Note:** `docker compose up` starts both the PostgreSQL database and the app. Migrations run automatically on first start via the entrypoint script.
+
+> **Docker Hub:** `docker pull siripo92/421-game:latest` — published on every merge to `main`.
 
 ### 3. Run locally without Docker
 
@@ -109,7 +116,14 @@ feature/* ← one branch per feature.
 hotfix/*  ← urgent fixes, backmerged to develop automatically.
 ```
 
-PRs to `develop` and `main` require CI to pass (lint + unit tests + integration tests + ≥ 80% coverage).
+PRs to `develop` and `main` require CI to pass. The pipeline runs four jobs in sequence:
+
+1. **Lint** — ruff (Python) + ESLint (frontend)
+2. **Unit tests** — fast, no database required
+3. **Integration tests + coverage gate** — real PostgreSQL, Alembic migrations, full test suite, ≥ 80% coverage enforced
+4. **Docker build & push** — multi-stage image pushed to `siripo92/421-game` on DockerHub (push events only, not PRs)
+
+Pushes to `main` tag the image `:latest` + `:<sha7>`. Pushes to `develop` tag `:develop` + `:<sha7>`.
 
 ## Environment variables
 
@@ -127,6 +141,7 @@ PRs to `develop` and `main` require CI to pass (lint + unit tests + integration 
 | `ANTHROPIC_API_KEY` | no | Required only for the retention pipeline |
 | `RETENTION_DRY_RUN` | no | Set `false` in prod to apply deletions; default `true` |
 | `DELETION_GRACE_DAYS` | no | Days before GDPR deletion executes; default 30 |
+| `GOOGLE_CLIENT_ID` | no | Google OAuth client ID for Google Sign-In |
 
 See `.env.example` for a full template.
 
