@@ -15,7 +15,45 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 
 ## Now
 
-_All initial Now items shipped. Pick the next batch from Next._
+### R1. Rewrite `_resolve_round` for correct one-loser-per-cycle + tiebreak mechanic
+**Why:** Commit `5d8bd45` ("rule correctness") shipped tie behavior that doesn't match the actual rules. The real rules: there is **always exactly one loser** per table cycle. Tied losers (or tied top players in discharge when combos are exactly equal) trigger a **tiebreak re-throw** — tied players re-roll three dice in reverse turn order, lowest hand by the combo hierarchy loses, recursive if still tied. The penalty stays the value of the original winning combo. My current code's "all-tied → no transfer" and "tied winners → no transfer" paths are wrong and need removal.
+**Scope:**
+- Add a new `GamePhase.TIEBREAK` state. Game enters it when `_resolve_round` detects ties at the relevant rank; stays in CHARGE/DECHARGE otherwise.
+- New WS action `tiebreak_roll` (one throw of all three dice, no rerolls). Restricted to the tied players.
+- New AFK timer variant covers TIEBREAK — bot rolls if a tied player goes idle.
+- `_resolve_round` returns early (without resolving) when ties exist; instead it stores the tied set + tiebreak context and broadcasts a TIEBREAK state.
+- A new `_resolve_tiebreak` handles the tiebreak roll, picks the loser (or re-enters TIEBREAK recursively if still tied), then applies the penalty using the **original** match's combo value.
+- Tied top during CHARGE stays no-op (chips come from bank, no tiebreak needed). Tied top during DECHARGE only triggers tiebreak when combos are exactly identical.
+**Acceptance:** Manual game with two players forcing a tie (e.g. via the bot) demonstrates a TIEBREAK round; loser takes the original-combo penalty; recursion handled.
+**Dependencies:** None, but item R2 should land alongside or after.
+
+### R2. Match-loss / round-point accounting (replaces `sets_lost`)
+**Why:** Current code tracks `sets_lost` and ends the game at 2 set losses (calling it "FINISHED"). The actual rule: a player who reaches 2 match losses takes 1 **round point**, the match-loss counter resets, and play continues. The game has no auto-end.
+**Scope:**
+- Rename `Game.sets_lost` → `Game.match_losses` (current-round counter; resets when a player hits 2 and takes a round point).
+- New `Game.round_points` dict (player_id → int): accumulates across rounds. Persisted to the DB at end-of-session for logged-in users; in-memory only for guests.
+- In `_resolve_round` (after `_resolve_tiebreak`), when the manché is determined:
+  - increment that player's `match_losses` by 1
+  - if `match_losses[pid] == 2`: increment `round_points[pid]`, broadcast a "round_ended" event, reset all `match_losses` to 0, start a new round (which is a new match with reset pool)
+- Remove the `GamePhase.FINISHED` transition triggered by `sets_lost >= 2`.
+- DB schema: replace `PlayerStats.wins`/`losses` with `round_points_taken` (or similar). Add a `MatchHistory` table tracking each match's manché for the per-match analytics roadmap item 5.
+- Alembic migration.
+- Frontend: `Profile.jsx` shows round-point count; `Game.jsx` end-of-match overlay shows "manché ! 1/2 → round point" instead of "set lost".
+- E1 (single-player auto-end) becomes "pause the match if everyone else left" — no automatic winner declaration.
+**Acceptance:** A logged-in user accumulates round points across multiple games; profile reflects the running total; no game forcibly terminates.
+**Dependencies:** R1 should land first (the manché determination logic depends on the corrected tie resolution).
+
+### R3. Code-side terminology cleanup
+**Why:** The current code uses `round_num`, `_resolve_round`, `_start_new_set`, `set_loser_id`, `sets_lost` — but those map to the user's *match* / *match* / *round* / *match loser* / *match losses*. Mid-rewrite is the cleanest time to rename.
+**Scope:** Mechanical renames across `app/game/logic.py`, `app/game/ws.py`, tests. Suggested mapping:
+- `round_num` → `match_num`
+- `_resolve_round` → `_resolve_table_cycle` (or `_resolve_throw`; pick whichever feels right)
+- `_start_new_set` → `_start_new_round` (matches user's "new round starts after a player takes a round point")
+- `sets_lost` → see R2
+- `log_round_start`/`log_new_set`/`log_set_lost` i18n keys renamed in lockstep
+- `current_round_plays`/`last_round_plays` in `game_state` → `current_throw_plays`/`last_throw_plays`
+**Acceptance:** No instance of `round` or `set` in the code that refers to user-facing terminology means something different from this doc.
+**Dependencies:** Best bundled with R1 + R2 so it's one rename, not several.
 
 ---
 
@@ -114,8 +152,16 @@ The web frontend is responsive; a native shell would enable push notifications f
 
 ---
 
+## Revisions
+
+Past commits that captured incorrect rules — superseded by **R1**, **R2**, **R3** above. The commits themselves stay in history; the corrections are tracked as new Now items.
+
+- `aec1c44` — `/how-to-play` rule docs. The tie-handling and "set lost" wording were wrong. **Revised in this commit** (rewrite under correct vocabulary; see Done below).
+- `5d8bd45` — `_resolve_round` "rule correctness". The tie-handling rules (all-tied no transfer / tied winners no transfer / single-survivor auto-end) don't match the actual game. Code stays in place until R1 + R2 land.
+
 ## Done
 
+- **2026-05-23** _(pending SHA)_ — Rewrote `/how-to-play` and README "How to play" with the correct vocabulary (throw / match / manché / round / round point) and corrected tie behavior (always one loser, tiebreak re-throw, recursive). New "Vocabulary" section at the top of the page.
 - **2026-05-23** `4071313` — Room ownership transfer + read-only host settings panel. Added `Player.joined_at` so the leave handler picks the longest-tenured remaining seat (the players list can be reordered by the initial-roll sort, so list position is unreliable). New `RoomSettingsPanel.jsx` modal triggered by a host-only "⚙ Room rules" button in `Game.jsx` — shows the config the creator picked, read-only. 3 new unit tests in `test_host_migration.py`.
 - **2026-05-23** `fdd8033` — Cookie consent banner. New `<CookieBanner />` mounted in `App.jsx`; `utils/consent.js` exposes `getCookieConsent`/`hasAnalyticsConsent`/`setCookieConsent`/`clearCookieConsent` for future analytics gating (item 10). Privacy page rewritten with current consent state + a "change my choice" reset button.
 - **2026-05-23** `3ec3127` — Strong-password UX. Extracted `pwdChecks`/`isPwdValid`/`pwdStrength` to `utils/pwdChecks.js`; new shared `PasswordChecklist` component with a 3-segment strength meter that's visible on mount (no longer hidden behind `pwdTouched`). Used on Login register tab + ResetPassword.

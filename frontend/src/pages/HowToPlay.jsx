@@ -10,6 +10,25 @@ export function HowToPlay() {
         {t('how_title')}
       </h1>
 
+      {/* Vocabulary — must come first because the rest references these terms */}
+      <section aria-labelledby="vocab-title" style={{ marginBottom: '2.5rem' }}>
+        <h2 id="vocab-title" className="display" style={{ fontSize: '2rem', margin: '0 0 0.5rem' }}>
+          {t('htp_vocab_title')}
+        </h2>
+        <p className="serif" style={{ color: 'var(--ink-mute)', margin: '0 0 1rem', fontStyle: 'italic' }}>
+          {t('htp_vocab_sub')}
+        </p>
+        <div className="ticket" style={{ padding: '1.6rem' }}>
+          <dl style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <VocabRow label={t('htp_term_throw_label')} text={t('htp_term_throw_text')} />
+            <VocabRow label={t('htp_term_match_label')} text={t('htp_term_match_text')} />
+            <VocabRow label={t('htp_term_manche_label')} text={t('htp_term_manche_text')} />
+            <VocabRow label={t('htp_term_round_label')} text={t('htp_term_round_text')} />
+            <VocabRow label={t('htp_term_round_point_label')} text={t('htp_term_round_point_text')} />
+          </dl>
+        </div>
+      </section>
+
       {/* Objective */}
       <section aria-labelledby="objective-title" style={{ marginBottom: '2.5rem' }}>
         <div className="ticket" style={{ padding: '1.8rem' }}>
@@ -27,7 +46,7 @@ export function HowToPlay() {
         </div>
       </section>
 
-      {/* Game flow: initial roll + starter rotation */}
+      {/* Game flow: banker roll + starter rotation */}
       <section aria-labelledby="phases-title" style={{ marginBottom: '2.5rem' }}>
         <h2 id="phases-title" className="display" style={{ fontSize: '2rem', margin: '0 0 1.5rem' }}>
           {t('htp_phases_title')}
@@ -71,15 +90,21 @@ export function HowToPlay() {
 
       {/* Ties */}
       <section aria-labelledby="ties-title" style={{ marginBottom: '2.5rem' }}>
-        <h2 id="ties-title" className="display" style={{ fontSize: '2rem', margin: '0 0 1rem' }}>
+        <h2 id="ties-title" className="display" style={{ fontSize: '2rem', margin: '0 0 0.5rem' }}>
           {t('htp_ties_title')}
         </h2>
-        <div className="card" style={{ padding: '1.6rem' }}>
-          <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-            <TieRow icon="=" text={t('htp_ties_all_text')} />
-            <TieRow icon="▼" text={t('htp_ties_losers_text')} />
-            <TieRow icon="▲" text={t('htp_ties_winners_text')} />
-          </ul>
+        <p className="serif" style={{ color: 'var(--ink-mute)', margin: '0 0 1rem', fontStyle: 'italic' }}>
+          {t('htp_ties_intro')}
+        </p>
+        <div className="card" style={{ padding: '1.6rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <TieBlock title={t('htp_ties_rule_label')} text={t('htp_ties_rule_text')} />
+          <hr style={{ border: 0, borderTop: '1px dashed var(--rule)', margin: 0 }} />
+          <TieBlock title={t('htp_ties_charge_label')} text={t('htp_ties_charge_text')} />
+          <hr style={{ border: 0, borderTop: '1px dashed var(--rule)', margin: 0 }} />
+          <TieBlock title={t('htp_ties_decharge_label')} text={t('htp_ties_decharge_text')} />
+          <p className="serif" style={{ fontSize: '0.85rem', color: 'var(--ink-mute)', fontStyle: 'italic', margin: 0 }}>
+            ↻ {t('htp_ties_recursive_text')}
+          </p>
         </div>
       </section>
 
@@ -100,11 +125,11 @@ export function HowToPlay() {
         </div>
       </section>
 
-      {/* Winning the game */}
+      {/* Tracking your record (no game-end concept) */}
       <section aria-labelledby="set-title">
         <div className="ticket" style={{ padding: '1.8rem' }}>
           <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
-            <div style={{ fontSize: '2rem' }} aria-hidden="true">🏆</div>
+            <div style={{ fontSize: '2rem' }} aria-hidden="true">📓</div>
             <div>
               <h2 id="set-title" className="display" style={{ fontSize: '1.6rem', margin: '0 0 0.5rem' }}>{t('set_title')}</h2>
               <p className="serif" style={{ color: 'var(--ink-soft)', lineHeight: 1.6, margin: 0 }}>{t('set_text')}</p>
@@ -136,15 +161,20 @@ function RuleCard({ title, text, icon, accent }) {
   )
 }
 
-function TieRow({ icon, text }) {
+function VocabRow({ label, text }) {
   return (
-    <li style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-      <span className="display" style={{
-        flexShrink: 0, width: 24, height: 24, display: 'inline-flex',
-        alignItems: 'center', justifyContent: 'center',
-        color: 'var(--ink-mute)', fontSize: '0.95rem',
-      }} aria-hidden="true">{icon}</span>
-      <span className="serif" style={{ color: 'var(--ink-soft)', lineHeight: 1.5, margin: 0 }}>{text}</span>
-    </li>
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(140px, 1fr) 3fr', gap: 16, alignItems: 'baseline' }}>
+      <dt className="display" style={{ fontSize: '1rem', color: 'var(--rouge)', margin: 0 }}>{label}</dt>
+      <dd className="serif" style={{ margin: 0, color: 'var(--ink-soft)', lineHeight: 1.55 }}>{text}</dd>
+    </div>
+  )
+}
+
+function TieBlock({ title, text }) {
+  return (
+    <div>
+      <h3 className="display" style={{ fontSize: '1.05rem', margin: '0 0 0.3rem', color: 'var(--ink)' }}>{title}</h3>
+      <p className="serif" style={{ color: 'var(--ink-soft)', lineHeight: 1.5, margin: 0 }}>{text}</p>
+    </div>
   )
 }

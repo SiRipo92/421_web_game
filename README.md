@@ -6,15 +6,25 @@ Multiplayer dice game playable in the browser. Create an account or join as a gu
 
 ## How to play
 
-421 is a French dice game played in two phases:
+421 is a French dice game played in nested cycles. The terminology matters because the same word can mean different things in different game variants — these are the ones we use:
 
-- **Charge** — players take turns rolling three dice. The round loser takes chips from the central pool (quantity set by the winning combo). Once the pool is empty, décharge begins.
-- **Décharge** — players give chips to the round loser until one player holds all 11 chips. That player loses the set and starts the next one.
-- **Sets** — a player who loses two sets is eliminated. Last player standing wins.
+- **Throw** — one roll of the three dice on a player's turn.
+- **Match** — a full bank cycle: starts with 11 chips in the central pool, ends when one player ("manché") holds them all. Chips reset for the next match.
+- **Round** — accumulates until any player has lost 2 matches (not necessarily consecutive). That player takes 1 **round point**, the match-loss counter resets for everyone, and a new round begins.
+- **Game** — there is no automatic game end. Round points are persistent stats on your profile (or session-scoped for guests). The room stays open until players leave.
 
-**Dice hierarchy (strongest → weakest):** 421 (8f) › 111 (7f) › 11x (x f) › triples (2-6f) › suites 123/234/345/456 (2f) › basic figures (1f).
+Each match has two phases:
 
-The round starter's number of rolls sets the maximum for all other players that round. Three bank rules are available: `free` (normal 3-roll rhythm), `sec` / `one` (max 1 roll per player during charge).
+- **Charge** — chips flow from the pool to the players. After each table cycle, the round loser takes chips from the pool equal to the winning combo's value. When the pool is empty, play flips to discharge.
+- **Discharge** — chips pass between players. The round winner hands chips to the loser. A player who drops to 0 chips sits out for the rest of the match (they're back for the next one). The match ends when one player holds all 11 chips — they're manché.
+
+**Critical:** every match has exactly **one** loser (the manché). Everyone else is a winner of that match. Ties at the lowest hand (or at the top during discharge, when combos are exactly equal) are broken by re-throwing: tied players roll again starting with the most recent and going backward; the lowest hand by the combo hierarchy takes the loss. The penalty stays the value of the original winning combo, not the tiebreak combo.
+
+**Dice hierarchy (strongest → weakest):** 421 (8f) › 111 (7f) › 11x (xf) › triples (2–6f) › suites 123/234/345/456 (2f) › basic figures (1f).
+
+**Bank rules** (set by the room creator at create time, not editable mid-game):
+- `free` — the round starter sets the rhythm (1, 2, or 3 throws); others must match in equal or fewer throws.
+- `sec` — one throw per player during charge, auto-marked done.
 
 ## Features
 
