@@ -79,14 +79,25 @@ async def login(request: Request, body: LoginRequest, db: AsyncSession = Depends
     pw_ok = user and user.hashed_password and verify_password(body.password, user.hashed_password)
     if not pw_ok:
         raise HTTPException(status_code=401, detail="Invalid email or password")
+    # G42: account ban gate. chat_banned_until does NOT block login — those users
+    # still play games, the chat WS handles their muting. Only banned_until
+    # blocks the auth handshake itself.
+    if user.banned_until and user.banned_until > datetime.now(UTC):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "account_temporarily_suspended",
+                "reason": user.ban_reason or "rule_violation",
+                "until": user.banned_until.isoformat(),
+            },
+        )
     return TokenResponse(
         access_token=create_access_token(str(user.id), remember_me=body.remember_me)
     )
 
 
-@router.get("/me", response_model=MeResponse)
-async def me(user: User = Depends(get_current_user)):
-    """Return the authenticated user's public profile."""
+def _me_response(user: User) -> MeResponse:
+    """Build the MeResponse including the G38 moderation fields."""
     return MeResponse(
         id=str(user.id),
         username=user.username,
@@ -95,7 +106,18 @@ async def me(user: User = Depends(get_current_user)):
         email_opt_in=user.email_opt_in,
         profile_complete=user.birthdate is not None,
         has_avatar=user.avatar_data is not None,
+        role=user.role,
+        strike_count=user.strike_count,
+        chat_banned_until=user.chat_banned_until.isoformat() if user.chat_banned_until else None,
+        banned_until=user.banned_until.isoformat() if user.banned_until else None,
+        ban_reason=user.ban_reason,
     )
+
+
+@router.get("/me", response_model=MeResponse)
+async def me(user: User = Depends(get_current_user)):
+    """Return the authenticated user's public profile."""
+    return _me_response(user)
 
 
 @router.post("/forgot-password", status_code=status.HTTP_202_ACCEPTED)
@@ -257,14 +279,7 @@ async def update_me(
         current_user.lang_pref = body.lang_pref
     await db.commit()
     await db.refresh(current_user)
-    return MeResponse(
-        id=str(current_user.id),
-        username=current_user.username,
-        email=current_user.email,
-        lang_pref=current_user.lang_pref,
-        email_opt_in=current_user.email_opt_in,
-        profile_complete=current_user.birthdate is not None,
-    )
+    return _me_response(current_user)
 
 
 @router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)
