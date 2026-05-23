@@ -110,6 +110,11 @@ class MeResponse(BaseModel):
     email_opt_in: bool
     profile_complete: bool = True
     has_avatar: bool = False
+    role: str = "player"
+    strike_count: int = 0
+    chat_banned_until: str | None = None
+    banned_until: str | None = None
+    ban_reason: str | None = None
 
 
 class CompleteProfileRequest(BaseModel):

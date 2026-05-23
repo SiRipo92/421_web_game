@@ -78,3 +78,23 @@ async def get_optional_user(
     if not token:
         return None
     return await _user_from_token(token, db)
+
+
+def require_moderator(user: User = Depends(get_current_user)) -> User:
+    """FastAPI dependency: 403 unless user.role is moderator or admin."""
+    if user.role not in ("moderator", "admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Moderator access required",
+        )
+    return user
+
+
+def require_admin(user: User = Depends(get_current_user)) -> User:
+    """FastAPI dependency: 403 unless user.role is admin."""
+    if user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required",
+        )
+    return user
