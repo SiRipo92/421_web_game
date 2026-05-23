@@ -41,6 +41,16 @@ class User(Base):
     avatar_content_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
     lang_pref: Mapped[str] = mapped_column(String(2), nullable=False, server_default="fr")
     email_opt_in: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    # Moderation foundation (G38). Role is a plain string column rather than a
+    # Postgres ENUM so promoting/demoting in tests + migrations stays a single
+    # UPDATE instead of an ALTER TYPE dance.
+    role: Mapped[str] = mapped_column(String(16), nullable=False, server_default="player")
+    strike_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    chat_banned_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    banned_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ban_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

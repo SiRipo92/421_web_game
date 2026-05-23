@@ -6,6 +6,7 @@ import { ChipStack } from '../components/shared/ChipStack.jsx'
 import { ComboTable } from '../components/shared/ComboTable.jsx'
 import { RoomSettingsPanel } from '../components/shared/RoomSettingsPanel.jsx'
 import { ConfirmModal } from '../components/shared/ConfirmModal.jsx'
+import { CommentaryTicker, ScoreToBeatBanner } from '../components/shared/CommentaryTicker.jsx'
 import { useGame } from '../hooks/useGame.js'
 import { useLang } from '../context/useLang.js'
 
@@ -111,11 +112,23 @@ export function Game({ token }) {
     <div style={{
       minHeight: '100vh',
       display: 'grid',
-      gridTemplateColumns: '1fr 320px',
+      gridTemplateColumns: '260px 1fr 320px',
       gap: 0,
     }} className="gameroom-grid">
 
-      <div style={{ display: 'flex', flexDirection: 'column' }}>
+      <aside
+        className="side-ticker"
+        style={{
+          borderRight: '1px solid var(--rule)',
+          background: 'var(--paper-soft)',
+          maxHeight: '100vh',
+          overflow: 'hidden',
+        }}
+      >
+        <CommentaryTicker events={state.log_events} t={t} />
+      </aside>
+
+      <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
 
         {/* Top panel */}
         <div style={{
@@ -221,9 +234,10 @@ export function Game({ token }) {
           </div>
         </div>
 
-        {/* Piste area */}
+        {/* Piste area — G14: piste grows to fill the column, dice anchored to bottom,
+            pool dead-center as the focal point, score-to-beat banner pinned at top. */}
         <div style={{
-          flex: 1, padding: '1.5rem',
+          flex: 1, padding: '1.2rem',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           position: 'relative',
         }}>
@@ -235,20 +249,37 @@ export function Game({ token }) {
               onClose={() => setMatchEnd(null)}
             />
           )}
-          <div style={{ position: 'relative', width: 'min(600px, 70vh, 92%)', aspectRatio: '1/1' }}>
+          <div
+            className="piste-stage"
+            style={{ position: 'relative', width: 'min(820px, 85vh, 100%)', aspectRatio: '1/1' }}
+          >
             <div className="piste" style={{ position: 'absolute', inset: 0 }} role="region" aria-label="Piste de jeu">
               <div style={{
-                position: 'absolute', top: '12%', left: '50%', transform: 'translateX(-50%)',
+                position: 'absolute', top: '5%', left: '50%', transform: 'translateX(-50%)',
                 fontFamily: 'var(--display)', fontStyle: 'italic',
                 color: 'var(--paper-deep)', fontSize: '1rem', letterSpacing: '0.16em', whiteSpace: 'nowrap',
               }} aria-hidden="true">❦  L A   P I S T E  ❦</div>
 
-              {/* Dice in center */}
+              <ScoreToBeatBanner plays={state.current_round_plays} t={t} />
+
+              {/* Pool chips — focal point dead-center */}
               <div style={{
-                position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)',
-                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12,
+                position: 'absolute', top: '46%', left: '50%', transform: 'translate(-50%,-50%)',
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
               }}>
-                <div style={{ display: 'flex', gap: 12 }}>
+                {(state.pool ?? 0) > 0 && <ChipStack count={state.pool} />}
+                <span className="eyebrow" style={{ fontSize: '0.6rem', color: 'var(--paper-deep)' }}>
+                  {t('pool')} · <span className="mono">{state.pool ?? 0}</span>
+                </span>
+              </div>
+
+              {/* Dice cluster — anchored at the bottom of the felt */}
+              <div style={{
+                position: 'absolute', bottom: '6%', left: '50%', transform: 'translateX(-50%)',
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
+                maxWidth: '90%',
+              }}>
+                <div style={{ display: 'flex', gap: 14 }}>
                   {(myTurn?.dice || [0, 0, 0]).map((v, i) => (
                     <Die
                       key={i}
@@ -259,26 +290,9 @@ export function Game({ token }) {
                     />
                   ))}
                 </div>
-                {isMyTurn && hasRolled && !myTurn?.done && (myTurn?.rolls_left ?? 0) > 0 && (
-                  <div className="serif" style={{
-                    fontSize: '0.95rem',
-                    color: 'var(--brass-soft)',
-                    fontStyle: 'italic',
-                    textShadow: '0 1px 3px rgba(0,0,0,0.9)',
-                    marginTop: 10,
-                    padding: '0.5rem 0.85rem',
-                    background: 'rgba(0,0,0,0.45)',
-                    borderRadius: 4,
-                    maxWidth: '90%',
-                    textAlign: 'center',
-                    border: '1px solid rgba(212,171,103,0.3)',
-                  }}>
-                    💡 {t('dice_keep_hint')}
-                  </div>
-                )}
                 {myTurn?.combo && (
                   <div style={{
-                    fontFamily: 'var(--display)', fontSize: '1.3rem',
+                    fontFamily: 'var(--display)', fontSize: '1.4rem',
                     color: myTurn.combo === '421' ? 'var(--brass-soft)' : 'var(--paper)',
                     fontStyle: myTurn.combo === 'nénette' ? 'italic' : 'normal',
                     textShadow: '0 2px 8px rgba(0,0,0,0.5)',
@@ -286,11 +300,21 @@ export function Game({ token }) {
                     {myTurn.combo} · <span className="mono">{myTurn.fiches}f</span>
                   </div>
                 )}
-              </div>
-
-              {/* Pool chips */}
-              <div style={{ position: 'absolute', bottom: '14%', left: '50%', transform: 'translateX(-50%)' }}>
-                {(state.pool ?? 0) > 0 && <ChipStack count={state.pool} />}
+                {isMyTurn && hasRolled && !myTurn?.done && (myTurn?.rolls_left ?? 0) > 0 && (
+                  <div className="serif" style={{
+                    fontSize: '0.9rem',
+                    color: 'var(--brass-soft)',
+                    fontStyle: 'italic',
+                    textShadow: '0 1px 3px rgba(0,0,0,0.9)',
+                    padding: '0.4rem 0.75rem',
+                    background: 'rgba(0,0,0,0.5)',
+                    borderRadius: 4,
+                    textAlign: 'center',
+                    border: '1px solid rgba(212,171,103,0.3)',
+                  }}>
+                    💡 {t('dice_keep_hint')}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -413,9 +437,15 @@ export function Game({ token }) {
       </aside>
 
       <style>{`
+        /* Mid-width: hide the ticker rail, keep log + piste */
+        @media (max-width: 1180px) {
+          .gameroom-grid { grid-template-columns: 1fr 320px !important; }
+          .side-ticker { display: none !important; }
+        }
         @media (max-width: 980px) {
           .gameroom-grid { grid-template-columns: 1fr !important; }
           .side-log { max-height: 300px !important; border-left: none !important; border-top: 1px solid var(--rule); }
+          .side-ticker { display: none !important; }
           .top-panel { grid-template-columns: 1fr !important; gap: 12px !important; }
         }
         @media (prefers-reduced-motion: reduce) {
