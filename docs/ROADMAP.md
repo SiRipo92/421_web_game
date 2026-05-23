@@ -156,7 +156,7 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 - Auto-dismiss ~4s, click to dismiss.
 - Subsumes part of G21.
 
-### G24. Host: kick AFK player
+### G24. (DONE) Host: kick AFK player
 **Why:** Reported. When a player goes AFK and the bot keeps playing for them, the host wants the option to free the seat for someone else instead of waiting through the timeout cycle.
 **Scope:**
 - Backend: new WS action `kick` accepting `target_id`. Validates the sender is `game.host_player_id` AND target isn't the host themselves. Treats it like the target's `leave` action (cleanup state, broadcast, close the target's WS).
@@ -331,6 +331,7 @@ Past commits that captured incorrect rules — superseded by **R1**, **R2**, **R
 ## Done
 
 - **2026-05-23** `63733a4` — G20: action-bar eyebrow + serif text bumped to readable sizes (0.78rem / 1.05rem; ink-soft instead of ink-mute). Top-panel control buttons (host's ⚙ Room rules and everyone's 🚪 Quitter) are now proper rounded pill buttons with hover states — Quitter is rouge-bordered and fills rouge on hover for visibility; Room rules is neutral. Both stay compact and wrap cleanly on narrow widths.
+- **2026-05-23** _(pending SHA)_ — G24: host kick. New WS action `kick {target_id, reason}` (host-only, can't kick self). Sends `{type:"kicked", reason}` to target's socket before closing it, then runs the same cleanup as leave (drops them from players/match_losses/round_points/etc., reassigns round_starter / current_index, resolves cycle if all_done). New `log_player_kicked` journal event. Frontend: small ✕ kick pill on each non-self player strip (host-only); confirms via ConfirmModal; KickedOverlay on the kicked client explains the reason (default "absence prolongée du clavier"; structured for future chat-moderation reasons — toxic/spam/default keys already in i18n).
 - **2026-05-23** `3f56da9` — G23: SelfPlayToast. Bottom-right brass-bordered notification pops when the local player's turn ends (manual done OR auto-validate OR AFK bot taking over for them). Reads: "Vous avez joué [4-2-1] → 421 (8f). À NextPlayer de jouer." Different copy when the bot took the turn ("Coup joué par le bot"). Auto-dismiss 5s, click to dismiss. Triggers off log_turn/log_afk_turn events where `name === me.name`, dedup via ref-counter.
 - **2026-05-23** `fee800a` — Round-loss banner differentiation (count=2 shows "X a perdu la partie !" with stronger styling instead of repeating "X est manché"). Manche + round-point pips (💀 / 🏷) on PlayerStrip and PisteSeat so every seat shows their losses at a glance. New `log_afk_takeover` event surfaced before the bot turn so the table knows who stepped away. Roadmap items G23 (self-play toast), G24 (host kick), G25 (manche markers — done in this batch) added.
 - **2026-05-23** `63733a4` — G20: action-bar polish + Quitter/Room rules pills.

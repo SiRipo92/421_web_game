@@ -6,6 +6,8 @@ function reducer(state, action) {
       return { ...state, ...action.payload, connected: true }
     case 'DISCONNECTED':
       return { ...state, connected: false }
+    case 'KICKED':
+      return { ...state, kickedReason: action.reason || 'afk' }
     default:
       return state
   }
@@ -25,6 +27,7 @@ const INITIAL = {
   current_round_plays: [],
   last_round_plays: [],
   log: [],
+  kickedReason: null,
 }
 
 export function useGame(gameId, playerId, token) {
@@ -42,6 +45,7 @@ export function useGame(gameId, playerId, token) {
     ws.onmessage = (e) => {
       const msg = JSON.parse(e.data)
       if (msg.type === 'state') dispatch({ type: 'STATE', payload: msg })
+      else if (msg.type === 'kicked') dispatch({ type: 'KICKED', reason: msg.reason })
     }
     ws.onclose = () => dispatch({ type: 'DISCONNECTED' })
 
@@ -61,6 +65,10 @@ export function useGame(gameId, playerId, token) {
   const tiebreakRoll = useCallback(() => send({ action: 'tiebreak_roll' }), [send])
   const start = useCallback(() => send({ action: 'start' }), [send])
   const leave = useCallback(() => send({ action: 'leave' }), [send])
+  const kick = useCallback(
+    (targetId, reason = 'afk') => send({ action: 'kick', target_id: targetId, reason }),
+    [send],
+  )
 
-  return { state, roll, keep, done, initialRoll, tiebreakRoll, start, leave }
+  return { state, roll, keep, done, initialRoll, tiebreakRoll, start, leave, kick }
 }

@@ -640,6 +640,78 @@ async def _dispatch(
         await manager.broadcast(game_id, game_state(game))
         return None
 
+    if action == "kick":
+        # Host-only: free a seat by ejecting another player. Default reason is
+        # "afk" (intended for bot-took-over situations); the host can pass any
+        # short string (future use: chat-moderation, manual reasons).
+        if player_id != game.host_player_id:
+            return None
+        target_id = msg.get("target_id")
+        reason = msg.get("reason") or "afk"
+        if not target_id or target_id == player_id:
+            return None
+        target = next((p for p in game.players if p.id == target_id), None)
+        if not target:
+            return None
+
+        # Tell the target's socket what happened BEFORE closing it so the
+        # client can render an explanatory modal.
+        target_socks = [
+            (w, pid)
+            for (w, pid) in manager.connections.get(game_id.upper(), [])
+            if pid == target_id
+        ]
+        for tws, _ in target_socks:
+            try:
+                await tws.send_json({"type": "kicked", "reason": reason})
+            except Exception:
+                pass
+
+        _log(
+            game,
+            "log_player_kicked",
+            f"{target.name} a été expulsé par l'hôte ({reason}).",
+            name=target.name,
+            host=player.name,
+            reason=reason,
+        )
+
+        # Same cleanup as a voluntary leave.
+        _cancel_afk(game, target_id)
+        leaver_index = next((i for i, p in enumerate(game.players) if p.id == target_id), -1)
+        game.players = [p for p in game.players if p.id != target_id]
+        game.user_ids.pop(target_id, None)
+        game.match_losses.pop(target_id, None)
+        game.round_points.pop(target_id, None)
+        game.has_avatars.pop(target_id, None)
+        game.initial_rolls.pop(target_id, None)
+        game.out_of_match.discard(target_id)
+
+        for tws, _ in target_socks:
+            try:
+                await tws.close(code=4002)
+            except Exception:
+                pass
+
+        if not game.players:
+            games.pop(game_id.upper(), None)
+            _join_locks.pop(game_id.upper(), None)
+            return None
+
+        if leaver_index >= 0 and leaver_index < game.current_index:
+            game.current_index -= 1
+        if game.current_index >= len(game.players):
+            game.current_index = 0
+        if game.round_starter_id == target_id and game.players:
+            game.round_starter_id = game.players[game.current_index].id
+
+        if game.all_done():
+            await _resolve_round(game)
+        else:
+            _schedule_afk(game, game_id)
+        await manager.broadcast(game_id, game_state(game))
+        return None
+
     return None
 
 

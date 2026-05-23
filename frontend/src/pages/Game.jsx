@@ -15,12 +15,13 @@ export function Game({ token }) {
   const [params] = useSearchParams()
   const playerId = params.get('pid')
   const navigate = useNavigate()
-  const { state, roll, keep, done, initialRoll, tiebreakRoll, leave } = useGame(gameId, playerId, token)
+  const { state, roll, keep, done, initialRoll, tiebreakRoll, leave, kick } = useGame(gameId, playerId, token)
   const logRef = useRef(null)
 
   const [logOpen, setLogOpen] = useState(true)
   const [showRoomSettings, setShowRoomSettings] = useState(false)
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false)
+  const [kickTarget, setKickTarget] = useState(null) // {id, name} the host is about to kick
   const [matchEnd, setMatchEnd] = useState(null) // {name, count} for the G13 banner
   const lastMatchEndFpRef = useRef(null)
   const [selfPlay, setSelfPlay] = useState(null) // G23: self-play toast {dice, combo, fiches, isBot, next}
@@ -144,7 +145,15 @@ export function Game({ token }) {
 
           <div style={{ display: 'flex', gap: 10, overflow: 'auto', justifyContent: 'center' }}>
             {state.players?.map(p => (
-              <PlayerStrip key={p.id} p={p} active={p.id === state.current_player_id} isSelf={p.id === playerId} />
+              <PlayerStrip
+                key={p.id}
+                p={p}
+                active={p.id === state.current_player_id}
+                isSelf={p.id === playerId}
+                t={t}
+                canKick={isHost && p.id !== playerId}
+                onKick={() => setKickTarget({ id: p.id, name: p.name })}
+              />
             ))}
           </div>
 
@@ -445,6 +454,29 @@ export function Game({ token }) {
           onClose={() => setSelfPlay(null)}
         />
       )}
+
+      {kickTarget && (
+        <ConfirmModal
+          title={t('kick_confirm_title')}
+          text={t('kick_confirm_text', { name: kickTarget.name })}
+          confirmLabel={t('kick_confirm_yes')}
+          cancelLabel={t('kick_confirm_no')}
+          danger
+          onConfirm={() => {
+            kick(kickTarget.id, 'afk')
+            setKickTarget(null)
+          }}
+          onCancel={() => setKickTarget(null)}
+        />
+      )}
+
+      {state.kickedReason && (
+        <KickedOverlay
+          t={t}
+          reason={state.kickedReason}
+          onClose={() => navigate('/')}
+        />
+      )}
     </div>
   )
 }
@@ -629,7 +661,7 @@ function CounterChip({ label, value, accent }) {
   )
 }
 
-function PlayerStrip({ p, active, isSelf }) {
+function PlayerStrip({ p, active, isSelf, t, canKick, onKick }) {
   return (
     <div style={{
       display: 'flex', alignItems: 'center', gap: 8,
@@ -648,6 +680,36 @@ function PlayerStrip({ p, active, isSelf }) {
         <div style={{ display: 'flex', gap: 2, marginLeft: 4 }}>
           {p.turn.dice.map((v, i) => <Die key={i} value={v} mini />)}
         </div>
+      )}
+      {canKick && (
+        <button
+          type="button"
+          onClick={onKick}
+          aria-label={t ? `${t('kick_button')} ${p.name}` : 'Kick'}
+          title={t ? t('kick_button') : 'Kick'}
+          style={{
+            marginLeft: 4,
+            padding: '2px 6px',
+            background: 'transparent',
+            border: '1px solid var(--rule)',
+            borderRadius: 999,
+            color: active ? 'var(--paper)' : 'var(--ink-mute)',
+            cursor: 'pointer',
+            fontSize: '0.72rem',
+            lineHeight: 1,
+            opacity: 0.7,
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.opacity = '1'
+            e.currentTarget.style.color = 'var(--rouge)'
+            e.currentTarget.style.borderColor = 'var(--rouge)'
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.opacity = '0.7'
+            e.currentTarget.style.color = active ? 'var(--paper)' : 'var(--ink-mute)'
+            e.currentTarget.style.borderColor = 'var(--rule)'
+          }}
+        >✕</button>
       )}
     </div>
   )
@@ -749,6 +811,57 @@ function AfkBar({ total }) {
       <span className="mono" style={{ fontSize: '0.75rem', color: remaining <= 10 ? 'var(--rouge)' : 'var(--ink-mute)' }}>
         {remaining}s
       </span>
+    </div>
+  )
+}
+
+function KickedOverlay({ t, reason, onClose }) {
+  const reasonText = t(`kick_reason_${reason}`) || t('kick_reason_default')
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 970,
+        background: 'rgba(20,15,12,0.75)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '1rem',
+      }}
+    >
+      <div
+        className="ticket"
+        style={{
+          background: 'var(--paper)',
+          border: '3px double var(--rouge)',
+          borderRadius: 6,
+          boxShadow: '0 18px 48px rgba(0,0,0,0.45)',
+          padding: '1.8rem 2.2rem',
+          maxWidth: 460,
+          textAlign: 'center',
+        }}
+      >
+        <div className="eyebrow" style={{ color: 'var(--rouge)', marginBottom: 10 }}>
+          🚪 {t('kicked_eyebrow')}
+        </div>
+        <h2 className="display" style={{ fontSize: '1.6rem', margin: '0 0 0.75rem' }}>
+          {t('kicked_title')}
+        </h2>
+        <p className="serif" style={{ color: 'var(--ink-soft)', margin: '0 0 1.2rem', lineHeight: 1.5 }}>
+          {t('kicked_intro')} <em>{reasonText}</em>.
+        </p>
+        <button
+          type="button"
+          onClick={onClose}
+          className="btn btn-primary"
+          style={{ padding: '0.6rem 1.4rem', fontSize: '0.95rem' }}
+        >
+          {t('kicked_back_home')}
+        </button>
+      </div>
     </div>
   )
 }
