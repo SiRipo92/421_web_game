@@ -48,6 +48,32 @@ export function Profile({ user, token, onRefreshUser, onLogout }) {
           <h1 className="display" style={{ fontSize: 'clamp(2rem, 4vw, 3rem)', margin: '0.3rem 0 0.4rem' }}>{user.username}</h1>
           <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
             <span className="mono" style={{ color: 'var(--ink-mute)' }}>@{user.username}</span>
+            {(user.role === 'admin' || user.role === 'moderator') && (
+              <>
+                <span
+                  className="eyebrow"
+                  style={{
+                    padding: '0.2rem 0.55rem',
+                    background: 'var(--rouge)',
+                    color: 'var(--paper)',
+                    borderRadius: 3,
+                    fontSize: '0.6rem',
+                    letterSpacing: '0.18em',
+                  }}
+                  aria-label={t(user.role === 'admin' ? 'role_badge_admin_aria' : 'role_badge_moderator_aria')}
+                >
+                  {user.role === 'admin' ? t('role_badge_admin') : t('role_badge_moderator')}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  style={{ padding: '0.3rem 0.7rem', fontSize: '0.78rem' }}
+                  onClick={() => navigate('/admin')}
+                >
+                  🛡 {t('admin_dashboard_link')}
+                </button>
+              </>
+            )}
           </div>
         </div>
         <div className="ticket" style={{ textAlign: 'center', padding: '1rem 1.4rem', minWidth: 180 }}>
