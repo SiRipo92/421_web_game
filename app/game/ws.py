@@ -25,6 +25,7 @@ from app.game.logic import (
     _finalize_order,
     _log,
     _resolve_round,
+    _resolve_tiebreak,
     _start_initial_roll,
     classify,
     game_state,
@@ -574,6 +575,39 @@ async def websocket_endpoint(
                     await _resolve_round(game)
                 else:
                     _schedule_afk(game, game_id)
+                await manager.broadcast(game_id, game_state(game))
+
+            elif action == "tiebreak_roll":
+                if game.phase != GamePhase.TIEBREAK or not game.tiebreak:
+                    continue
+                if player_id != game.tiebreak.get("next_pid"):
+                    continue
+                dice = [random.randint(1, 6) for _ in range(3)]
+                combo, rank, fiches = classify(dice)
+                game.tiebreak["throws"][player_id] = {
+                    "dice": dice,
+                    "combo": combo,
+                    "rank": rank,
+                    "fiches": fiches,
+                }
+                sorted_dice = sorted(dice, reverse=True)
+                _log(
+                    game,
+                    "log_tiebreak_throw",
+                    f"{player.name} (départage) : {sorted_dice} → {combo} ({fiches}f)",
+                    name=player.name,
+                    dice=sorted_dice,
+                    combo=combo,
+                    fiches=fiches,
+                )
+                # Advance to the next tied player; resolve when all have thrown.
+                tied = game.tiebreak["tied_pids"]
+                idx = tied.index(player_id) + 1
+                if idx >= len(tied):
+                    game.tiebreak["next_pid"] = None
+                    await _resolve_tiebreak(game)
+                else:
+                    game.tiebreak["next_pid"] = tied[idx]
                 await manager.broadcast(game_id, game_state(game))
 
     except WebSocketDisconnect:

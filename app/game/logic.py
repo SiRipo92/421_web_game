@@ -51,6 +51,10 @@ class GamePhase(str, Enum):
     INITIAL_ROLL = "initial_roll"
     CHARGE = "charge"
     DECHARGE = "decharge"
+    # Mid-cycle re-throw to break ties at the loser position (charge or décharge).
+    # Only the tied players roll. The lowest hand by combo hierarchy takes the
+    # original cycle's penalty. Recursive if still tied.
+    TIEBREAK = "tiebreak"
     FINISHED = "finished"
 
 
@@ -111,6 +115,16 @@ class Game:
     # of the match (no turns), but rejoin on match-end. Cleared when a new match
     # starts.
     out_of_match: set = field(default_factory=set)
+    # Tiebreak context when phase == TIEBREAK. None otherwise. Shape:
+    #   {
+    #     "tied_pids": [pid, ...],   # in throw order: most recent first
+    #     "throws":    {pid: {dice, combo, rank, fiches}},
+    #     "next_pid":  pid | None,
+    #     "penalty":   int,           # original winning combo's fiches
+    #     "return_phase": "charge" | "decharge",
+    #     "original_winner_id": pid | None,
+    #   }
+    tiebreak: Optional[dict] = None
     # Room configuration
     is_public: bool = False
     max_players: int = 5
@@ -207,6 +221,7 @@ def game_state(game: Game) -> dict:
         "last_round_plays": game.last_round_plays,
         "log": game.log[-40:],
         "log_events": game.log_events[-40:],
+        "tiebreak": game.tiebreak,
     }
 
 
@@ -317,6 +332,188 @@ def _start_new_set(game: Game, set_loser_id: str):
     )
 
 
+def _play_order(game: Game) -> list[str]:
+    """Active player IDs in this cycle's play order (round starter first)."""
+    if not game.players:
+        return []
+    n = len(game.players)
+    starter_idx = next(
+        (i for i, p in enumerate(game.players) if p.id == game.round_starter_id),
+        0,
+    )
+    order: list[str] = []
+    for offset in range(n):
+        idx = (starter_idx + offset) % n
+        if game.players[idx].id not in game.out_of_match:
+            order.append(game.players[idx].id)
+    return order
+
+
+def _enter_tiebreak(
+    game: Game,
+    tied_pids_set: set[str],
+    *,
+    penalty: int,
+    return_phase: GamePhase,
+    original_winner_id: Optional[str],
+) -> None:
+    """Switch the game into TIEBREAK so tied players can re-throw."""
+    # Throw order = reverse of this cycle's play order, restricted to tied players.
+    order = [pid for pid in reversed(_play_order(game)) if pid in tied_pids_set]
+    game.phase = GamePhase.TIEBREAK
+    game.tiebreak = {
+        "tied_pids": order,
+        "throws": {},
+        "next_pid": order[0] if order else None,
+        "penalty": penalty,
+        "return_phase": return_phase.value,
+        "original_winner_id": original_winner_id,
+    }
+    # Tied players need a fresh slot; non-tied players' turns already done.
+    for p in game.players:
+        if p.id in tied_pids_set:
+            p.turn = new_turn()
+    tied_names = ", ".join(p.name for p in game.players if p.id in tied_pids_set)
+    _log(
+        game,
+        "log_tiebreak_start",
+        f"Égalité au plus bas — {tied_names} relancent.",
+        names=tied_names,
+    )
+
+
+async def _resolve_tiebreak(game: Game) -> None:
+    """Pick a single loser from the tiebreak throws. Recursive if still tied."""
+    tb = game.tiebreak
+    if not tb:
+        return
+    throws = tb["throws"]
+    # Lowest rank in tiebreak = the loser. Use combo hierarchy (rank field).
+    ranked = [(pid, info["rank"]) for pid, info in throws.items()]
+    min_rank = min(r for _, r in ranked)
+    still_tied = {pid for pid, r in ranked if r == min_rank}
+    if len(still_tied) > 1:
+        # Recursive tiebreak with the still-tied subset; carry penalty/context.
+        _enter_tiebreak(
+            game,
+            still_tied,
+            penalty=tb["penalty"],
+            return_phase=GamePhase(tb["return_phase"]),
+            original_winner_id=tb["original_winner_id"],
+        )
+        return
+
+    loser_id = next(iter(still_tied))
+    loser = next(p for p in game.players if p.id == loser_id)
+    penalty = tb["penalty"]
+    return_phase = GamePhase(tb["return_phase"])
+
+    # Apply the ORIGINAL combo's penalty (not the tiebreak combo).
+    if return_phase == GamePhase.CHARGE:
+        taken = min(penalty, game.pool)
+        loser.tokens += taken
+        game.pool -= taken
+        _log(
+            game,
+            "log_charge_takes",
+            f"{loser.name} (départage) prend {taken} jeton(s) · Pool: {game.pool}",
+            name=loser.name,
+            n=taken,
+            pool=game.pool,
+        )
+        if game.pool == 0:
+            game.phase = GamePhase.DECHARGE
+            _log(game, "log_pool_empty", "Pool vide → Décharge !")
+        else:
+            game.phase = GamePhase.CHARGE
+    else:  # DECHARGE
+        winner_id = tb["original_winner_id"]
+        if winner_id:
+            winner = next((p for p in game.players if p.id == winner_id), None)
+            if winner and winner.tokens > 0:
+                transfer = min(penalty, winner.tokens)
+                winner.tokens -= transfer
+                loser.tokens += transfer
+                _log(
+                    game,
+                    "log_decharge_gives",
+                    f"{winner.name} donne {transfer} jeton(s) à {loser.name} (départage)",
+                    winner=winner.name,
+                    n=transfer,
+                    loser=loser.name,
+                )
+        game.phase = GamePhase.DECHARGE
+
+    game.tiebreak = None
+    await _finalize_cycle(game, next_starter_id=loser_id)
+
+
+async def _finalize_cycle(game: Game, next_starter_id: Optional[str]) -> None:
+    """Common post-resolution work: sit-outs, match-end check, next cycle setup."""
+    all_players = game.players
+
+    if game.phase == GamePhase.DECHARGE:
+        for p in all_players:
+            if p.tokens == 0 and p.id not in game.out_of_match:
+                game.out_of_match.add(p.id)
+                _log(
+                    game,
+                    "log_player_sits_out",
+                    f"{p.name} n'a plus de fiches — pause jusqu'au prochain match.",
+                    name=p.name,
+                )
+
+    manche = next((p for p in all_players if p.tokens >= 11), None)
+    if manche:
+        ml_id = manche.id
+        game.match_losses[ml_id] = game.match_losses.get(ml_id, 0) + 1
+        ml_count = game.match_losses[ml_id]
+        _admit_waiting(game)
+        _log(
+            game,
+            "log_match_lost",
+            f"{manche.name} a les 11 jetons — manché ({ml_count}/2)",
+            name=manche.name,
+            count=ml_count,
+        )
+        if ml_count >= 2:
+            game.round_points[ml_id] = game.round_points.get(ml_id, 0) + 1
+            rp_count = game.round_points[ml_id]
+            for pid in list(game.match_losses.keys()):
+                game.match_losses[pid] = 0
+            _log(
+                game,
+                "log_round_point",
+                f"{manche.name} prend un point de round ({rp_count}).",
+                name=manche.name,
+                count=rp_count,
+            )
+        _start_new_set(game, ml_id)
+        return
+
+    game.round_num += 1
+    game.max_throws_this_round = 3
+    if next_starter_id is not None:
+        game.round_starter_id = next_starter_id
+        game.current_index = next(
+            (i for i, p in enumerate(all_players) if p.id == next_starter_id), 0
+        )
+    for p in all_players:
+        if p.id in game.out_of_match:
+            p.turn = None
+        else:
+            p.turn = new_turn()
+    starter_name = next((p.name for p in all_players if p.id == game.round_starter_id), "")
+    _log(
+        game,
+        "log_round_start",
+        f"Round {game.round_num} · {starter_name} donne le rythme",
+        num=game.round_num,
+        phase=game.phase.value,
+        starter=starter_name,
+    )
+
+
 async def _resolve_round(game: Game):
     """Settle fiche transfers after every active player has played this table cycle.
 
@@ -325,6 +522,7 @@ async def _resolve_round(game: Game):
     pass. The match ends only when one player ends up holding all 11 chips
     (the « manché »); only then do match losses / round transitions fire.
     Sat-out players (0 chips) are skipped from rank comparison and turn order.
+    Tied losers trigger TIEBREAK; the result determines the single loser.
     """
     all_players = game.players
 
@@ -358,136 +556,81 @@ async def _resolve_round(game: Game):
         for p in active
     ]
 
-    next_starter_id: str | None = None  # set if a loser is determined
-
-    # Edge case: only one active player (others sat out). They auto-lose this
-    # cycle in décharge (no one to give chips to them); we just advance.
+    # Edge case: <2 active players → no comparison, just advance to next cycle.
     if len(active) < 2:
-        # No comparison possible; fall through to next-cycle setup.
-        pass
-    else:
-        ranks = [(p, p.turn.rank) for p in active]
-        max_rank = max(r for _, r in ranks)
-        min_rank = min(r for _, r in ranks)
-
-        if max_rank == min_rank:
-            # B3 (legacy): everyone tied → no transfer this cycle, starter unchanged.
-            # NOTE: real game rules call for a tiebreak re-throw here; that's roadmap R1.
-            _log(game, "log_round_all_tie", "Manche annulée — tous à égalité.", rank=max_rank)
-        else:
-            winners = [p for p, r in ranks if r == max_rank]
-            losers = [p for p, r in ranks if r == min_rank]
-            penalty = max(winners[0].turn.fiches, 1)
-
-            if game.phase == GamePhase.CHARGE:
-                for loser in losers:
-                    if game.pool <= 0:
-                        break
-                    taken = min(penalty, game.pool)
-                    loser.tokens += taken
-                    game.pool -= taken
-                    _log(
-                        game,
-                        "log_charge_takes",
-                        f"{loser.name} prend {taken} jeton(s) · Pool: {game.pool}",
-                        name=loser.name,
-                        n=taken,
-                        pool=game.pool,
-                    )
-                if game.pool == 0:
-                    game.phase = GamePhase.DECHARGE
-                    _log(game, "log_pool_empty", "Pool vide → Décharge !")
-
-            else:  # DECHARGE
-                if len(winners) == 1:
-                    winner = winners[0]
-                    each = max(penalty // len(losers), 1) if len(losers) > 1 else penalty
-                    for loser in losers:
-                        if winner.tokens <= 0:
-                            break
-                        transfer = min(each, winner.tokens)
-                        winner.tokens -= transfer
-                        loser.tokens += transfer
-                        _log(
-                            game,
-                            "log_decharge_gives",
-                            f"{winner.name} donne {transfer} jeton(s) à {loser.name}",
-                            winner=winner.name,
-                            n=transfer,
-                            loser=loser.name,
-                        )
-
-            # B2: loser of this cycle becomes the next cycle's starter
-            next_starter_id = losers[0].id
-
-    # Sit out any player that just hit 0 chips (only relevant in DECHARGE).
-    # They miss the rest of this match but rejoin when a new match starts.
-    if game.phase == GamePhase.DECHARGE:
-        for p in all_players:
-            if p.tokens == 0 and p.id not in game.out_of_match:
-                game.out_of_match.add(p.id)
-                _log(
-                    game,
-                    "log_player_sits_out",
-                    f"{p.name} n'a plus de fiches — pause jusqu'au prochain match.",
-                    name=p.name,
-                )
-
-    # Match-end check: one player holds all 11 chips → they're the « manché »
-    manche = next((p for p in all_players if p.tokens >= 11), None)
-    if manche:
-        ml_id = manche.id
-        game.match_losses[ml_id] = game.match_losses.get(ml_id, 0) + 1
-        ml_count = game.match_losses[ml_id]
-        _admit_waiting(game)
-        _log(
-            game,
-            "log_match_lost",
-            f"{manche.name} a les 11 jetons — manché ({ml_count}/2)",
-            name=manche.name,
-            count=ml_count,
-        )
-        if ml_count >= 2:
-            # Round-end: the manché takes a round point. Reset every player's
-            # match-loss counter so the new round starts fresh. No game-end —
-            # the room continues; round points accumulate persistently.
-            game.round_points[ml_id] = game.round_points.get(ml_id, 0) + 1
-            rp_count = game.round_points[ml_id]
-            for pid in list(game.match_losses.keys()):
-                game.match_losses[pid] = 0
-            _log(
-                game,
-                "log_round_point",
-                f"{manche.name} prend un point de round ({rp_count}).",
-                name=manche.name,
-                count=rp_count,
-            )
-        _start_new_set(game, ml_id)
+        await _finalize_cycle(game, next_starter_id=None)
         return
 
-    # Normal next cycle (match still in progress)
-    game.round_num += 1
-    game.max_throws_this_round = 3
-    if next_starter_id is not None:
-        game.round_starter_id = next_starter_id
-        game.current_index = next(
-            (i for i, p in enumerate(all_players) if p.id == next_starter_id), 0
+    ranks = [(p, p.turn.rank) for p in active]
+    max_rank = max(r for _, r in ranks)
+    min_rank = min(r for _, r in ranks)
+
+    if max_rank == min_rank:
+        # Everyone tied at the same rank → tiebreak among ALL active players.
+        # Per the actual rules, the lowest re-throw takes the original combo's penalty.
+        penalty = max(active[0].turn.fiches, 1)
+        _enter_tiebreak(
+            game,
+            {p.id for p in active},
+            penalty=penalty,
+            return_phase=game.phase,
+            original_winner_id=None,
         )
-    # Fresh turn for active players; sat-out players get no turn this cycle
-    for p in all_players:
-        if p.id in game.out_of_match:
-            p.turn = None
-        else:
-            p.turn = new_turn()
-    starter_name = next((p.name for p in all_players if p.id == game.round_starter_id), "")
-    _log(
-        game,
-        "log_round_start",
-        f"Round {game.round_num} · {starter_name} donne le rythme",
-        num=game.round_num,
-        phase=game.phase.value,
-        starter=starter_name,
-    )
+        return
+
+    winners = [p for p, r in ranks if r == max_rank]
+    losers = [p for p, r in ranks if r == min_rank]
+    penalty = max(winners[0].turn.fiches, 1)
+
+    # Tiebreak when multiple players share the lowest rank — common case the rules
+    # actually call out. Tied winners at the top in décharge with the exact same
+    # combo also warrant a tiebreak; that's the next commit.
+    if len(losers) > 1:
+        _enter_tiebreak(
+            game,
+            {p.id for p in losers},
+            penalty=penalty,
+            return_phase=game.phase,
+            original_winner_id=winners[0].id if len(winners) == 1 else None,
+        )
+        return
+
+    # Single loser, direct resolution
+    loser = losers[0]
+    if game.phase == GamePhase.CHARGE:
+        taken = min(penalty, game.pool)
+        loser.tokens += taken
+        game.pool -= taken
+        _log(
+            game,
+            "log_charge_takes",
+            f"{loser.name} prend {taken} jeton(s) · Pool: {game.pool}",
+            name=loser.name,
+            n=taken,
+            pool=game.pool,
+        )
+        if game.pool == 0:
+            game.phase = GamePhase.DECHARGE
+            _log(game, "log_pool_empty", "Pool vide → Décharge !")
+    else:  # DECHARGE
+        # Multiple winners → no transfer this cycle (tied-winner tiebreak is the
+        # next commit). Single winner → standard transfer.
+        if len(winners) == 1:
+            winner = winners[0]
+            if winner.tokens > 0:
+                transfer = min(penalty, winner.tokens)
+                winner.tokens -= transfer
+                loser.tokens += transfer
+                _log(
+                    game,
+                    "log_decharge_gives",
+                    f"{winner.name} donne {transfer} jeton(s) à {loser.name}",
+                    winner=winner.name,
+                    n=transfer,
+                    loser=loser.name,
+                )
+
+    await _finalize_cycle(game, next_starter_id=loser.id)
 
 
 async def _persist_game(game: "Game") -> None:

@@ -395,8 +395,8 @@ async def test_resolve_round_loser_becomes_next_starter():
 
 
 @pytest.mark.asyncio
-async def test_resolve_round_charge_tied_losers_both_take_from_pool():
-    """B3: when multiple players tie at the lowest rank, each takes the penalty."""
+async def test_resolve_round_charge_tied_losers_enter_tiebreak():
+    """When multiple players tie at the lowest rank in charge → TIEBREAK phase."""
     game = _make_game(3)
     game.phase = GamePhase.CHARGE
     game.pool = 11
@@ -407,32 +407,34 @@ async def test_resolve_round_charge_tied_losers_both_take_from_pool():
     game.players[1].turn = _done_turn(100, 1)
     game.players[2].turn = _done_turn(100, 1)
     await _resolve_round(game)
-    # Both losers should have taken 8 each, but pool only had 11 → first takes 8, second takes 3
-    assert game.players[1].tokens + game.players[2].tokens == 11
-    assert game.pool == 0
-    assert game.phase == GamePhase.DECHARGE  # pool emptied
+    # No transfer yet — tiebreak first
+    assert game.phase == GamePhase.TIEBREAK
+    assert game.tiebreak is not None
+    assert set(game.tiebreak["tied_pids"]) == {"p1", "p2"}
+    assert game.tiebreak["penalty"] == 8
+    assert game.tiebreak["return_phase"] == "charge"
+    assert game.pool == 11  # untouched until tiebreak resolves
 
 
 @pytest.mark.asyncio
-async def test_resolve_round_all_tied_no_transfer():
-    """B3: when all players tie on rank, no transfer happens and starter stays."""
+async def test_resolve_round_all_tied_enters_tiebreak():
+    """When everyone ties on rank → tiebreak with all active players."""
     game = _make_game(3)
     game.phase = GamePhase.CHARGE
     game.pool = 11
     game.round_num = 1
     game.round_starter_id = "p1"
-    # All three roll the same rank
     for p in game.players:
         p.turn = _done_turn(2200, 2)
     await _resolve_round(game)
-    assert game.pool == 11
-    assert all(p.tokens == 0 for p in game.players)
-    assert game.round_starter_id == "p1"  # starter unchanged when no loser exists
+    assert game.phase == GamePhase.TIEBREAK
+    assert game.tiebreak is not None
+    assert set(game.tiebreak["tied_pids"]) == {"p0", "p1", "p2"}
 
 
 @pytest.mark.asyncio
-async def test_resolve_round_decharge_tied_losers_split_transfer():
-    """B3: single winner gives split shares to each tied loser in DECHARGE."""
+async def test_resolve_round_decharge_tied_losers_enter_tiebreak():
+    """Tied losers in décharge also trigger TIEBREAK before any transfer."""
     game = _make_game(3)
     game.phase = GamePhase.DECHARGE
     game.round_num = 1
@@ -445,8 +447,11 @@ async def test_resolve_round_decharge_tied_losers_split_transfer():
     game.round_starter_id = "p0"
     p0_before = game.players[0].tokens
     await _resolve_round(game)
-    # The winner gave some tokens; both tied losers received something
-    assert game.players[0].tokens < p0_before
+    assert game.phase == GamePhase.TIEBREAK
+    assert set(game.tiebreak["tied_pids"]) == {"p1", "p2"}
+    assert game.tiebreak["original_winner_id"] == "p0"
+    # No transfer yet
+    assert game.players[0].tokens == p0_before
 
 
 @pytest.mark.asyncio
@@ -548,6 +553,68 @@ async def test_new_match_clears_out_of_match():
     _start_new_set(game, "p1")
     assert game.out_of_match == set()
     assert game.players[0].turn is not None  # p0 rejoins
+
+
+@pytest.mark.asyncio
+async def test_resolve_tiebreak_picks_lowest_combo_and_applies_penalty():
+    """After tied losers throw, lowest combo takes the original penalty (not the tiebreak's)."""
+    from app.game.logic import _resolve_tiebreak
+
+    game = _make_game(3)
+    game.phase = GamePhase.TIEBREAK
+    game.pool = 11
+    game.round_starter_id = "p0"
+    # Simulate: p0 won the original cycle (penalty 8); p1, p2 tied at bottom.
+    game.tiebreak = {
+        "tied_pids": ["p2", "p1"],  # most recent first
+        "throws": {
+            "p2": {"dice": [3, 3, 2], "combo": "332", "rank": 332, "fiches": 1},
+            "p1": {"dice": [4, 3, 2], "combo": "432", "rank": 1200, "fiches": 2},
+        },
+        "next_pid": None,
+        "penalty": 8,
+        "return_phase": "charge",
+        "original_winner_id": "p0",
+    }
+    await _resolve_tiebreak(game)
+    # p2 (rank 332, basic) is lowest → takes the ORIGINAL penalty of 8 (not 1)
+    assert game.players[2].tokens == 8
+    assert game.players[1].tokens == 0
+    assert game.pool == 3
+    assert game.phase == GamePhase.CHARGE
+    assert game.tiebreak is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_tiebreak_recurses_when_still_tied():
+    """If the tiebreak roll also ties at the bottom, enter another TIEBREAK."""
+    from app.game.logic import _resolve_tiebreak
+
+    game = _make_game(3)
+    game.phase = GamePhase.TIEBREAK
+    game.pool = 11
+    game.round_starter_id = "p0"
+    # p1 and p2 still tied on the same rank in the tiebreak roll
+    game.tiebreak = {
+        "tied_pids": ["p2", "p1"],
+        "throws": {
+            "p2": {"dice": [3, 3, 1], "combo": "331", "rank": 331, "fiches": 1},
+            "p1": {"dice": [3, 3, 1], "combo": "331", "rank": 331, "fiches": 1},
+        },
+        "next_pid": None,
+        "penalty": 8,
+        "return_phase": "charge",
+        "original_winner_id": "p0",
+    }
+    await _resolve_tiebreak(game)
+    # Still tied → recursive tiebreak; phase stays TIEBREAK, throws reset
+    assert game.phase == GamePhase.TIEBREAK
+    assert game.tiebreak is not None
+    assert set(game.tiebreak["tied_pids"]) == {"p1", "p2"}
+    assert game.tiebreak["throws"] == {}
+    assert game.tiebreak["penalty"] == 8  # carries through
+    # Pool untouched
+    assert game.pool == 11
 
 
 @pytest.mark.asyncio
