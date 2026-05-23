@@ -194,6 +194,32 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 - UI: follow button on `/profile/{username}`; followers/following count + list on own profile.
 - Privacy: respect a future `User.profile_visibility` setting (defer).
 
+### G31. 3D dice animation + organized combo banner + sound
+**Why:** The current dice are flat 2D images that snap to a new value with no animation, and the player has to scan the values and remember the hierarchy table to know what they rolled (was 1-1-3 worth 3 chips? a basic? 11x?). User wants a more immersive feel — visible dice tumble, a sorted result banner that names the combo, and a "shake" sound before the throw so it feels like real dice in a hand.
+**Scope:**
+- **3D dice rendering.** Two options to weigh during research:
+  - CSS 3D transforms (lightweight, no extra deps; ~12 keyframes per face): faster to ship, narrow visual ceiling.
+  - Three.js or react-three-fiber (~150 KB gzip): richer physics, more polish, larger bundle.
+  - Decision criterion: visual quality vs. bundle size budget. Default lean: CSS 3D first; promote to Three.js only if the look falls short.
+- **Adaptive sizing.** On mount of `Game.jsx`, measure the piste container via a `ResizeObserver` and pass dimensions down to the dice area so the throw fills the available space instead of being capped at 600×600 (this also helps G14). Re-measure on viewport resize.
+- **Animation flow per throw:**
+  1. **Shake** (~1 s): kept dice slide to a side panel inside the piste; remaining dice cluster centre, shake in place with audio loop.
+  2. **Throw** (~600 ms): dice tumble across the piste in 3D, settling to their final value.
+  3. **Banner** (~3 s, then collapses): organized post-roll banner above/below the dice with the dice sorted high → low and the combo name + chip value pulled from `classify()` server-side (already in `state.players[me].turn.combo` / `.fiches`). Example: « **4-2-1** · 421 · 8 fiches ».
+- **Audio.**
+  - Three short clips: `shake.mp3` (loop), `throw.mp3` (one-shot), `settle.mp3` (one-shot).
+  - Use Web Audio API or `<audio>` tags; prefer Web Audio for precise scheduling.
+  - Per-user toggle in localStorage (`sound_enabled: true | false`), default `true`.
+  - Sound toggle exposed in the TopBar (next to theme toggle) AND in the Room settings panel.
+  - Respect `prefers-reduced-motion` and `Mute` audio API hint to default off if the browser/OS suggests.
+- **Selected-dice layout.** When the player clicks a die to keep it (current click-to-keep semantics): the kept die animates to a side rail inside the piste (top-right by default). The remaining unkept dice cluster centre for the next throw. After the throw, dice that were kept return to the inline display.
+- **Accessibility:** keep `<Die>` keyboard-focus + Enter/Space behaviour intact even when 3D. Animation skipped entirely when `prefers-reduced-motion: reduce`.
+- **Performance:** all animation runs on `transform` + `opacity` (GPU-composited). No layout thrashing. Pause animation when the tab is hidden (`document.visibilityState`).
+
+**Research first.** This item carries enough unknowns (3D library choice, audio asset sourcing, mobile perf) that the first PR should be a research note + tiny prototype, not the production drop. Split it: G31a (research + prototype) → G31b (production implementation).
+
+**Dependencies:** ideally lands alongside G14 (piste sizing) since both touch the piste container measurement. G16 (hint text) and G15 (rhythm indicator) won't fight with the new dice but their placement might need tweaking once the dice area grows.
+
 ### G30. External invite delivery — email / SMS / WhatsApp link
 **Why:** Beyond the in-app friend invites (G29), the user wants to share a private-room join link via outside channels. "Tap to copy a link", "send via email", "send via WhatsApp" — invitee clicks the link, lands on the room with the code pre-filled, joins.
 **Scope (sketch only):**
@@ -221,9 +247,10 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 - "Le Tapis" → « La piste »
 **Scope:** Full grep + replace across `i18n/index.js` (FR section), `Game.jsx`, `CreateRoom.jsx`, backend French log strings in `logic.py` / `ws.py`. **Status:** Landed in this batch's vocab commit; remaining cleanup is mostly docstring/comment normalization (R3 follow-up).
 
-### G18. Round-point persistence trigger
+### G18. Round-point persistence trigger (partially done — leave/kick path landed)
 **Why:** With no auto-game-end, `_persist_game` only fires for the lone-survivor edge case. Logged-in users' round points accumulated in a session are lost when the room dissolves.
 **Scope:** Trigger persistence (1) when a player leaves the room mid-game, (2) when the room dissolves (last player leaves or host migrates). Write `round_points[pid]` to `GamePlayer.round_points` and update `PlayerStats`.
+**Status:** Leave / kick path done in `feature/g18-round-point-persistence` (new `persist_player_session` writes to `PlayerStats`: `games_played +1`, `losses += round_points` or `wins +1` if 0). **Still queued for follow-up:** `GameRecord` + `GamePlayer` history-row writes on room-dissolve (the "Recent Games" panel stays empty until those land), and a proper ELO recalc trigger.
 
 ### R1. Rewrite `_resolve_round` for correct one-loser-per-cycle + tiebreak mechanic
 **Why:** Commit `5d8bd45` ("rule correctness") shipped tie behavior that doesn't match the actual rules. The real rules: there is **always exactly one loser** per table cycle. Tied losers (or tied top players in discharge when combos are exactly equal) trigger a **tiebreak re-throw** — tied players re-roll three dice in reverse turn order, lowest hand by the combo hierarchy loses, recursive if still tied. The penalty stays the value of the original winning combo. My current code's "all-tied → no transfer" and "tied winners → no transfer" paths are wrong and need removal.
@@ -371,6 +398,7 @@ Past commits that captured incorrect rules — superseded by **R1**, **R2**, **R
 
 ## Done
 
+- **2026-05-23** _(pending PR merge — `feature/g18-round-point-persistence`)_ — **G18 leave/kick path**. New `persist_player_session(user_id, game_code, round_points)` in `app/services/game_persistence.py` bumps `PlayerStats.games_played` and attributes the leaver's `round_points` to `losses` (or counts a `win` if they left with 0). Wired into the WS leave **and** kick handlers as a background task, snapshotting values before the cleanup mutates them. ELO recalc deliberately deferred — we don't have a canonical game-end to define "opponents" for the rating sense. 6 new integration tests cover normal / zero / accumulate / unknown-user / invalid-uuid / empty-id paths. Coverage 83.62%. Still queued: `GameRecord` / `GamePlayer` history-row writes on room dissolve (Recent Games panel stays empty until then) + ELO trigger.
 - **2026-05-23** `63733a4` — G20: action-bar eyebrow + serif text bumped to readable sizes (0.78rem / 1.05rem; ink-soft instead of ink-mute). Top-panel control buttons (host's ⚙ Room rules and everyone's 🚪 Quitter) are now proper rounded pill buttons with hover states — Quitter is rouge-bordered and fills rouge on hover for visibility; Room rules is neutral. Both stay compact and wrap cleanly on narrow widths.
 - **2026-05-23** _(pending SHA)_ — Test coverage backfill (CI gate was failing at 77%). Added 8 WS integration tests covering the new actions in `_dispatch`: `initial_roll`, `roll`, `keep`, `done`, plus `kick` (non-host rejected, host removes target, can't target self, missing target_id is no-op) and a CHARGE-phase seed helper. Coverage back to 83.99% (≥ 80% gate). Added roadmap G30: external invite delivery (copy link + email/SMS/WhatsApp).
 - **2026-05-23** `38421d9` — Fixed `PATCH /auth/me` returning 422: the `req()` wrapper in `api/auth.js` was spreading `opts` AFTER its own headers, so the `Authorization: Bearer ...` from callers stripped the `Content-Type: application/json`. FastAPI then couldn't parse the JSON body. One-line fix: spread `opts` first, build headers second. Also: after a successful lang_pref save, the profile now calls `setLang()` so the UI flips language immediately (G26 partial — full login-time sync still queued). G26 (lang follows profile), G27 (notifications), G28 (friends/follow), G29 (invite-friends) added to roadmap. G18 still covers the empty-stats issue (round_points / games_played never persist because game-end no longer auto-fires).
@@ -407,7 +435,32 @@ Past commits that captured incorrect rules — superseded by **R1**, **R2**, **R
 When picking up an item:
 1. Move it to **Now** if it isn't already.
 2. Create a Plan-mode plan file or AskUserQuestion to confirm intent before coding.
-3. Branch off `develop`, ship behind logical commits, push.
-4. Update this file: status → **Done**, add the commit SHA.
+3. **Cut a new branch from `develop`** using a Conventional-Commits-style slug:
+   - `feature/<slug>` for new features
+   - `fix/<slug>` for bug fixes
+   - `chore/<slug>` for docs / roadmap / CI tweaks
+   - `refactor/<slug>` / `test/<slug>` for those respectively
+4. Ship commits on that branch. Run the full gates before pushing:
+   - `pytest tests/ --cov=app --cov-fail-under=80`
+   - `ruff check app/ tests/` + `ruff format --check app/ tests/`
+   - `npm --prefix frontend run lint` + `npm --prefix frontend run build`
+5. `git push -u origin <branch>` (NOT to develop directly).
+6. Open a PR into `develop` with this body shape:
+   ```
+   ## Summary
+   - <1–3 bullets>
+
+   ## Changes
+   - <file/area> — <what>
+
+   ## Test plan
+   - [ ] <how to verify, locally and in CI>
+
+   ## Roadmap
+   - Closes G<n>  (or: addresses part of G<n>; full scope in G<m>)
+   ```
+7. After merge, update this file: status → **Done**, add the commit SHA.
 
 When adding a new idea: drop it in **Maybe** with a one-line *Why*. Promote it once we've thought through scope.
+
+**Branch protection rule of thumb:** `develop` is the integration branch; nothing lands there without a PR. `main` is stable; only merges from `develop`. Hotfixes can branch from `main` (`hotfix/<slug>`) and back-merge to both.
