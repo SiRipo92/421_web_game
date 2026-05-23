@@ -82,7 +82,7 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 - Same pattern usable for `log_round_point` (when 2/2 reached, "X prend un point de round").
 **Acceptance:** Two-player game; one player reaches 11; the screen shows a centered banner naming them as the manché before the new match starts.
 
-### G14. Layout overhaul — piste sizing, dice placement, log positioning
+### G14. (partially DONE — pending PR merge) Layout overhaul — piste sizing, dice placement, log positioning
 **Why:** The piste doesn't take up the screen's full visual real estate; the dice area and chip stack sit inside a small circle while the rest of the page has unused white space. The user wants the game to feel "bigger".
 **Scope:**
 - Rework `Game.jsx`'s main grid:
@@ -131,7 +131,7 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 - Make the ⚙ Room rules pill visibly button-shaped for the host.
 - Possibly split the action bar into a fixed two-row layout on narrow screens so the buttons don't wrap into the player's status text.
 
-### G21. Live play commentary + score-to-beat banner
+### G21. (partially DONE — pending PR merge) Live play commentary + score-to-beat banner
 **Why:** Reported. Even when it's not your turn, you should know what's happening: who's playing, what they rolled, what the highest score to beat is, how many chips are in play. After your own turn you want a friendly summary ("You just lost the manche. You took 3 chips from Player_1. Better luck next time. Your turn to start!").
 **Scope:**
 - New persistent panel (left of piste, see G14) that shows:
@@ -376,6 +376,129 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 
 ---
 
+## Admin & moderation foundation
+
+This block ships in coordination with the chat-moderation suite (G32–G37 in the moderation-suite PR). It's the human-facing side: the dashboard the moderator uses, the inbox where AI-escalated reports land, the 3-strike accounting engine that decides who gets warned vs. muted vs. banned, the login-time ban gate, and the per-room ban upholding flow.
+
+### G38. (partially DONE — pending PR merge) Admin / moderator role + dashboard surface
+**Why:** TheWitch (`ripochesierra@gmail.com`) is the seed admin. The interface they see needs to be different from a regular player: a top-level "Admin dashboard" entry, a moderation inbox count badge, and the ability to delegate moderator role to others. Without a code-side role enum, none of the moderation tooling has anywhere to authorize against.
+**Scope:**
+- **Schema** — `User.role: enum(player | moderator | admin)` (stored as `String(16)`, default `"player"`). `User.chat_banned_until`, `User.banned_until`, `User.ban_reason`, `User.strike_count` columns. Alembic migration includes a data step that promotes the seed admin by email.
+- **Auth** — new `require_moderator` and `require_admin` FastAPI deps (`app/core/security.py`). `/auth/me` surfaces `role`, `strike_count`, `chat_banned_until`, `banned_until`, `ban_reason`. Frontend `useAuth` propagates the role.
+- **Admin router** (`app/routers/admin.py`) — `GET /api/admin/dashboard-summary` returns counts (pending_reports, active_bans, total_users, active_strikes). Moderator-gated. More endpoints land with G39 / G40 / G42.
+- **Admin dashboard page** (`frontend/src/pages/AdminDashboard.jsx`) — top-level route `/admin`, three placeholder panels (Inbox / Users / Room bans) that G39 / G40 / G42 fill in. Non-admins hitting `/admin` get redirected to `/profile`.
+- **Profile updates** — admin/moderator badge next to username + "Admin dashboard" link.
+- **Promote/demote moderators** — admin-only `PATCH /api/admin/users/{user_id}/role`. Audit row in `GdprAuditLog`.
+**Acceptance:** TheWitch logs in → sees the admin badge on her profile + an "Admin dashboard" link → /admin renders the 3-panel layout with live counts pulled from the summary endpoint. A regular player navigating to /admin is redirected to /profile.
+**Dependencies:** None — this is the foundation everything else hangs off of.
+
+### G39. Moderation inbox (HITL queue)
+**Why:** When the AI triage (G37) returns `human_review`, when a category requires legal review (csam_suspect, named-victim doxxing), or when a user appeals an AI verdict — these all need to land somewhere the moderator actually sees. The inbox is the single pane of glass that prevents items from getting lost.
+**Scope:**
+- **Inbox model** — `ModerationInboxItem(id, kind, reference_id, severity, status, assigned_to, created_at, resolved_at, resolved_by, notes)` where `kind ∈ {report_human_review, report_appeal, ban_appeal, csam_legal_review, system_alert}` and `reference_id` foreign-keys into `ModerationReport` (G37) / `RoomBan` (G32) / etc.
+- **Inbox endpoints** —
+  - `GET /api/admin/inbox?status=open&kind=...&sort=newest` paginated list
+  - `GET /api/admin/inbox/{id}` full detail with the surrounding context (message + 5 surrounding messages for reports, recent room activity for bans)
+  - `POST /api/admin/inbox/{id}/resolve` body `{verdict, action_taken, notes}` → applies the verdict (e.g. `chat_ban_temp_30d`, `dismiss`, `escalate_to_admin`) and closes the item
+  - `POST /api/admin/inbox/{id}/reassign` admin-only; reassigns to another moderator
+- **Inbox UI** — top of admin dashboard. Per-item card shows: kind, reported user, AI's prior verdict + confidence, full message + context, action buttons (apply verdict / dismiss / escalate / reassign).
+- **Counts + notifications** — badge in TopBar with inbox count for logged-in moderators; daily Resend digest email of items pending > 24h (configurable threshold).
+- **Bulk actions** — select multiple items → bulk dismiss / bulk escalate. Useful for brigade-reporting cleanup.
+**Acceptance:** AI triage escalates a report → item appears in inbox within seconds → moderator opens it, sees the full message + context, applies "chat_ban_temp_30d" → user gets notified (G27 / G42 login gate), inbox count drops by 1.
+**Dependencies:** G38 (auth + dashboard surface), G37 (escalation source), G27 (notification sink).
+
+### G40. 3-strike enforcement engine (warn → mute → ban)
+**Why:** The rule we've agreed on: most rule-breaks earn strikes; outright legal violations (threats, hate speech, sexual content involving minors, doxxing of named individuals) skip strikes and go straight to a permanent ban. The engine is the central accounting layer that every other moderation surface defers to — so "what counts as a strike", "how strikes decay", and "what each strike level does" are defined once.
+**Scope:**
+- **Rule table** (`app/services/enforcement.py`) — one source of truth:
+  | Category | Auto-action | Counts as strike? |
+  |---|---|---|
+  | hate_speech (confirmed) | perm chat ban + account ban review | NO — direct ban |
+  | csam_suspect (confirmed) | perm account ban + legal escalation | NO — direct ban |
+  | doxxing (named victim) | perm chat ban + 30d account suspension | NO — direct ban |
+  | credible_threat | perm chat ban + 7d account suspension | NO — direct ban |
+  | harassment | 1st: warn · 2nd: 24h chat mute · 3rd: 30d chat ban | YES |
+  | sexual (not minor) | 1st: warn · 2nd: 24h chat mute · 3rd: 30d chat ban | YES |
+  | spam | 1st: warn · 2nd: 1h chat mute · 3rd: 7d chat mute | YES |
+  | rule_break_minor | 1st: warn · 2nd: warn · 3rd: 7d chat mute | YES |
+  | cheating | 1st: warn · 2nd: 7d account suspension · 3rd: perm account ban | YES |
+- **Strike decay** — strikes older than 90d are excluded from the active count. The raw count never decrements (audit-preserving) but only the rolling-90d window decides next action.
+- **Engine API** — `record_strike(user_id, category, source) -> EnforcementAction` returns the action that was just applied (so callers know what to communicate). Persists a `StrikeRecord(id, user_id, category, source, action_taken, occurred_at)` row.
+- **Login gate (G42 plumbing)** — the engine writes `User.banned_until` / `User.ban_reason` directly so the login flow only has to check one column.
+- **Notification fan-out** — every strike + action triggers a notification (G27) to the affected user with category, action, duration, and the appeal link.
+- **Moderator override** — `POST /api/admin/users/{user_id}/clear-strikes` (admin only, audited). For false-positive recovery.
+**Acceptance:** Calling `record_strike(user_id, "harassment", source="ai_triage")` three times in a row produces 3 distinct StrikeRecord rows AND escalates the user from warn → 24h mute → 30d chat ban, with notifications fired at each step. Calling `record_strike(user_id, "csam_suspect")` once triggers immediate account ban + legal escalation.
+**Dependencies:** G38 (role + ban columns), G27 (notifications), G39 (inbox surfaces the override action).
+
+### G41. Per-room ban upholding (host + moderator joint authority)
+**Why:** When a room host bans a player from THEIR room (G32), that ban belongs to the host — not the platform. So: the host owns it (can lift it later from their own dashboard), but the platform moderator can also see and uphold it. If the host later un-bans someone the moderator considers genuinely dangerous, the moderator can override and lock the ban platform-wide.
+**Scope:**
+- **`RoomBan.upheld_by` column** (default null). Null = host-only ban; populated with a moderator's user_id = platform-upheld (host can no longer lift it).
+- **Host dashboard view** — new `frontend/src/pages/MyRoomBans.jsx` (linked from Profile): lists all RoomBans where `banned_by_user_id == me`. Each row shows banned user + reason + date + "Lift this ban" button (disabled with explanation if `upheld_by` is set).
+- **Moderator inbox surface** — Room bans appear in the G39 inbox under `kind=room_ban_review` when they reach a threshold (3 bans of the same user across distinct rooms in 30d → auto-create an inbox item for moderator review).
+- **Moderator action** — from inbox, can `POST /api/admin/room-bans/{id}/uphold` (locks the ban from host lifting) OR `escalate-to-account-ban` (chains into G40's engine).
+- **Lift-ban path** — `DELETE /api/rooms/bans/{id}` (host only if `upheld_by IS NULL`). Records to GdprAuditLog.
+**Acceptance:** Host bans a player → 3 weeks later wants to give them another chance → goes to MyRoomBans → clicks "Lift this ban" → user can re-join. If a moderator had upheld it in the meantime, the Lift button is disabled with copy explaining why and how to appeal.
+**Dependencies:** G32 (RoomBan table), G38 (moderator role), G39 (inbox).
+
+### G43. Chat access tiers — registered-only send, guest-only react
+**Why:** Anonymous free-text chat is the moderation-impossible mode. Forcing message-send to a registered account makes every offence directly attributable to a user_id, which makes G35 IP capture, G37 peer reports, G40 strikes, and G42 login gate all meaningfully enforceable. Guests still feel social via a small reaction set without opening the abuse vector. This is a deliberately family-friendly default — not a friction-for-friction's-sake choice.
+
+**Scope:**
+
+A. **Three access tiers**
+- **Tier 0 — banned-from-chat user** (`User.chat_banned_until > now()`): can read messages, cannot send, cannot react. UI shows their muted state with the time remaining + reason.
+- **Tier 1 — guest / unregistered** (no JWT on WS handshake): can read messages, can fire from a fixed reaction palette (👏 🍷 🎲 🔥 😂 ❦ — 6 buttons, no custom emoji), cannot send free-text.
+- **Tier 2 — registered user** (`User.chat_banned_until` null or expired): full send + react. Rate-limits per G36.
+
+B. **WS enforcement**
+- `chat_send` action requires authenticated user. Guest socket sending `chat_send` gets `{type: "chat_blocked", reason: "guest_send_disabled", hint: "Register or log in to chat."}`.
+- New `chat_react` action accepts `{emoji}` where `emoji` must match one of the 6 preset codepoints (server-side whitelist). Anything else → `{type: "chat_blocked", reason: "invalid_reaction"}`.
+- Reactions broadcast as `{type: "reaction", from_display, emoji, message_id_target}`; they overlay the targeted message (or attach to the room if no target).
+- Rate limit (G36 extension): guest react bucket is tighter — capacity 3 reactions / 10 s, refill 1 / 4 s. Same global anti-spam cap as registered users.
+
+C. **Frontend**
+- Chat input shows different UI per tier:
+  - Tier 0: input replaced with a calm rouge banner « Vous êtes en pause de chat jusqu'au {date}. » + a /contact appeal link.
+  - Tier 1: input replaced with the 6-emoji palette row + a brass-bordered « Inscrivez-vous pour écrire » CTA linking to `/login?tab=register`.
+  - Tier 2: normal text input.
+- Reaction palette is keyboard-navigable (arrow keys + Enter).
+- Reaction overlays auto-fade after 4 s; multiple identical reactions in 2 s stack into a `×N` chip rather than spawning separate floats.
+
+D. **Why guests aren't completely locked out**
+- The bistrot atmosphere wants a low-friction "drop in, watch a hand" feel — kicking guests out of chat entirely kills that. Reactions are the compromise: enough social presence to feel like a room, not enough abuse surface to need full moderation.
+- Guests still have their IP captured at WS handshake (G35). A guest who spams reactions to evasion levels gets the same IP-ban treatment as a registered user — they just hit the limit faster because their bucket is tighter.
+
+E. **Edge cases**
+- A guest gets a reaction-IP-ban → all sockets from that IP get `{type: "chat_blocked", reason: "banned_ip"}` for reactions AND view (we don't want the IP loitering on chat). Game still plays — the ban is chat-only.
+- A registered user gets `chat_banned_until` mid-game → next `chat_send` returns the banned response; reactions continue to work because reactions are a Tier 1 affordance and chat-ban is specifically about text. (Alternative: treat reactions as Tier 2 too — TBD when we ship.)
+- Logged-out-mid-session: WS handshake re-evaluates tier on reconnect. If the user logs out, they're back to Tier 1 until they log back in.
+
+**Acceptance:**
+- Guest opens a game → sees other players' messages → sees the emoji palette → can fire reactions → cannot type free text. Registration CTA visible.
+- Registered user → full chat. Strike + ban → tier drops to 0 with the banner.
+- Spamming guest hits IP-ban → reactions stop landing, view also drops.
+
+**Dependencies:** Item 8 (chat), G34 (moderation), G35 (IP), G36 (rate-limiter), G42 (ban-state messaging copy).
+
+### G42. Login-time ban gate (clear messaging + cool-down reminder)
+**Why:** A banned user trying to log in should get a clear, kind explanation — not a generic "invalid credentials." Temp-banned users should see when they can come back + a reminder of the rules. Permanently banned users should see the reason category + an appeal link. The mistake to avoid: silently letting them in with chat broken or letting their account vanish without explanation.
+**Scope:**
+- **Login flow change** — `POST /auth/login` checks `User.banned_until` and `User.ban_reason` after password verification.
+  - `banned_until IS NULL` → normal login.
+  - `banned_until > now()` → return **403** with `{error: "account_temporarily_suspended", reason: <category>, until: <iso>, rules_link: "/terms"}`. Frontend renders a friendly screen.
+  - `banned_until IN past` AND status='permanent' (separate flag) → return **403** with `{error: "account_permanently_banned", reason: <category>, appeal_link: "/contact?subject=appeal"}`. Frontend renders an explainer.
+- **Chat-only ban** — `chat_banned_until` does NOT block login (the user can still play games). Surfaced via `/auth/me`; chat WS just drops their messages with a polite refusal.
+- **Frontend screens**:
+  - `LoginBlockedTemp.jsx` — "Votre compte est suspendu jusqu'au {date}. Voici un rappel des règles…" + the rule excerpt that was violated + countdown + auto-redirect to `/login` when expiry passes.
+  - `LoginBlockedPerm.jsx` — "Votre compte a été désactivé pour {reason}. Voici la décision et les voies d'appel." + Contact link with the case prefilled.
+- **Logout-on-mid-session-ban** — if a moderator bans an active user, the next WS message gets `{type: "session_terminated", reason: ...}` and the frontend redirects to the appropriate blocked screen.
+- **i18n** — French + English copy for all messaging. Tone stays respectful even for permanent bans (legal-safer + reduces escalation).
+**Acceptance:** A user banned for 7 days tries to log in → sees the temp-block screen with the date and rule excerpt → 7 days later logs in successfully. A user permanently banned for csam_suspect → sees the perm-block screen with the appeal link → can't log in until appeal verdict.
+**Dependencies:** G38 (ban columns), G40 (engine writes the columns), G27 (in-session ban notification).
+
+---
+
 ## Maybe
 
 ### 12. Game replay / spectator history
@@ -399,6 +522,8 @@ Past commits that captured incorrect rules — superseded by **R1**, **R2**, **R
 ## Done
 
 - **2026-05-23** _(pending PR merge — `feature/g18-round-point-persistence`)_ — **G18 leave/kick path**. New `persist_player_session(user_id, game_code, round_points)` in `app/services/game_persistence.py` bumps `PlayerStats.games_played` and attributes the leaver's `round_points` to `losses` (or counts a `win` if they left with 0). Wired into the WS leave **and** kick handlers as a background task, snapshotting values before the cleanup mutates them. ELO recalc deliberately deferred — we don't have a canonical game-end to define "opponents" for the rating sense. 6 new integration tests cover normal / zero / accumulate / unknown-user / invalid-uuid / empty-id paths. Coverage 83.62%. Still queued: `GameRecord` / `GamePlayer` history-row writes on room dissolve (Recent Games panel stays empty until then) + ELO trigger.
+- **2026-05-23** `0f1676d` (PR #19) — **G38 first cut**. Adds `User.role` (`player | moderator | admin`, default `player`), `User.strike_count`, `User.chat_banned_until`, `User.banned_until`, `User.ban_reason`. Alembic migration `g38admin0001` (chained off the current head `a1b2c3d4e5f6`) adds the columns AND promotes the seed admin (`ripochesierra@gmail.com`) to `admin` via an idempotent UPDATE. New `require_moderator` / `require_admin` deps in `app/core/security.py`. New `app/routers/admin.py` with `GET /api/admin/dashboard-summary` (moderator-gated counts) + `PATCH /api/admin/users/{user_id}/role` (admin-only, audited via GdprAuditLog). `/auth/me` now returns role + strike + ban fields. `POST /auth/login` rejects accounts with `banned_until > now()` with 403 + structured payload (`{error, reason, until}`) the frontend uses to render a blocked-login screen. Frontend: new `/admin` route with `AdminDashboard.jsx` (live summary grid + 3 placeholder panels for G39 inbox / G40 strikes / G41 room bans, non-admins redirected to /profile); admin/moderator badge + dashboard link injected into `Profile.jsx`. 9 new integration tests cover default-role default values, player→403 on admin route, moderator→200, admin role promotion, moderator-cannot-promote, unknown-role rejection, login ban gate (active + expired), chat_banned_until doesn't gate login. 22 new i18n keys (FR + EN). Gates: 225 passed, coverage 84.42%, ruff + format clean, frontend lint + build clean. **Still queued:** G39 inbox, G40 strike engine, G41 room-ban uphold UI, G42 login-blocked screens.
+- **2026-05-23** `302cefa` (PR #17) — **G14 + G21 first cut**. Three-column game-room grid (`260px | 1fr | 320px`) with a new left-rail `CommentaryTicker` (rolling stack of up to 5 headline events: manche/round-point/tiebreak/player-left/kick/afk-takeover/pool-empty/all-tie/sit-out; colored eyebrow per category, slide-in animation, naturally cycles as new headlines arrive). The piste itself grows to `min(820px, 85vh)` and gets a clearer visual hierarchy: « La piste » label up top, new `ScoreToBeatBanner` pinned at top-of-piste (reads `current_round_plays`, surfaces the highest-rank play as "Score à battre : {name} · {combo} ({fiches}f) · N lancers"), pool chips dead-center as the focal point with a small label, dice cluster + combo + keep-hint anchored at the bottom. Mid-width breakpoint (1180px) hides only the ticker so the piste stays roomy on laptops; full mobile stack below 980px. New i18n: ticker_eyebrow/title/empty/aria, 7 ticker_label_* badges, score_to_beat_label/in_throws/aria (FR + EN). Bundle size +5 KB.
 - **2026-05-23** `63733a4` — G20: action-bar eyebrow + serif text bumped to readable sizes (0.78rem / 1.05rem; ink-soft instead of ink-mute). Top-panel control buttons (host's ⚙ Room rules and everyone's 🚪 Quitter) are now proper rounded pill buttons with hover states — Quitter is rouge-bordered and fills rouge on hover for visibility; Room rules is neutral. Both stay compact and wrap cleanly on narrow widths.
 - **2026-05-23** _(pending SHA)_ — Test coverage backfill (CI gate was failing at 77%). Added 8 WS integration tests covering the new actions in `_dispatch`: `initial_roll`, `roll`, `keep`, `done`, plus `kick` (non-host rejected, host removes target, can't target self, missing target_id is no-op) and a CHARGE-phase seed helper. Coverage back to 83.99% (≥ 80% gate). Added roadmap G30: external invite delivery (copy link + email/SMS/WhatsApp).
 - **2026-05-23** `38421d9` — Fixed `PATCH /auth/me` returning 422: the `req()` wrapper in `api/auth.js` was spreading `opts` AFTER its own headers, so the `Authorization: Bearer ...` from callers stripped the `Content-Type: application/json`. FastAPI then couldn't parse the JSON body. One-line fix: spread `opts` first, build headers second. Also: after a successful lang_pref save, the profile now calls `setLang()` so the UI flips language immediately (G26 partial — full login-time sync still queued). G26 (lang follows profile), G27 (notifications), G28 (friends/follow), G29 (invite-friends) added to roadmap. G18 still covers the empty-stats issue (round_points / games_played never persist because game-end no longer auto-fires).
