@@ -58,9 +58,18 @@ class ConnectionManager:
         self.spectators: dict[str, list[WebSocket]] = {}
 
     async def connect(self, game_id: str, ws: WebSocket, player_id: str):
-        """Accept and register a player WebSocket."""
+        """Accept and register a player WebSocket; kick any prior socket for the same player_id."""
         await ws.accept()
-        self.connections.setdefault(game_id, []).append((ws, player_id))
+        existing = self.connections.get(game_id, [])
+        # C2: only one live WS per player_id — last connect wins (reconnect / dup-tab semantics)
+        for old_ws, pid in existing:
+            if pid == player_id:
+                try:
+                    await old_ws.close(code=4001)
+                except Exception:
+                    pass
+        self.connections[game_id] = [(w, pid) for w, pid in existing if pid != player_id]
+        self.connections[game_id].append((ws, player_id))
 
     async def connect_spectator(self, game_id: str, ws: WebSocket):
         """Accept and register a spectator WebSocket."""
@@ -97,6 +106,22 @@ class ConnectionManager:
 
 
 manager = ConnectionManager()
+
+# E3: serialize concurrent joins per game so the max_players check + append is atomic
+_join_locks: dict[str, asyncio.Lock] = {}
+
+
+def _join_lock(game_id: str) -> asyncio.Lock:
+    """Return (creating if needed) the per-game lock used to serialize joins."""
+    lock = _join_locks.get(game_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _join_locks[game_id] = lock
+    return lock
+
+
+# WebSocket message limits (H1)
+_MAX_WS_MSG_BYTES = 1024
 
 
 def _bot_take_turn(player: Player):
@@ -136,6 +161,31 @@ async def _afk_timer(game: Game, player_id: str, game_id: str):
     _schedule_afk(game, game_id)
 
 
+async def _afk_initial_timer(game: Game, player_id: str, game_id: str):
+    """Roll an initial die for an AFK player; finalize order if last to roll."""
+    await asyncio.sleep(game.afk_seconds)
+    if game.phase != GamePhase.INITIAL_ROLL:
+        return
+    if game.initial_rolls.get(player_id) is not None:
+        return
+    player = next((p for p in game.players if p.id == player_id), None)
+    if not player:
+        return
+    roll = random.randint(1, 6)
+    game.initial_rolls[player_id] = roll
+    _log(
+        game,
+        "log_afk_initial",
+        f"{player.name} (AFK) lance {roll}",
+        name=player.name,
+        roll=roll,
+    )
+    if all(v is not None for v in game.initial_rolls.values()):
+        _finalize_order(game)
+    await manager.broadcast(game_id, game_state(game))
+    _schedule_afk(game, game_id)
+
+
 def _cancel_afk(game: Game, player_id: str):
     """Cancel any running AFK timer for the given player."""
     task = game.afk_tasks.pop(player_id, None)
@@ -144,8 +194,20 @@ def _cancel_afk(game: Game, player_id: str):
 
 
 def _schedule_afk(game: Game, game_id: str):
-    """Start a new AFK timer for the current player if the game uses AFK bot."""
+    """Start AFK timers for the players who need to act in the current phase."""
     if not game.afk_bot:
+        return
+    if game.phase == GamePhase.INITIAL_ROLL:
+        # Each player needs to roll once; one timer per pending player. Skip slots
+        # that already have a live task (covers both first-roll and tie re-rolls).
+        for p in game.players:
+            if game.initial_rolls.get(p.id) is not None:
+                continue
+            existing = game.afk_tasks.get(p.id)
+            if existing and not existing.done():
+                continue
+            task = asyncio.create_task(_afk_initial_timer(game, p.id, game_id))
+            game.afk_tasks[p.id] = task
         return
     if game.phase not in (GamePhase.CHARGE, GamePhase.DECHARGE):
         return
@@ -170,7 +232,7 @@ async def create_game(
     """Create a new game room and return its short ID."""
     if max_players < 2 or max_players > 5:
         max_players = 5
-    if bank_rule not in ("sec", "one", "free"):
+    if bank_rule not in ("sec", "free"):
         bank_rule = "free"
     if afk_seconds < 10 or afk_seconds > 300:
         afk_seconds = 45
@@ -196,38 +258,40 @@ async def join_game(
     db: AsyncSession = Depends(get_db),
 ):
     """Add a player to a room by name; returns player_id and join status."""
-    game = games.get(game_id.upper())
+    gid = game_id.upper()
+    game = games.get(gid)
     if not game:
         return {"error": "Game not found"}
 
-    active_count = len(game.players)
-    if game.phase in (GamePhase.WAITING, GamePhase.INITIAL_ROLL):
-        if active_count >= game.max_players:
-            return {"error": "Game is full"}
-
     user_id = await _resolve_user_from_token(token)
-    pid = str(uuid.uuid4())[:8]
-    player = Player(id=pid, name=name)
-
     has_avatar = False
     if user_id:
         row = await db.execute(select(User.avatar_data).where(User.id == user_id))
         has_avatar = row.scalar_one_or_none() is not None
 
-    if game.phase in (GamePhase.WAITING, GamePhase.INITIAL_ROLL):
-        game.players.append(player)
+    # E3: serialize the capacity check + mutation so concurrent joins can't overshoot max_players
+    async with _join_lock(gid):
+        if game.phase in (GamePhase.WAITING, GamePhase.INITIAL_ROLL):
+            if len(game.players) >= game.max_players:
+                return {"error": "Game is full"}
+
+        pid = str(uuid.uuid4())[:8]
+        player = Player(id=pid, name=name)
+
+        if game.phase in (GamePhase.WAITING, GamePhase.INITIAL_ROLL):
+            game.players.append(player)
+            game.user_ids[pid] = user_id
+            game.has_avatars[pid] = has_avatar
+            if game.phase == GamePhase.INITIAL_ROLL:
+                game.initial_rolls[pid] = None
+            if not game.host_player_id:
+                game.host_player_id = pid
+            return {"player_id": pid, "game_id": game.id, "status": "joined"}
+
+        game.waiting_players.append(player)
         game.user_ids[pid] = user_id
         game.has_avatars[pid] = has_avatar
-        if game.phase == GamePhase.INITIAL_ROLL:
-            game.initial_rolls[pid] = None
-        if not game.host_player_id:
-            game.host_player_id = pid
-        return {"player_id": pid, "game_id": game.id, "status": "joined"}
-
-    game.waiting_players.append(player)
-    game.user_ids[pid] = user_id
-    game.has_avatars[pid] = has_avatar
-    return {"player_id": pid, "game_id": game.id, "status": "waiting"}
+        return {"player_id": pid, "game_id": game.id, "status": "waiting"}
 
 
 def _serve(filename: str) -> FileResponse:
@@ -304,9 +368,16 @@ async def websocket_endpoint(
         await ws.close()
         return
 
-    # Update user_id from WS token if not already set from join
-    if token and game.user_ids.get(player_id) is None:
-        game.user_ids[player_id] = await _resolve_user_from_token(token)
+    # C1: if this player_id was claimed by a logged-in user at join time, require
+    # a matching JWT on the WS handshake. Guests (no registered user_id) stay open;
+    # the WS token may upgrade a guest slot to authenticated on first connect.
+    ws_user_id = await _resolve_user_from_token(token) if token else None
+    registered_user_id = game.user_ids.get(player_id)
+    if registered_user_id and registered_user_id != ws_user_id:
+        await ws.close(code=4003)
+        return
+    if registered_user_id is None and ws_user_id is not None:
+        game.user_ids[player_id] = ws_user_id
 
     await manager.connect(game_id, ws, player_id)
     player.connected = True
@@ -314,7 +385,24 @@ async def websocket_endpoint(
 
     try:
         async for raw in ws.iter_text():
-            msg = json.loads(raw)
+            # H1: cap message size
+            if len(raw) > _MAX_WS_MSG_BYTES:
+                try:
+                    await ws.send_json({"error": "message_too_large"})
+                except Exception:
+                    pass
+                continue
+            # H2: handle malformed JSON without falling through to the catch-all
+            try:
+                msg = json.loads(raw)
+            except (json.JSONDecodeError, ValueError):
+                try:
+                    await ws.send_json({"error": "invalid_json"})
+                except Exception:
+                    pass
+                continue
+            if not isinstance(msg, dict):
+                continue
             action = msg.get("action")
 
             if action == "start":
@@ -330,20 +418,41 @@ async def websocket_endpoint(
 
             elif action == "leave":
                 _cancel_afk(game, player_id)
+                leaver_index = next(
+                    (i for i, p in enumerate(game.players) if p.id == player_id), -1
+                )
                 game.players = [p for p in game.players if p.id != player_id]
                 game.user_ids.pop(player_id, None)
                 game.sets_lost.pop(player_id, None)
+                game.has_avatars.pop(player_id, None)
+                game.initial_rolls.pop(player_id, None)
+
                 if not game.players:
-                    games.pop(game_id, None)
+                    games.pop(game_id.upper(), None)
+                    _join_locks.pop(game_id.upper(), None)
                     await ws.close()
                     break
                 if game.host_player_id == player_id and game.phase == GamePhase.WAITING:
-                    games.pop(game_id, None)
+                    games.pop(game_id.upper(), None)
+                    _join_locks.pop(game_id.upper(), None)
                     await manager.broadcast(game_id, game_state(game))
                     await ws.close()
                     break
+
+                # E2: keep current_index pointing at the right player
+                if leaver_index >= 0 and leaver_index < game.current_index:
+                    game.current_index -= 1
                 if game.current_index >= len(game.players):
                     game.current_index = 0
+
+                # B5: if the round starter just left, hand the rhythm to whoever is current
+                if game.round_starter_id == player_id and game.players:
+                    game.round_starter_id = game.players[game.current_index].id
+
+                # Host migration: if the host left after the game started, promote the next player
+                if game.host_player_id == player_id and game.players:
+                    game.host_player_id = game.players[0].id
+
                 if game.all_done():
                     await _resolve_round(game)
                 else:
@@ -357,10 +466,11 @@ async def websocket_endpoint(
                     continue
                 if player_id not in game.initial_rolls or game.initial_rolls[player_id] is not None:
                     continue
+                _cancel_afk(game, player_id)
                 game.initial_rolls[player_id] = random.randint(1, 6)
                 if all(v is not None for v in game.initial_rolls.values()):
                     _finalize_order(game)
-                    _schedule_afk(game, game_id)
+                _schedule_afk(game, game_id)
                 await manager.broadcast(game_id, game_state(game))
 
             elif action == "roll":
@@ -373,8 +483,9 @@ async def websocket_endpoint(
                     continue
                 is_starter = player_id == game.round_starter_id
                 rolls_used = 3 - t.rolls_left
-                # bank_rule limits throws during CHARGE: sec=1 for everyone, one=1 for starter
-                if game.phase == GamePhase.CHARGE and game.bank_rule in ("sec", "one"):
+                # bank_rule="sec" caps everyone to 1 throw during charge (and auto-marks done);
+                # "free" lets the round starter set the rhythm, others match up to that count.
+                if game.phase == GamePhase.CHARGE and game.bank_rule == "sec":
                     if rolls_used >= 1:
                         continue
                 elif not is_starter and rolls_used >= game.max_throws_this_round:
@@ -439,7 +550,7 @@ async def websocket_endpoint(
                 _cancel_afk(game, player_id)
                 t.done = True
                 if player_id == game.round_starter_id:
-                    if game.phase == GamePhase.CHARGE and game.bank_rule in ("sec", "one"):
+                    if game.phase == GamePhase.CHARGE and game.bank_rule == "sec":
                         game.max_throws_this_round = 1
                     else:
                         game.max_throws_this_round = max(3 - t.rolls_left, 1)
