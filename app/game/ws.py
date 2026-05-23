@@ -554,17 +554,18 @@ async def websocket_endpoint(
                 elif not is_starter and rolls_used >= game.max_throws_this_round:
                     continue
                 _cancel_afk(game, player_id)
-                # Re-roll semantics: reroll[i]=True means "this die will be re-rolled".
-                # Default after each roll is all-False (dice are kept by default). The
-                # player clicks a die to *mark it for re-roll*; clicking again unmarks.
-                # Special case for the next roll: if rolls_left < 3 AND no dice are
-                # marked, treat "Relancer" as "re-roll everything" — otherwise the
-                # button would be a no-op when the player wants a fresh throw.
-                no_selection = t.rolls_left < 3 and not any(t.reroll)
+                # Click-to-keep semantics (Yahtzee convention):
+                #   reroll[i] = True  → this die will be re-rolled on the next throw
+                #   reroll[i] = False → kept (locked); the die-paper[data-keep="true"]
+                #                       CSS gives it a lifted brass treatment.
+                # After each roll the default is all-True (every die unkept), so the
+                # player clicks the ones they want to lock before throwing again.
+                # No-selection + Relancer is no longer a special case — every die has
+                # reroll=True by default, so they all get re-rolled.
                 for i in range(3):
-                    if t.rolls_left == 3 or t.reroll[i] or no_selection:
+                    if t.rolls_left == 3 or t.reroll[i]:
                         t.dice[i] = random.randint(1, 6)
-                t.reroll = [False, False, False]
+                t.reroll = [True, True, True]
                 t.rolls_left -= 1
                 t.combo, t.rank, t.fiches = classify(t.dice)
 

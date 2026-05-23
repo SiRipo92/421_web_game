@@ -142,11 +142,14 @@ export function Game({ token }) {
                 </div>
                 {isMyTurn && hasRolled && !myTurn?.done && (myTurn?.rolls_left ?? 0) > 0 && (
                   <div className="serif" style={{
-                    fontSize: '0.78rem',
-                    color: 'var(--ink-mute)',
+                    fontSize: '0.8rem',
+                    color: 'var(--brass-soft)',
                     fontStyle: 'italic',
-                    textShadow: '0 1px 2px rgba(0,0,0,0.6)',
-                    marginTop: 4,
+                    textShadow: '0 1px 3px rgba(0,0,0,0.8)',
+                    marginTop: 8,
+                    padding: '0.3rem 0.6rem',
+                    background: 'rgba(0,0,0,0.25)',
+                    borderRadius: 3,
                   }}>
                     {t('dice_keep_hint')}
                   </div>
