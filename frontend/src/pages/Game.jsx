@@ -355,7 +355,7 @@ function FinishedScreen({ state, playerId, t, navigate }) {
                 </div>
               </div>
               <div className="serif" style={{ fontStyle: 'italic', color: 'var(--ink-mute)', fontSize: '0.95rem' }}>
-                {p.sets_lost ?? state.players?.find(q => q.id === p.id) ? '' : '0'} {t('sets_lost')}
+                {p.round_points ?? 0} {t('round_points')}
               </div>
               <div className="display" style={{ fontSize: '1.4rem' }}>
                 {p.tokens ?? 0}<span className="serif" style={{ fontSize: '0.7rem', fontStyle: 'italic', color: 'var(--ink-mute)', marginLeft: 4 }}>f</span>

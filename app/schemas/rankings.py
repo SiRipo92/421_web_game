@@ -29,7 +29,7 @@ class GameHistoryEntry(BaseModel):
     placement: int
     total_players: int
     final_tokens: int
-    sets_lost: int
+    round_points: int
     total_rounds: int
 
 

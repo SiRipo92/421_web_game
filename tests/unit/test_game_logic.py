@@ -27,7 +27,7 @@ def _make_game(n: int = 2) -> Game:
         p = Player(id=f"p{i}", name=f"Player{i}")
         game.players.append(p)
         game.user_ids[f"p{i}"] = None
-        game.sets_lost[f"p{i}"] = 0
+        game.match_losses[f"p{i}"] = 0
     return game
 
 
@@ -217,7 +217,7 @@ def test_admit_waiting_moves_players():
     assert len(game.players) == 3
     assert len(game.waiting_players) == 0
     assert wp.turn is not None
-    assert game.sets_lost.get("w0") == 0
+    assert game.match_losses.get("w0") == 0
 
 
 # ---------------------------------------------------------------------------
@@ -295,8 +295,8 @@ async def test_resolve_round_decharge_winner_gives_tokens():
 
 
 @pytest.mark.asyncio
-async def test_resolve_round_set_win_increments_counter():
-    """A player reaching 0 tokens ends the set; sets_lost counter increments."""
+async def test_match_loss_increments_counter_on_first_loss():
+    """A player taking the manché (11 chips) gets +1 in match_losses, not a round point yet."""
     game = _make_game(2)
     game.phase = GamePhase.DECHARGE
     game.round_num = 1
@@ -306,26 +306,32 @@ async def test_resolve_round_set_win_increments_counter():
     game.players[1].turn = _done_turn(100, 1)
     game.round_starter_id = "p0"
     await _resolve_round(game)
-    assert game.sets_lost.get("p1", 0) == 1
-    assert game.phase != GamePhase.FINISHED  # only 1 set lost, not 2
+    assert game.match_losses.get("p1", 0) == 1
+    assert game.round_points.get("p1", 0) == 0
+    assert game.phase != GamePhase.FINISHED  # game never auto-ends now
 
 
 @pytest.mark.asyncio
-async def test_resolve_round_game_end():
-    """Two sets lost by same player ends the game (FINISHED phase)."""
+async def test_two_match_losses_take_round_point_and_restart():
+    """Hitting 2 match losses → round_point += 1, match_losses reset for all, new match starts."""
     game = _make_game(2)
     game.phase = GamePhase.DECHARGE
     game.round_num = 3
-    game.sets_lost["p1"] = 1  # already lost one set
+    game.match_losses["p1"] = 1  # already lost one match this round
     game.players[0].tokens = 0
     game.players[1].tokens = 11
     game.players[0].turn = _done_turn(9000, 8)
     game.players[1].turn = _done_turn(100, 1)
     game.round_starter_id = "p0"
     await _resolve_round(game)
-    # Give the background persist task a tick to start (it'll fail silently — no DB)
-    await asyncio.sleep(0)
-    assert game.phase == GamePhase.FINISHED
+    # p1 took a round point
+    assert game.round_points.get("p1", 0) == 1
+    # match_losses reset for everyone
+    assert all(v == 0 for v in game.match_losses.values())
+    # No auto-end — back to CHARGE for a fresh match
+    assert game.phase == GamePhase.CHARGE
+    # Pool is restocked
+    assert game.pool == 11
 
 
 # ---------------------------------------------------------------------------
@@ -487,7 +493,7 @@ async def test_match_ends_only_on_eleven_chips_not_on_zero():
     # p1 dropped to 0; p2 went to 6 — no manché yet
     assert game.players[1].tokens == 0
     assert game.players[2].tokens == 6
-    assert game.sets_lost.get("p2", 0) == 0
+    assert game.match_losses.get("p2", 0) == 0
     assert game.phase != GamePhase.FINISHED
     # p1 (now at 0) should be sat out for the rest of the match
     assert "p1" in game.out_of_match

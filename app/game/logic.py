@@ -99,7 +99,12 @@ class Game:
     last_round_plays: list = field(default_factory=list)
     max_throws_this_round: int = 3
     round_starter_id: str = ""
-    sets_lost: dict = field(default_factory=dict)
+    # Match losses in the CURRENT round (resets to 0 for all players when any
+    # player reaches 2 — that player takes a round point, see `round_points`).
+    match_losses: dict = field(default_factory=dict)
+    # Round points accumulated this session (one per 2 match losses). Persisted
+    # to the DB at end-of-session for logged-in users.
+    round_points: dict = field(default_factory=dict)
     user_ids: dict = field(default_factory=dict)
     has_avatars: dict = field(default_factory=dict)
     # Players who hit 0 tokens during the current match — they sit out the rest
@@ -178,7 +183,8 @@ def game_state(game: Game) -> dict:
                 "connected": p.connected,
                 "turn": asdict(p.turn) if p.turn else None,
                 "initial_roll": game.initial_rolls.get(p.id),
-                "sets_lost": game.sets_lost.get(p.id, 0),
+                "match_losses": game.match_losses.get(p.id, 0),
+                "round_points": game.round_points.get(p.id, 0),
                 "out_of_match": p.id in game.out_of_match,
             }
             for p in game.players
@@ -261,7 +267,8 @@ def _do_start(game: Game):
     for p in game.players:
         p.tokens = 0
         p.turn = new_turn()
-        game.sets_lost.setdefault(p.id, 0)
+        game.match_losses.setdefault(p.id, 0)
+        game.round_points.setdefault(p.id, 0)
     game.round_starter_id = game.players[0].id if game.players else ""
     starter_name = game.players[0].name if game.players else ""
     _log(
@@ -280,7 +287,8 @@ def _admit_waiting(game: Game):
         return
     for p in game.waiting_players:
         game.players.append(p)
-        game.sets_lost[p.id] = 0
+        game.match_losses[p.id] = 0
+        game.round_points.setdefault(p.id, 0)
         p.turn = new_turn()
         _log(game, "log_player_joins", f"✦ {p.name} rejoint la partie !", name=p.name)
     game.waiting_players.clear()
@@ -429,29 +437,31 @@ async def _resolve_round(game: Game):
     manche = next((p for p in all_players if p.tokens >= 11), None)
     if manche:
         ml_id = manche.id
-        game.sets_lost[ml_id] = game.sets_lost.get(ml_id, 0) + 1
-        ml_count = game.sets_lost[ml_id]
+        game.match_losses[ml_id] = game.match_losses.get(ml_id, 0) + 1
+        ml_count = game.match_losses[ml_id]
         _admit_waiting(game)
         _log(
             game,
-            "log_set_lost",
+            "log_match_lost",
             f"{manche.name} a les 11 jetons — manché ({ml_count}/2)",
             name=manche.name,
             count=ml_count,
         )
         if ml_count >= 2:
-            # Round-end: this player took a round point. With no game-end (R2)
-            # we should reset match_losses + start a new round. For now we keep
-            # the FINISHED transition pending R2.
-            game.phase = GamePhase.FINISHED
+            # Round-end: the manché takes a round point. Reset every player's
+            # match-loss counter so the new round starts fresh. No game-end —
+            # the room continues; round points accumulate persistently.
+            game.round_points[ml_id] = game.round_points.get(ml_id, 0) + 1
+            rp_count = game.round_points[ml_id]
+            for pid in list(game.match_losses.keys()):
+                game.match_losses[pid] = 0
             _log(
                 game,
-                "log_game_over",
-                f"Fin de partie ! {manche.name} perd la partie.",
-                winner=manche.name,
+                "log_round_point",
+                f"{manche.name} prend un point de round ({rp_count}).",
+                name=manche.name,
+                count=rp_count,
             )
-            asyncio.create_task(_persist_game(game))
-            return
         _start_new_set(game, ml_id)
         return
 

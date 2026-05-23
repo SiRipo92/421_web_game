@@ -94,7 +94,7 @@ class GamePlayer(Base):
     )
     display_name: Mapped[str] = mapped_column(String(32), nullable=False)
     final_tokens: Mapped[int] = mapped_column(Integer, default=0)
-    sets_lost: Mapped[int] = mapped_column(Integer, default=0)
+    round_points: Mapped[int] = mapped_column(Integer, default=0)
     placement: Mapped[int] = mapped_column(SmallInteger, nullable=False)
 
     game: Mapped["Game"] = relationship(back_populates="players")

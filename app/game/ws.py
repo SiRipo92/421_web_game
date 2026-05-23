@@ -423,7 +423,8 @@ async def websocket_endpoint(
                 )
                 game.players = [p for p in game.players if p.id != player_id]
                 game.user_ids.pop(player_id, None)
-                game.sets_lost.pop(player_id, None)
+                game.match_losses.pop(player_id, None)
+                game.round_points.pop(player_id, None)
                 game.has_avatars.pop(player_id, None)
                 game.initial_rolls.pop(player_id, None)
                 game.out_of_match.discard(player_id)

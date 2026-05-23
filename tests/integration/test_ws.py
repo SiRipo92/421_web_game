@@ -45,7 +45,7 @@ def _join(tc: TestClient, game_id: str, name: str) -> str:
     game.players.append(Player(id=pid, name=name))
     game.user_ids[pid] = None
     game.has_avatars[pid] = False
-    game.sets_lost[pid] = 0
+    game.match_losses[pid] = 0
     if not game.host_player_id:
         game.host_player_id = pid
     return pid

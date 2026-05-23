@@ -160,7 +160,8 @@ const I18N = {
     rematch: "Rejouer",
     back_home: "Retour à l'accueil",
     final_score: "L'addition",
-    sets_lost: "set(s) perdu(s)",
+    round_points: "point(s) de round",
+    match_losses: "match(s) perdu(s)",
     guest_label: "Invité",
 
     // Rankings
@@ -562,7 +563,8 @@ const I18N = {
     rematch: "Rematch",
     back_home: "Back home",
     final_score: "Final score",
-    sets_lost: "set(s) lost",
+    round_points: "round point(s)",
+    match_losses: "match(es) lost",
     guest_label: "Guest",
 
     // Rankings
