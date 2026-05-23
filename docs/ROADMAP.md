@@ -15,16 +15,7 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 
 ## Now
 
-### 3. Cookies consent banner (CNIL / GDPR)
-**Why:** The site uses `localStorage` for the auth token and theme/lang prefs. Per CNIL guidance, even functional storage benefits from a transparent notice; if we add any analytics later we'll need a proper consent flow already in place.
-**Scope:**
-- New component `frontend/src/components/shared/CookieBanner.jsx`: fixed-bottom banner with "Accept" / "Reject non-essential" / link to `/privacy`. Stores acceptance in `localStorage` (`cookie_consent: "accepted" | "rejected" | <timestamp>`).
-- Mount in `App.jsx` so it appears on every page until dismissed.
-- Today there are *no* non-essential cookies, so "reject" is a no-op — but the flag is honored when we add analytics (item 9).
-- Update `Privacy.jsx` to reference the banner and what each category covers.
-- i18n strings (fr + en).
-**Acceptance:** First-time visitor sees the banner; clicking either option hides it permanently for that browser; link to `/privacy` works.
-**Dependencies:** None.
+_All initial Now items shipped. Pick the next batch from Next._
 
 ---
 
@@ -138,6 +129,7 @@ The web frontend is responsive; a native shell would enable push notifications f
 
 ## Done
 
+- **2026-05-23** _(pending SHA)_ — Cookie consent banner. New `<CookieBanner />` mounted in `App.jsx`; `utils/consent.js` exposes `getCookieConsent`/`hasAnalyticsConsent`/`setCookieConsent`/`clearCookieConsent` for future analytics gating (item 10). Privacy page rewritten with current consent state + a "change my choice" reset button.
 - **2026-05-23** `3ec3127` — Strong-password UX. Extracted `pwdChecks`/`isPwdValid`/`pwdStrength` to `utils/pwdChecks.js`; new shared `PasswordChecklist` component with a 3-segment strength meter that's visible on mount (no longer hidden behind `pwdTouched`). Used on Login register tab + ResetPassword.
 - **2026-05-23** `aec1c44` — `/how-to-play` rule documentation: objective, banker roll, starter rotation, charge/décharge, bank rules, tie handling, AFK bot, winning the game. Also fixed `how_to_play_eyquitebrow` typo in the English locale.
 - **2026-05-23** `bf9f77b` — Removed `bank_rule="one"` (duplicate of `"sec"`)
