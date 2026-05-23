@@ -90,12 +90,14 @@ class Game:
     round_num: int = 0
     pool: int = 11
     log: list = field(default_factory=list)
+    log_events: list = field(default_factory=list)
     initial_rolls: dict = field(default_factory=dict)
     last_round_plays: list = field(default_factory=list)
     max_throws_this_round: int = 3
     round_starter_id: str = ""
     sets_lost: dict = field(default_factory=dict)
     user_ids: dict = field(default_factory=dict)
+    has_avatars: dict = field(default_factory=dict)
     # Room configuration
     is_public: bool = False
     max_players: int = 5
@@ -138,12 +140,15 @@ def game_state(game: Game) -> dict:
             "max_players": game.max_players,
             "bank_rule": game.bank_rule,
             "afk_seconds": game.afk_seconds,
+            "afk_bot": game.afk_bot,
             "allow_spectators": game.allow_spectators,
             "host_player_id": game.host_player_id,
         },
         "players": [
             {
                 "id": p.id,
+                "user_id": game.user_ids.get(p.id),
+                "has_avatar": game.has_avatars.get(p.id, False),
                 "name": p.name,
                 "tokens": p.tokens,
                 "connected": p.connected,
@@ -170,7 +175,14 @@ def game_state(game: Game) -> dict:
         ],
         "last_round_plays": game.last_round_plays,
         "log": game.log[-40:],
+        "log_events": game.log_events[-40:],
     }
+
+
+def _log(game: "Game", key: str, fr_msg: str, **params) -> None:
+    """Append both a raw French log string and a structured i18n event."""
+    game.log.append(fr_msg)
+    game.log_events.append({"key": key, **params})
 
 
 def new_turn() -> PlayerTurn:
@@ -182,7 +194,7 @@ def _start_initial_roll(game: Game):
     """Transition to INITIAL_ROLL and prompt players to roll for order."""
     game.phase = GamePhase.INITIAL_ROLL
     game.initial_rolls = {p.id: None for p in game.players}
-    game.log.append("Lancez un dé pour déterminer l'ordre de jeu !")
+    _log(game, "log_initial_roll", "Lancez un dé pour déterminer l'ordre de jeu !")
 
 
 def _finalize_order(game: Game):
@@ -196,12 +208,17 @@ def _finalize_order(game: Game):
             if rolls[p.id] in tied_vals:
                 game.initial_rolls[p.id] = None
         tied_names = ", ".join(p.name for p in game.players if game.initial_rolls[p.id] is None)
-        game.log.append(f"Égalité ! {tied_names} doivent relancer.")
+        _log(game, "log_tie", f"Égalité ! {tied_names} doivent relancer.", names=tied_names)
         return
 
     game.players.sort(key=lambda p: rolls[p.id])
     summary = " · ".join(f"{p.name}:{rolls[p.id]}" for p in game.players)
-    game.log.append(f"{summary} — {game.players[0].name} commence (plus bas).")
+    first = game.players[0].name
+    _log(
+        game, "log_order_set",
+        f"{summary} — {first} commence (plus bas).",
+        summary=summary, first=first,
+    )
     _do_start(game)
 
 
@@ -218,7 +235,11 @@ def _do_start(game: Game):
         game.sets_lost.setdefault(p.id, 0)
     game.round_starter_id = game.players[0].id if game.players else ""
     starter_name = game.players[0].name if game.players else ""
-    game.log.append(f"Round {game.round_num} – Charge · {starter_name} donne le rythme")
+    _log(
+        game, "log_round_start",
+        f"Round {game.round_num} – Charge · {starter_name} donne le rythme",
+        num=game.round_num, phase="charge", starter=starter_name,
+    )
 
 
 def _admit_waiting(game: Game):
@@ -229,7 +250,7 @@ def _admit_waiting(game: Game):
         game.players.append(p)
         game.sets_lost[p.id] = 0
         p.turn = new_turn()
-        game.log.append(f"✦ {p.name} rejoint la partie !")
+        _log(game, "log_player_joins", f"✦ {p.name} rejoint la partie !", name=p.name)
     game.waiting_players.clear()
 
 
@@ -246,7 +267,11 @@ def _start_new_set(game: Game, set_loser_id: str):
     game.round_starter_id = set_loser_id
     game.round_num += 1
     loser_name = next((p.name for p in game.players if p.id == set_loser_id), "?")
-    game.log.append(f"Nouveau set · Round {game.round_num} · {loser_name} donne le rythme")
+    _log(
+        game, "log_new_set",
+        f"Nouveau set · Round {game.round_num} · {loser_name} donne le rythme",
+        num=game.round_num, starter=loser_name,
+    )
 
 
 async def _resolve_round(game: Game):
@@ -278,17 +303,25 @@ async def _resolve_round(game: Game):
             taken = min(penalty, game.pool)
             loser.tokens += taken
             game.pool -= taken
-            game.log.append(f"{loser.name} prend {taken} jeton(s) · Pool: {game.pool}")
+            _log(
+                game, "log_charge_takes",
+                f"{loser.name} prend {taken} jeton(s) · Pool: {game.pool}",
+                name=loser.name, n=taken, pool=game.pool,
+            )
         if game.pool == 0:
             game.phase = GamePhase.DECHARGE
-            game.log.append("Pool vide → Décharge !")
+            _log(game, "log_pool_empty", "Pool vide → Décharge !")
 
     else:  # DECHARGE
         if winner.id != loser.id:
             transfer = min(penalty, winner.tokens)
             winner.tokens -= transfer
             loser.tokens += transfer
-            game.log.append(f"{winner.name} donne {transfer} jeton(s) à {loser.name}")
+            _log(
+                game, "log_decharge_gives",
+                f"{winner.name} donne {transfer} jeton(s) à {loser.name}",
+                winner=winner.name, n=transfer, loser=loser.name,
+            )
 
         set_winner = next((p for p in players if p.tokens == 0), None)
         if set_winner:
@@ -297,13 +330,19 @@ async def _resolve_round(game: Game):
             game.sets_lost[sl_id] = game.sets_lost.get(sl_id, 0) + 1
             sl_count = game.sets_lost[sl_id]
             _admit_waiting(game)
-            game.log.append(
+            _log(
+                game, "log_set_lost",
                 f"{set_loser.name} a les 11 jetons — set perdu ({sl_count}/2) · "
-                f"{set_loser.name} donne le rythme au prochain set."
+                f"{set_loser.name} donne le rythme au prochain set.",
+                name=set_loser.name, count=sl_count,
             )
             if sl_count >= 2:
                 game.phase = GamePhase.FINISHED
-                game.log.append(f"Fin de partie ! {set_winner.name} gagne !")
+                _log(
+                    game, "log_game_over",
+                    f"Fin de partie ! {set_winner.name} gagne !",
+                    winner=set_winner.name,
+                )
                 asyncio.create_task(_persist_game(game))
                 return
             _start_new_set(game, sl_id)
@@ -316,7 +355,11 @@ async def _resolve_round(game: Game):
     for p in players:
         p.turn = new_turn()
     starter_name = next((p.name for p in game.players if p.id == game.round_starter_id), "")
-    game.log.append(f"Round {game.round_num} · {starter_name} donne le rythme")
+    _log(
+        game, "log_round_start",
+        f"Round {game.round_num} · {starter_name} donne le rythme",
+        num=game.round_num, phase=game.phase.value, starter=starter_name,
+    )
 
 
 async def _persist_game(game: "Game") -> None:

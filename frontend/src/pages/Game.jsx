@@ -4,6 +4,7 @@ import { Die } from '../components/shared/Die.jsx'
 import { DiceRow } from '../components/shared/Die.jsx'
 import { Avatar } from '../components/shared/Avatar.jsx'
 import { ChipStack } from '../components/shared/ChipStack.jsx'
+import { ComboTable } from '../components/shared/ComboTable.jsx'
 import { useGame } from '../hooks/useGame.js'
 import { useLang } from '../context/LangContext.jsx'
 
@@ -13,8 +14,12 @@ export function Game({ token }) {
   const [params] = useSearchParams()
   const playerId = params.get('pid')
   const navigate = useNavigate()
-  const { state, roll, keep, done, initialRoll } = useGame(gameId, playerId, token)
+  const { state, roll, keep, done, initialRoll, leave } = useGame(gameId, playerId, token)
   const logRef = useRef(null)
+
+  const [logOpen, setLogOpen] = useState(true)
+  const [afkCountdown, setAfkCountdown] = useState(null)
+  const afkIntervalRef = useRef(null)
 
   const me = state.players?.find(p => p.id === playerId)
   const isMyTurn = state.current_player_id === playerId
@@ -27,6 +32,22 @@ export function Game({ token }) {
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
   }, [state.log])
+
+  useEffect(() => {
+    clearInterval(afkIntervalRef.current)
+    if (isMyTurn && state.room?.afk_bot && state.room?.afk_seconds > 0) {
+      let remaining = state.room.afk_seconds
+      setAfkCountdown(remaining)
+      afkIntervalRef.current = setInterval(() => {
+        remaining -= 1
+        setAfkCountdown(remaining)
+        if (remaining <= 0) clearInterval(afkIntervalRef.current)
+      }, 1000)
+    } else {
+      setAfkCountdown(null)
+    }
+    return () => clearInterval(afkIntervalRef.current)
+  }, [state.current_player_id, state.room?.afk_bot, state.room?.afk_seconds])
 
   if (state.phase === 'finished') {
     return <FinishedScreen state={state} playerId={playerId} t={t} navigate={navigate} gameId={gameId} />
@@ -80,6 +101,12 @@ export function Game({ token }) {
 
           <div style={{ display: 'flex', gap: 20, alignItems: 'center' }}>
             <CounterChip label={t('pool')} value={state.pool ?? 0} accent="var(--rouge)" />
+            <button
+              type="button"
+              className="btn-link"
+              onClick={() => { if (window.confirm(t('leave') + ' ?')) { leave(); navigate('/') } }}
+              style={{ fontSize: '0.75rem', color: 'var(--ink-mute)' }}
+            >← {t('leave')}</button>
           </div>
         </div>
 
@@ -167,6 +194,26 @@ export function Game({ token }) {
                 ? !hasRolled ? t('keep_hint') : `${myTurn?.rolls_left ?? 0} ${t('rolls_left')}.`
                 : <span>{t('waiting_for')} <span className="mono pulse-soft">…</span></span>}
             </div>
+            {afkCountdown !== null && afkCountdown > 0 && (
+              <div style={{
+                marginTop: 6, display: 'flex', alignItems: 'center', gap: 6,
+              }}>
+                <div style={{
+                  height: 3, flex: 1, maxWidth: 120, borderRadius: 2,
+                  background: 'var(--rule)', overflow: 'hidden',
+                }}>
+                  <div style={{
+                    height: '100%',
+                    width: `${(afkCountdown / (state.room?.afk_seconds ?? 45)) * 100}%`,
+                    background: afkCountdown <= 10 ? 'var(--rouge)' : 'var(--brass)',
+                    transition: 'width 1s linear, background 0.3s',
+                  }} />
+                </div>
+                <span className="mono" style={{ fontSize: '0.75rem', color: afkCountdown <= 10 ? 'var(--rouge)' : 'var(--ink-mute)' }}>
+                  {afkCountdown}s
+                </span>
+              </div>
+            )}
           </div>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
             <RollDots rollsLeft={myTurn?.rolls_left ?? 3} />
@@ -205,24 +252,35 @@ export function Game({ token }) {
         display: 'flex', flexDirection: 'column',
         maxHeight: '100vh',
       }} className="side-log" aria-label={t('log')}>
-        <div style={{ padding: '1.2rem 1.4rem', borderBottom: '1px solid var(--rule)' }}>
-          <div className="eyebrow">{t('log')}</div>
-          <div className="display" style={{ fontSize: '1.4rem', marginTop: 4 }}>{t('log_subtitle')}</div>
-          <div className="note" style={{ fontSize: '0.85rem' }}>{t('log_sub')}</div>
+        <div style={{ padding: '1.2rem 1.4rem', borderBottom: '1px solid var(--rule)', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+          <div>
+            <div className="eyebrow">{t('log')}</div>
+            <div className="display" style={{ fontSize: '1.4rem', marginTop: 4 }}>{t('log_subtitle')}</div>
+            <div className="note" style={{ fontSize: '0.85rem' }}>{t('log_sub')}</div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setLogOpen(o => !o)}
+            aria-expanded={logOpen}
+            aria-label={logOpen ? 'Réduire le journal' : 'Afficher le journal'}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-mute)', fontSize: '1rem', padding: '0.2rem', marginTop: 2 }}
+          >{logOpen ? '▲' : '▼'}</button>
         </div>
-        <div ref={logRef} style={{ flex: 1, overflowY: 'auto', padding: '1rem 1.4rem' }}>
-          {[...(state.log || [])].reverse().map((entry, i) => (
-            <div key={i} style={{
-              display: 'grid', gridTemplateColumns: '1fr',
-              padding: '0.45rem 0', borderBottom: '1px dashed var(--rule)',
-            }}>
-              <span className="serif" style={{ fontSize: '0.9rem', color: 'var(--ink)' }}>{entry}</span>
-            </div>
-          ))}
-        </div>
+        {logOpen && (
+          <div ref={logRef} style={{ flex: 1, overflowY: 'auto', padding: '1rem 1.4rem' }}>
+            {formatLogEntries(state, t).map((text, i) => (
+              <div key={i} style={{
+                display: 'grid', gridTemplateColumns: '1fr',
+                padding: '0.45rem 0', borderBottom: '1px dashed var(--rule)',
+              }}>
+                <span className="serif" style={{ fontSize: '0.9rem', color: 'var(--ink)' }}>{text}</span>
+              </div>
+            ))}
+          </div>
+        )}
         <div style={{ padding: '1rem 1.4rem', borderTop: '1px solid var(--rule)' }}>
           <div className="eyebrow" style={{ marginBottom: 8 }}>{t('combo_hier')}</div>
-          <MiniHier />
+          <ComboTable compact />
         </div>
       </aside>
 
@@ -256,7 +314,7 @@ function InitialRollScreen({ state, playerId, t, onRoll }) {
           {state.players?.map(p => (
             <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 14, justifyContent: 'space-between' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <Avatar name={p.name} isSelf={p.id === playerId} size={2.2} />
+                <Avatar name={p.name} userId={p.user_id} hasAvatar={p.has_avatar ?? false} isSelf={p.id === playerId} size={2.2} />
                 <span className="serif">{p.name}</span>
               </div>
               <div className="mono" style={{ fontWeight: 700, fontSize: '1.4rem' }}>
@@ -306,7 +364,7 @@ function FinishedScreen({ state, playerId, t, navigate, gameId }) {
               <div className="display" style={{ fontSize: i === 0 ? '2.5rem' : '1.6rem', color: i === 0 ? 'var(--rouge)' : 'var(--ink-fade)', width: 48, textAlign: 'center' }}>
                 {i === 0 ? '🏆' : `${i + 1}ᵉ`}
               </div>
-              <Avatar name={p.name} size={2.4} isSelf={p.id === playerId} />
+              <Avatar name={p.name} userId={p.user_id} hasAvatar={p.has_avatar ?? false} size={2.4} isSelf={p.id === playerId} />
               <div>
                 <div className="display" style={{ fontSize: '1.4rem' }}>
                   {p.name} {p.id === playerId && <em style={{ fontSize: '0.85rem', color: 'var(--ink-mute)' }}>{t('you_label')}</em>}
@@ -354,7 +412,7 @@ function PlayerStrip({ p, active, isSelf }) {
       color: active ? 'var(--paper)' : 'var(--ink)',
       border: '1px solid var(--rule)', minWidth: 0, whiteSpace: 'nowrap',
     }}>
-      <Avatar name={p.name} size={1.6} />
+      <Avatar name={p.name} userId={p.user_id} hasAvatar={p.has_avatar ?? false} size={1.6} />
       <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.1, minWidth: 0 }}>
         <span className="serif" style={{ fontWeight: 600, fontSize: '0.85rem' }}>{p.name}{isSelf ? ' ★' : ''}</span>
         <span className="mono" style={{ fontSize: '0.65rem', opacity: 0.7 }}>{p.tokens ?? 0} fiches</span>
@@ -376,7 +434,7 @@ function PisteSeat({ p, active, isSelf, x, y }) {
       display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
       pointerEvents: 'none',
     }}>
-      <Avatar name={p.name} active={active} isSelf={isSelf} size={3.2} />
+      <Avatar name={p.name} userId={p.user_id} hasAvatar={p.has_avatar ?? false} active={active} isSelf={isSelf} size={3.2} />
       <div style={{
         background: active ? 'var(--ink)' : 'var(--paper-soft)',
         color: active ? 'var(--paper)' : 'var(--ink)',
@@ -427,25 +485,17 @@ function RollDots({ rollsLeft }) {
   )
 }
 
-function MiniHier() {
-  const rows = [
-    { name: '421', dice: [4, 2, 1], pts: 8 },
-    { name: '111', dice: [1, 1, 1], pts: 7 },
-    { name: '11x', dice: [1, 1, 6], pts: 'x' },
-    { name: 'Brelan', dice: [5, 5, 5], pts: 3 },
-    { name: 'Suite', dice: [3, 2, 1], pts: 2 },
-    { name: 'Nénette', dice: [2, 2, 1], pts: 2 },
-  ]
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, fontSize: '0.78rem' }}>
-      {rows.map(r => (
-        <div key={r.name} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <div style={{ display: 'flex', gap: 1 }}>
-            {r.dice.map((v, i) => <Die key={i} value={v} mini />)}
-          </div>
-          <span className="mono" style={{ color: 'var(--ink-mute)' }}>{r.pts}f</span>
-        </div>
-      ))}
-    </div>
-  )
+function formatLogEntries(state, t) {
+  const events = state.log_events
+  const raw = state.log || []
+  if (events?.length) {
+    return [...events].reverse().map((ev, i) => {
+      if (!ev?.key) return raw[raw.length - 1 - i] ?? ''
+      const { key, ...params } = ev
+      if (params.dice && Array.isArray(params.dice)) params.dice = `[${params.dice.join('-')}]`
+      return t(key, params) || raw[raw.length - 1 - i] || ''
+    })
+  }
+  return [...raw].reverse()
 }
+

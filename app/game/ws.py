@@ -9,16 +9,21 @@ from pathlib import Path
 from typing import Optional
 
 import sentry_sdk
-from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from jose import JWTError, jwt
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.db.base import get_db
+from app.db.models import User
 from app.game.logic import (
     Game,
     GamePhase,
     Player,
     _finalize_order,
+    _log,
     _resolve_round,
     _start_initial_roll,
     classify,
@@ -114,8 +119,11 @@ async def _afk_timer(game: Game, player_id: str, game_id: str):
         return
     _bot_take_turn(player)
     t = player.turn
-    game.log.append(
-        f"{player.name} (AFK): {sorted(t.dice, reverse=True)} → {t.combo} ({t.fiches}f)"
+    dice_sorted = sorted(t.dice, reverse=True)
+    _log(
+        game, "log_afk_turn",
+        f"{player.name} (AFK): {dice_sorted} → {t.combo} ({t.fiches}f)",
+        name=player.name, dice=dice_sorted, combo=t.combo, fiches=t.fiches,
     )
     game.advance()
     if game.all_done():
@@ -181,6 +189,7 @@ async def join_game(
     game_id: str,
     name: str,
     token: Optional[str] = Query(default=None),
+    db: AsyncSession = Depends(get_db),
 ):
     """Add a player to a room by name; returns player_id and join status."""
     game = games.get(game_id.upper())
@@ -196,9 +205,15 @@ async def join_game(
     pid = str(uuid.uuid4())[:8]
     player = Player(id=pid, name=name)
 
+    has_avatar = False
+    if user_id:
+        row = await db.execute(select(User.avatar_data).where(User.id == user_id))
+        has_avatar = row.scalar_one_or_none() is not None
+
     if game.phase in (GamePhase.WAITING, GamePhase.INITIAL_ROLL):
         game.players.append(player)
         game.user_ids[pid] = user_id
+        game.has_avatars[pid] = has_avatar
         if game.phase == GamePhase.INITIAL_ROLL:
             game.initial_rolls[pid] = None
         if not game.host_player_id:
@@ -207,6 +222,7 @@ async def join_game(
 
     game.waiting_players.append(player)
     game.user_ids[pid] = user_id
+    game.has_avatars[pid] = has_avatar
     return {"player_id": pid, "game_id": game.id, "status": "waiting"}
 
 
@@ -290,10 +306,6 @@ async def websocket_endpoint(
 
     await manager.connect(game_id, ws, player_id)
     player.connected = True
-
-    if game.phase == GamePhase.WAITING and len(game.players) >= 2:
-        _start_initial_roll(game)
-
     await manager.broadcast(game_id, game_state(game))
 
     try:
@@ -301,7 +313,42 @@ async def websocket_endpoint(
             msg = json.loads(raw)
             action = msg.get("action")
 
-            if action == "initial_roll":
+            if action == "start":
+                if game.phase != GamePhase.WAITING:
+                    continue
+                if player_id != game.host_player_id:
+                    continue
+                if len(game.players) < 2:
+                    continue
+                _start_initial_roll(game)
+                _schedule_afk(game, game_id)
+                await manager.broadcast(game_id, game_state(game))
+
+            elif action == "leave":
+                _cancel_afk(game, player_id)
+                game.players = [p for p in game.players if p.id != player_id]
+                game.user_ids.pop(player_id, None)
+                game.sets_lost.pop(player_id, None)
+                if not game.players:
+                    games.pop(game_id, None)
+                    await ws.close()
+                    break
+                if game.host_player_id == player_id and game.phase == GamePhase.WAITING:
+                    games.pop(game_id, None)
+                    await manager.broadcast(game_id, game_state(game))
+                    await ws.close()
+                    break
+                if game.current_index >= len(game.players):
+                    game.current_index = 0
+                if game.all_done():
+                    await _resolve_round(game)
+                else:
+                    _schedule_afk(game, game_id)
+                await manager.broadcast(game_id, game_state(game))
+                await ws.close()
+                break
+
+            elif action == "initial_roll":
                 if game.phase != GamePhase.INITIAL_ROLL:
                     continue
                 if player_id not in game.initial_rolls or game.initial_rolls[player_id] is not None:
@@ -335,7 +382,23 @@ async def websocket_endpoint(
                 t.reroll = [False, False, False]
                 t.rolls_left -= 1
                 t.combo, t.rank, t.fiches = classify(t.dice)
-                _schedule_afk(game, game_id)
+                if game.phase == GamePhase.CHARGE and game.bank_rule == "sec":
+                    t.done = True
+                    if player_id == game.round_starter_id:
+                        game.max_throws_this_round = 1
+                    _sec_dice = sorted(t.dice, reverse=True)
+                    _log(
+                        game, "log_turn",
+                        f"{player.name}: {_sec_dice} → {t.combo} ({t.fiches}f)",
+                        name=player.name, dice=_sec_dice, combo=t.combo, fiches=t.fiches,
+                    )
+                    game.advance()
+                    if game.all_done():
+                        await _resolve_round(game)
+                    else:
+                        _schedule_afk(game, game_id)
+                else:
+                    _schedule_afk(game, game_id)
                 await manager.broadcast(game_id, game_state(game))
 
             elif action == "keep":
@@ -372,8 +435,11 @@ async def websocket_endpoint(
                         game.max_throws_this_round = 1
                     else:
                         game.max_throws_this_round = max(3 - t.rolls_left, 1)
-                game.log.append(
-                    f"{player.name}: {sorted(t.dice, reverse=True)} → {t.combo} ({t.fiches}f)"
+                _done_dice = sorted(t.dice, reverse=True)
+                _log(
+                    game, "log_turn",
+                    f"{player.name}: {_done_dice} → {t.combo} ({t.fiches}f)",
+                    name=player.name, dice=_done_dice, combo=t.combo, fiches=t.fiches,
                 )
                 game.advance()
                 if game.all_done():
