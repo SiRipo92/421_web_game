@@ -29,7 +29,7 @@ export function Lobby({ token }) {
   }, [])
 
   const handleJoin = async (gameId) => {
-    const name = sessionStorage.getItem('playerName') || 'Joueur'
+    const name = sessionStorage.getItem('playerName') || t('default_player_name')
     try {
       const res = await joinGame(gameId, name, token)
       if (res.error) { setError(t('err_game_full')); return }
@@ -43,7 +43,7 @@ export function Lobby({ token }) {
     <div style={{ maxWidth: 980, margin: '0 auto', padding: '2.5rem 1.5rem' }}>
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: '0.5rem', flexWrap: 'wrap', gap: 12 }}>
         <div>
-          <div className="eyebrow">Tables publiques</div>
+          <div className="eyebrow">{t('public_tables')}</div>
           <h1 className="display" style={{ fontSize: 'clamp(2.4rem, 5vw, 3.2rem)', margin: '0.3rem 0 0.4rem' }}>
             {t('lobby_title')}.
           </h1>
@@ -57,7 +57,7 @@ export function Lobby({ token }) {
       {error && <p style={{ color: 'var(--rouge)', margin: '1rem 0' }}>{error}</p>}
 
       {loading ? (
-        <p className="serif" style={{ fontStyle: 'italic', color: 'var(--ink-mute)', marginTop: '2rem' }}>Chargement…</p>
+        <p className="serif" style={{ fontStyle: 'italic', color: 'var(--ink-mute)', marginTop: '2rem' }}>{t('loading')}</p>
       ) : rooms.length === 0 ? (
         <div className="ticket" style={{ marginTop: '2rem', textAlign: 'center', padding: '3rem' }}>
           <p className="serif" style={{ fontStyle: 'italic', color: 'var(--ink-mute)', fontSize: '1.2rem' }}>
@@ -74,8 +74,8 @@ export function Lobby({ token }) {
             padding: '0.8rem 1.4rem', background: 'var(--paper-deep)', borderBottom: '1px solid var(--rule)',
             alignItems: 'center',
           }}>
-            <div className="eyebrow">Hôte</div>
-            <div className="eyebrow">Joueurs</div>
+            <div className="eyebrow">{t('host_col')}</div>
+            <div className="eyebrow">{t('players_label')}</div>
             <div className="eyebrow">Banque</div>
             <div className="eyebrow" />
           </div>

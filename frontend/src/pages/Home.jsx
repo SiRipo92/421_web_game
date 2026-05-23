@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Die } from '../components/shared/Die.jsx'
-import { DiceRow } from '../components/shared/Die.jsx'
 import { ChipStack } from '../components/shared/ChipStack.jsx'
+import { ComboTable } from '../components/shared/ComboTable.jsx'
 import { useLang } from '../context/LangContext.jsx'
 import { joinGame } from '../api/game.js'
 
@@ -52,12 +52,12 @@ export function Home({ user, token }) {
             <span style={{ color: 'var(--rouge)' }}>❦</span> {t('tagline')}
           </div>
           <h1 className="display" style={{ fontSize: 'clamp(3.5rem, 8vw, 5.5rem)', margin: '0 0 1.5rem', lineHeight: 0.92 }}>
-            Quatre<br />
-            <span style={{ color: 'var(--rouge)', fontStyle: 'italic' }}>cent vingt</span><br />
-            et un.
+            {t('hero_h1_pre')}<br />
+            <span style={{ color: 'var(--rouge)', fontStyle: 'italic' }}>{t('hero_h1_em')}</span><br />
+            {t('hero_h1_post')}
           </h1>
           <p className="serif" style={{ fontSize: '1.2rem', color: 'var(--ink-soft)', maxWidth: 480, marginBottom: '2rem', lineHeight: 1.5 }}>
-            Trois dés, onze fiches, et l'art de la <em>nénette</em>. Asseyez-vous au comptoir, secouez le cornet, faites monter la mise.
+            {t('hero_desc')}
           </p>
 
           <form onSubmit={(e) => { e.preventDefault(); handleCreate() }}
@@ -139,55 +139,25 @@ export function Home({ user, token }) {
 
       {/* Option cards */}
       <section style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.5rem', marginTop: '2rem' }} className="opt-grid">
-        <OptionCard number="I" title={t('private_room')} subtitle="Entre amis"
-          desc="Créez une partie, partagez le code, lancez quand vous êtes prêts. Vous configurez les règles."
-          accent="var(--rouge)" icon="🗝️" />
-        <OptionCard number="II" title={t('quick_match')} subtitle="Au comptoir"
-          desc="Rejoignez instantanément une table ouverte. Jusqu'à cinq joueurs, le bistrot s'occupe du reste."
-          accent="var(--brass-deep)" icon="⚡" />
-        <OptionCard number="III" title={t('register')} subtitle="Pour les habitués"
-          desc="Suivez vos statistiques, votre Elo, votre historique. Décrochez les badges du Maître de table."
-          accent="var(--felt-deep)" icon="📒" />
+        <OptionCard number="I" title={t('private_room')} subtitle={t('card_private_sub')}
+          desc={t('card_private_desc')} accent="var(--rouge)" icon="🗝️" />
+        <OptionCard number="II" title={t('quick_match')} subtitle={t('card_quick_sub')}
+          desc={t('card_quick_desc')} accent="var(--brass-deep)" icon="⚡" />
+        <OptionCard number="III" title={t('register')} subtitle={t('card_account_sub')}
+          desc={t('card_account_desc')} accent="var(--felt-deep)" icon="📒" />
       </section>
 
       {/* Combo hierarchy teaser */}
       <section style={{ marginTop: '3.5rem', display: 'grid', gridTemplateColumns: '2fr 3fr', gap: '3rem', alignItems: 'start' }} className="rules-grid">
         <div>
-          <div className="eyebrow">Mémo de jeu</div>
+          <div className="eyebrow">{t('combo_memo')}</div>
           <h2 className="display" style={{ fontSize: '2.4rem', margin: '0.5rem 0 1rem' }}>
-            La hiérarchie<br />des combinaisons
+            {t('combo_hier_title')}
           </h2>
-          <p className="note">Du plus fort au plus faible. La nénette (2-2-1) est le piège classique.</p>
+          <p className="note">{t('combo_hier_sub')}</p>
         </div>
-        <div className="ticket">
-          {[
-            { name: t('combo_421'), dice: [4, 2, 1], pts: 8, rouge: true },
-            { name: t('combo_111'), dice: [1, 1, 1], pts: 7 },
-            { name: t('combo_11x'), dice: [1, 1, 6], pts: 'x' },
-            { name: t('combo_brelan'), dice: [5, 5, 5], pts: 3 },
-            { name: t('combo_suite'), dice: [3, 2, 1], pts: 2 },
-            { name: t('combo_nenette'), dice: [2, 2, 1], pts: 2, italic: true },
-            { name: t('combo_other'), dice: [6, 4, 3], pts: 1 },
-          ].map((row, i) => (
-            <div key={i} style={{
-              display: 'grid', gridTemplateColumns: 'auto 1fr auto auto', gap: 16,
-              alignItems: 'center', padding: '0.7rem 0',
-              borderBottom: i < 6 ? '1px dashed var(--rule)' : 'none',
-            }}>
-              <div className="mono" style={{ fontSize: '0.8rem', color: 'var(--ink-fade)', width: 24 }}>
-                {String(i + 1).padStart(2, '0')}
-              </div>
-              <div className="serif" style={{
-                fontSize: '1.1rem',
-                fontStyle: row.italic ? 'italic' : 'normal',
-                color: row.rouge ? 'var(--rouge)' : 'var(--ink)',
-              }}>{row.name}</div>
-              <DiceRow values={row.dice} mini />
-              <div className="display" style={{ fontSize: '1.3rem', color: row.rouge ? 'var(--rouge)' : 'var(--ink-soft)' }}>
-                {row.pts}<span style={{ fontSize: '0.7rem', color: 'var(--ink-mute)', marginLeft: 2 }}>{t('pieces')}</span>
-              </div>
-            </div>
-          ))}
+        <div className="ticket" style={{ padding: '0 0.5rem' }}>
+          <ComboTable />
         </div>
       </section>
 

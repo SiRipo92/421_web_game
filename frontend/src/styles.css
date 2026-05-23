@@ -35,27 +35,29 @@
 }
 
 /* Theme variants — toggled via [data-theme] on root */
-[data-theme="cafe"] {
-  /* default */
+[data-theme="light"] {
+  /* default — warm cream bistro palette */
 }
-[data-theme="vin"] {
-  --paper: #F0E4D2;
-  --paper-deep: #E5D4B8;
-  --rouge: #6B1A18;
-  --rouge-deep: #4A0F0E;
-  --brass: #C9A867;
-  --felt: #2A1F1A;
-  --ink: #1A0F0B;
-}
-[data-theme="absinthe"] {
-  --paper: #F2EFD9;
-  --paper-deep: #E0DCB8;
-  --rouge: #8E5A2A;
-  --rouge-deep: #5C3818;
-  --brass: #A8954A;
-  --felt: #4A6B45;
-  --felt-deep: #2F4A2C;
-  --ink: #1F2419;
+[data-theme="dark"] {
+  --paper:        #1A1410;
+  --paper-deep:   #120E0B;
+  --paper-soft:   #221C17;
+  --ink:          #F0E6D3;
+  --ink-soft:     #C8B89A;
+  --ink-mute:     #8A7460;
+  --ink-fade:     #5A4A3A;
+  --rule:         #3A2E24;
+  --rouge:        #C24A42;
+  --rouge-deep:   #8A2820;
+  --rouge-soft:   #D46A62;
+  --brass:        #C49A4A;
+  --brass-deep:   #C49A4A;
+  --brass-soft:   #E0BA78;
+  --felt:         #2A4A2E;
+  --felt-deep:    #5A9462;
+  --felt-soft:    #4A7850;
+  --bone:         #2A2018;
+  --noir:         #0A0806;
 }
 
 * { box-sizing: border-box; }
@@ -545,4 +547,214 @@ input, textarea, select { font-family: inherit; }
   border: 2px dashed var(--ink-soft);
   padding: 0.8rem 1.5rem;
   display: inline-block;
+}
+
+/* ── TopBar ───────────────────────────────────────────────────────────── */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.2rem 2rem;
+  border-bottom: 1px solid var(--rule);
+  background: var(--paper-soft);
+  position: sticky;
+  top: 0;
+  z-index: 30;
+}
+
+.topbar-logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-decoration: none;
+  color: inherit;
+  flex-shrink: 0;
+}
+
+.topbar-logo-badge {
+  width: 38px; height: 38px;
+  border-radius: 6px;
+  background: var(--ink);
+  color: var(--paper);
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--display);
+  font-weight: 900;
+  font-size: 1.3rem;
+  letter-spacing: -0.04em;
+  flex-shrink: 0;
+}
+
+.topbar-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.topbar-link {
+  padding: 0.4rem 0.9rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  text-decoration: none;
+  color: var(--ink-soft);
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+}
+.topbar-link.active { color: var(--rouge); border-bottom-color: var(--rouge); }
+.topbar-link:hover:not(.active) { color: var(--ink); }
+
+.topbar-lang {
+  display: flex;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.topbar-theme-btn {
+  padding: 0.4rem 0.7rem;
+  font-size: 0.9rem;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--ink-soft);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.topbar-rule {
+  width: 1px;
+  height: 24px;
+  background: var(--rule);
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+
+.topbar-user-dropdown {
+  position: absolute;
+  right: 0; top: 110%;
+  background: var(--paper-soft);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  box-shadow: 0 6px 20px rgba(28,22,18,0.18);
+  min-width: 160px;
+  z-index: 50;
+}
+
+/* ── Burger button — hidden on desktop ───────────────────────────────── */
+.topbar-burger {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px; height: 40px;
+  padding: 0;
+  background: none;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.burger-icon {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 18px;
+  pointer-events: none;
+}
+.burger-icon span {
+  display: block;
+  height: 1.5px;
+  background: var(--ink);
+  border-radius: 1px;
+  transition: transform 0.22s ease, opacity 0.15s ease;
+  transform-origin: center;
+}
+.burger-icon.open span:nth-child(1) { transform: translateY(6.5px) rotate(45deg); }
+.burger-icon.open span:nth-child(2) { opacity: 0; transform: scaleX(0); }
+.burger-icon.open span:nth-child(3) { transform: translateY(-6.5px) rotate(-45deg); }
+
+/* ── Mobile drawer — hidden on desktop ──────────────────────────────── */
+.topbar-drawer {
+  display: none;
+}
+
+/* ── Mobile breakpoint ───────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  .topbar {
+    padding: 1rem 1.25rem;
+    position: relative;
+  }
+
+  .topbar-nav   { display: none; }
+  .topbar-burger { display: flex; }
+
+  .topbar-drawer {
+    position: absolute;
+    top: 100%; left: 0; right: 0;
+    background: var(--paper-soft);
+    border-bottom: 2px solid var(--rule);
+    box-shadow: 0 8px 28px rgba(28,22,18,0.13);
+    z-index: 29;
+    flex-direction: column;
+    /* closed by default */
+    clip-path: inset(0 0 100% 0);
+    transition: clip-path 0.22s ease;
+  }
+  .topbar-drawer.open {
+    display: flex;
+    clip-path: inset(0 0 0% 0);
+  }
+
+  .topbar-drawer > nav {
+    display: flex;
+    flex-direction: column;
+    border-bottom: 1px solid var(--rule);
+    padding: 0.4rem 0;
+  }
+
+  .topbar-drawer-link {
+    display: block;
+    padding: 0.9rem 1.5rem;
+    font-size: 0.78rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    text-decoration: none;
+    color: var(--ink-soft);
+    transition: color 0.15s, background 0.12s;
+  }
+  .topbar-drawer-link.active { color: var(--rouge); }
+  .topbar-drawer-link:hover  { background: var(--paper-deep); color: var(--ink); }
+
+  .topbar-drawer-controls {
+    display: flex;
+    flex-direction: column;
+    border-bottom: 1px solid var(--rule);
+    padding: 0.25rem 0;
+  }
+
+  .topbar-drawer-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.7rem 1.5rem;
+  }
+
+  .topbar-drawer-footer {
+    padding: 0.85rem 1.25rem;
+  }
+
+  .topbar-drawer-logout {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 0.5rem 0.25rem;
+    font-size: 0.78rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--rouge);
+    cursor: pointer;
+  }
 }

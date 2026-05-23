@@ -1,21 +1,11 @@
-import { DiceRow } from '../components/shared/Die.jsx'
+import { ComboTable } from '../components/shared/ComboTable.jsx'
 import { useLang } from '../context/LangContext.jsx'
-
-const COMBOS = [
-  { nameKey: 'combo_421', dice: [4, 2, 1], pts: 8, rouge: true },
-  { nameKey: 'combo_111', dice: [1, 1, 1], pts: 7 },
-  { nameKey: 'combo_11x', dice: [1, 1, 6], pts: 'x' },
-  { nameKey: 'combo_brelan', dice: [5, 5, 5], pts: 3 },
-  { nameKey: 'combo_suite', dice: [3, 2, 1], pts: 2 },
-  { nameKey: 'combo_nenette', dice: [2, 2, 1], pts: 2, italic: true },
-  { nameKey: 'combo_other', dice: [6, 4, 3], pts: 1 },
-]
 
 export function HowToPlay() {
   const { t } = useLang()
   return (
     <div style={{ maxWidth: 900, margin: '0 auto', padding: '2.5rem 1.5rem' }}>
-      <div className="eyebrow">Le guide du joueur</div>
+      <div className="eyebrow">{t('how_to_play_eyebrow')}</div>
       <h1 className="display" style={{ fontSize: 'clamp(2.4rem, 5vw, 3.2rem)', margin: '0.3rem 0 1.5rem', lineHeight: 0.95 }}>
         {t('how_title')}
       </h1>
@@ -23,25 +13,8 @@ export function HowToPlay() {
       {/* Combo table */}
       <section aria-labelledby="combos-title">
         <h2 id="combos-title" className="display" style={{ fontSize: '2rem', margin: '0 0 1rem' }}>{t('combo_table_title')}</h2>
-        <div className="ticket" style={{ marginBottom: '2.5rem' }}>
-          {COMBOS.map((row, i) => (
-            <div key={i} style={{
-              display: 'grid', gridTemplateColumns: 'auto 1fr auto auto', gap: 16,
-              alignItems: 'center', padding: '0.8rem 0',
-              borderBottom: i < COMBOS.length - 1 ? '1px dashed var(--rule)' : 'none',
-            }}>
-              <div className="mono" style={{ fontSize: '0.8rem', color: 'var(--ink-fade)', width: 24 }}>
-                {String(i + 1).padStart(2, '0')}
-              </div>
-              <div className="serif" style={{ fontSize: '1.1rem', fontStyle: row.italic ? 'italic' : 'normal', color: row.rouge ? 'var(--rouge)' : 'var(--ink)' }}>
-                {t(row.nameKey)}
-              </div>
-              <DiceRow values={row.dice} mini />
-              <div className="display" style={{ fontSize: '1.3rem', color: row.rouge ? 'var(--rouge)' : 'var(--ink-soft)' }}>
-                {row.pts}<span style={{ fontSize: '0.7rem', color: 'var(--ink-mute)', marginLeft: 2 }}>{t('pieces')}</span>
-              </div>
-            </div>
-          ))}
+        <div className="ticket" style={{ marginBottom: '2.5rem', padding: '0 1rem' }}>
+          <ComboTable />
         </div>
       </section>
 

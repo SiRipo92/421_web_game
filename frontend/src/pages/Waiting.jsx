@@ -11,7 +11,7 @@ export function Waiting({ token }) {
   const [params] = useSearchParams()
   const playerId = params.get('pid')
   const navigate = useNavigate()
-  const { state, initialRoll } = useGame(gameId, playerId, token)
+  const { state, initialRoll, start } = useGame(gameId, playerId, token)
   const hasNavigated = useRef(false)
 
   useEffect(() => {
@@ -36,9 +36,9 @@ export function Waiting({ token }) {
 
         {/* Left: code + players */}
         <div>
-          <div className="eyebrow">Salle d'attente · {isPublic ? t('public_room') : t('private_room')}</div>
+          <div className="eyebrow">{t('waiting_room_eyebrow')} · {isPublic ? t('public_room') : t('private_room')}</div>
           <h1 className="display" style={{ fontSize: 'clamp(2rem, 4vw, 3rem)', margin: '0.4rem 0 1.5rem' }}>
-            La table est <em style={{ color: 'var(--rouge)' }}>dressée</em>.
+            {t('waiting_room_title_pre')} <em style={{ color: 'var(--rouge)' }}>{t('waiting_room_title_em')}</em>.
           </h1>
 
           {!isPublic && gameId && (
@@ -46,7 +46,7 @@ export function Waiting({ token }) {
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
                 <div>
                   <div className="eyebrow" style={{ marginBottom: 8 }}>{t('game_code')}</div>
-                  <div className="code-block" aria-label={`Code de partie: ${gameId}`}>{gameId}</div>
+                  <div className="code-block" aria-label={`${t('game_code')}: ${gameId}`}>{gameId}</div>
                 </div>
                 <ShareButtons code={gameId} />
               </div>
@@ -56,7 +56,7 @@ export function Waiting({ token }) {
 
           <div className="card" style={{ padding: '1.5rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '1rem' }}>
-              <div className="display" style={{ fontSize: '1.4rem' }}>Joueurs à table</div>
+              <div className="display" style={{ fontSize: '1.4rem' }}>{t('players_at_table')}</div>
               <div className="mono" style={{ color: 'var(--ink-mute)' }}>
                 {state.players?.length ?? 0} / {state.room?.max_players ?? '?'}
               </div>
@@ -70,7 +70,7 @@ export function Waiting({ token }) {
                   borderBottom: i < state.players.length - 1 ? '1px dashed var(--rule)' : 'none',
                   minHeight: 44,
                 }}>
-                  <Avatar name={p.name} isSelf={p.id === playerId} />
+                  <Avatar name={p.name} userId={p.user_id} hasAvatar={p.has_avatar ?? false} isSelf={p.id === playerId} />
                   <div style={{ flex: 1 }}>
                     <div className="serif" style={{ fontSize: '1.15rem', fontWeight: 600 }}>
                       {p.name}
@@ -88,7 +88,7 @@ export function Waiting({ token }) {
                     width: 8, height: 8, borderRadius: '50%',
                     background: p.connected ? 'var(--felt)' : 'var(--ink-fade)',
                     flexShrink: 0,
-                  }} className={p.connected ? '' : 'pulse-soft'} aria-label={p.connected ? 'Connecté' : 'Déconnecté'} />
+                  }} className={p.connected ? '' : 'pulse-soft'} aria-label={p.connected ? t('connected') : t('disconnected')} />
                 </div>
               ))}
 
@@ -110,8 +110,13 @@ export function Waiting({ token }) {
                 ? t('min_players_msg')
                 : isHost ? t('host_ready_msg') : t('waiting_for_host')}
             </div>
+            {isHost && state.phase === 'waiting' && (state.players?.length ?? 0) >= 2 && (
+              <button type="button" className="btn btn-rouge" onClick={start}>
+                ▶ {t('start_game')}
+              </button>
+            )}
             {isHost && state.phase === 'initial_roll' && (
-              <p className="note" style={{ fontStyle: 'italic' }}>Partie lancée — lancez le dé !</p>
+              <p className="note" style={{ fontStyle: 'italic' }}>{t('game_started_roll')}</p>
             )}
           </div>
         </div>

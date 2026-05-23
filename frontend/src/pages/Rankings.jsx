@@ -31,9 +31,9 @@ export function Rankings({ user }) {
 
   return (
     <div style={{ maxWidth: 980, margin: '0 auto', padding: '2.5rem 1.5rem' }}>
-      <div className="eyebrow">Tableau d'honneur</div>
+      <div className="eyebrow">{t('rankings_eyebrow')}</div>
       <h1 className="display" style={{ fontSize: 'clamp(2.4rem, 5vw, 3.2rem)', margin: '0.3rem 0 0.5rem' }}>
-        Le <em style={{ color: 'var(--rouge)' }}>palmarès</em> de la maison.
+        {t('rankings_title_pre')}<em style={{ color: 'var(--rouge)' }}>{t('rankings_title_em')}</em>{t('rankings_title_post')}
       </h1>
       <p className="note" style={{ marginBottom: '2rem' }}>{t('rankings_sub')}</p>
 
@@ -66,7 +66,7 @@ export function Rankings({ user }) {
 
       {/* Full table */}
       {loading ? (
-        <p className="serif" style={{ fontStyle: 'italic', color: 'var(--ink-mute)' }}>Chargement…</p>
+        <p className="serif" style={{ fontStyle: 'italic', color: 'var(--ink-mute)' }}>{t('loading')}</p>
       ) : (
         <div className="card" style={{ overflow: 'hidden' }}>
           <div style={{
