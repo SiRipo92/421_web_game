@@ -305,7 +305,7 @@ Past commits that captured incorrect rules — superseded by **R1**, **R2**, **R
 
 ## Done
 
-- **2026-05-23** _(pending SHA)_ — G19: raised TopBar burger threshold from 640px → 880px so the 641–835 zone no longer overflows. Desktop nav (logo + 3 links + 2 dividers + lang + theme + user menu) needs ~720px minimum, plus padding; anything narrower now uses the drawer. Tablet-portrait lands in the drawer (still very usable).
+- **2026-05-23** `0483a74` — G19: raised TopBar burger threshold from 640px → 880px so the 641–835 zone no longer overflows. Desktop nav (logo + 3 links + 2 dividers + lang + theme + user menu) needs ~720px minimum, plus padding; anything narrower now uses the drawer. Tablet-portrait lands in the drawer (still very usable).
 - **2026-05-23** `efd0be5` — French vocabulary review (G22). Replaced "match" → « manche », "round" → « partie », "pool" → « banque », "Le Tapis" → « La piste » across `i18n/index.js` (FR section), `Game.jsx` piste banner, `CreateRoom.jsx` title, backend French log fallback strings in `logic.py`. English copy unchanged.
 - **2026-05-23** `c3ba8f1` — Match-end banner (G13), rhythm indicator (G15), bigger keep-hint (G16).
 - **2026-05-23** `ec71db8` — Defensive try/except around WS action dispatch — bug in any handler no longer drops the socket. Extracted `_dispatch` helper.
