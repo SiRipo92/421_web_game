@@ -126,14 +126,167 @@ def _join_lock(game_id: str) -> asyncio.Lock:
 _MAX_WS_MSG_BYTES = 1024
 
 
-def _bot_take_turn(player: Player):
-    """Roll all dice once and mark the turn done."""
-    for i in range(3):
-        player.turn.dice[i] = random.randint(1, 6)
-    player.turn.combo, player.turn.rank, player.turn.fiches = classify(player.turn.dice)
-    player.turn.reroll = [False, False, False]
-    player.turn.rolls_left = 0
-    player.turn.done = True
+def _bot_pick_keepers(dice: list[int]) -> list[bool]:
+    """Decide which of three dice to re-roll. Returns a [bool, bool, bool] mask
+    (True = re-roll, False = keep).
+
+    G9 heuristic — rules ordered by potential rank ceiling:
+      1. Two or more 1s → keep all 1s (path to 111 = 7f or 11x = 2-6f).
+      2. A 4 AND a 2 (with or without a 1) → keep them (chase 421 = 8f).
+      3. Any pair → keep the pair (chase a triple). If a lone 1 is also
+         present, keep it too — cheap upgrade path to 11x / 111.
+      4. A lone 1 → keep it + the highest other die (cheap chase at 421/11x).
+      5. Two consecutive values → keep them (chase a suite).
+      6. Default → keep the highest, re-roll the other two.
+
+    Pure function: caller decides whether to actually use it (e.g. only
+    when the bot is still behind its target combo and has throws left).
+    """
+    counts = [0] * 7
+    for d in dice:
+        counts[d] += 1
+
+    # Rule 1: 2+ aces. Path to 111 / 11x.
+    if counts[1] >= 2:
+        return [d != 1 for d in dice]
+
+    # Rule 2: 4 + 2 (421 chase). Also keep any 1 already present.
+    if counts[4] >= 1 and counts[2] >= 1:
+        kept = {4: 0, 2: 0, 1: 0}
+        reroll = [True, True, True]
+        for i, d in enumerate(dice):
+            if d in (4, 2, 1) and kept[d] < 1:
+                reroll[i] = False
+                kept[d] += 1
+        return reroll
+
+    # Rule 3: any pair. Keep the pair + any lone 1.
+    for v in (6, 5, 4, 3, 2):
+        if counts[v] >= 2:
+            kept_count = 0
+            reroll = [True, True, True]
+            for i, d in enumerate(dice):
+                if d == v and kept_count < 2:
+                    reroll[i] = False
+                    kept_count += 1
+            if counts[1] >= 1:
+                for i, d in enumerate(dice):
+                    if d == 1 and reroll[i]:
+                        reroll[i] = False
+                        break
+            return reroll
+
+    # Rule 4: lone 1. Keep it + the highest other die.
+    if counts[1] >= 1:
+        reroll = [True, True, True]
+        for i, d in enumerate(dice):
+            if d == 1:
+                reroll[i] = False
+                break
+        non_ones = [(i, d) for i, d in enumerate(dice) if d != 1]
+        if non_ones:
+            best_i, _ = max(non_ones, key=lambda t: t[1])
+            reroll[best_i] = False
+        return reroll
+
+    # Rule 5: two consecutive values. Chase a suite (2 fiches).
+    sorted_vals = sorted(dice)
+    pair_consec = None
+    if sorted_vals[2] - sorted_vals[1] == 1:
+        pair_consec = (sorted_vals[1], sorted_vals[2])
+    elif sorted_vals[1] - sorted_vals[0] == 1:
+        pair_consec = (sorted_vals[0], sorted_vals[1])
+    if pair_consec:
+        a, b = pair_consec
+        seen = {a: False, b: False}
+        reroll = [True, True, True]
+        for i, d in enumerate(dice):
+            if d in seen and not seen[d]:
+                reroll[i] = False
+                seen[d] = True
+        return reroll
+
+    # Rule 6: keep the highest, re-roll the rest.
+    best_i = max(range(3), key=lambda i: dice[i])
+    return [i != best_i for i in range(3)]
+
+
+def _bot_take_turn(player: Player, game: Optional[Game] = None) -> None:
+    """Bot plays the player's turn (G9: now reads the table to play to win).
+
+    Behavior:
+      * If `game` is None (used by isolated unit tests of the bot helper),
+        roll all three dice once and mark done — the legacy single-throw
+        behavior, preserved as a fallback.
+      * If `game` is provided, the bot reads `current_round_plays` to find
+        the highest combo to beat, then iteratively re-rolls within the
+        cycle's rhythm cap. Each iteration calls `_bot_pick_keepers` to
+        decide which dice to keep, and stops on any of:
+          - current rank strictly beats the target
+          - no throws left
+          - reached the rhythm cap (max_throws_this_round for non-starters,
+            or 1 for everyone under bank_rule=="sec" + CHARGE)
+          - already holding a 421 (ceiling)
+
+    On exit, `turn.rolls_left` reflects the actual throws used (mirrors the
+    human `done` handler) so the caller can read it for starter-rhythm lock.
+    """
+    turn = player.turn
+
+    # Fresh turn → take the first roll.
+    if turn.rolls_left == 3:
+        for i in range(3):
+            turn.dice[i] = random.randint(1, 6)
+        turn.rolls_left -= 1
+        turn.combo, turn.rank, turn.fiches = classify(turn.dice)
+
+    # Legacy path: no game context → one-shot roll, done.
+    if game is None:
+        turn.reroll = [False, False, False]
+        turn.rolls_left = 0
+        turn.done = True
+        return
+
+    # Target rank to beat: the highest rank among players who have already
+    # played this cycle. Bot wants strictly higher to avoid being the loser.
+    target_rank = 0
+    for p in game.players:
+        if p.id == player.id or not p.turn or not p.turn.done:
+            continue
+        if p.turn.rank > target_rank:
+            target_rank = p.turn.rank
+
+    # Per-turn cap. bank_rule=="sec" + CHARGE = single roll for everyone.
+    is_starter = player.id == game.round_starter_id
+    if game.phase == GamePhase.CHARGE and game.bank_rule == "sec":
+        max_throws_for_me = 1
+    elif not is_starter and game.max_throws_this_round > 0:
+        max_throws_for_me = game.max_throws_this_round
+    else:
+        max_throws_for_me = 3
+
+    while True:
+        rolls_used = 3 - turn.rolls_left
+        if turn.rank > target_rank and turn.rank > 0:
+            break
+        if turn.rolls_left <= 0:
+            break
+        if rolls_used >= max_throws_for_me:
+            break
+        if turn.combo == "421":
+            break
+
+        reroll = _bot_pick_keepers(turn.dice)
+        if not any(reroll):
+            break
+        for i, do_reroll in enumerate(reroll):
+            if do_reroll:
+                turn.dice[i] = random.randint(1, 6)
+        turn.rolls_left -= 1
+        turn.combo, turn.rank, turn.fiches = classify(turn.dice)
+
+    turn.reroll = [False, False, False]
+    turn.done = True
 
 
 async def _afk_timer(game: Game, player_id: str, game_id: str):
@@ -152,8 +305,16 @@ async def _afk_timer(game: Game, player_id: str, game_id: str):
         f"{player.name} est AFK — le bot prend la main.",
         name=player.name,
     )
-    _bot_take_turn(player)
+    _bot_take_turn(player, game)
     t = player.turn
+    # G9: if the bot is the starter, lock the rhythm based on how many throws
+    # it actually used. Mirrors the human `done` handler so the rest of the
+    # table inherits the correct cap for the cycle.
+    if player_id == game.round_starter_id:
+        if game.phase == GamePhase.CHARGE and game.bank_rule == "sec":
+            game.max_throws_this_round = 1
+        else:
+            game.max_throws_this_round = max(3 - t.rolls_left, 1)
     dice_sorted = sorted(t.dice, reverse=True)
     _log(
         game,
