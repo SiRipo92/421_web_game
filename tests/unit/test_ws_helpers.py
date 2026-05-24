@@ -6,8 +6,10 @@ from jose import jwt
 from app.core.config import settings
 from app.game.logic import Game, GamePhase, Player, PlayerTurn
 from app.game.ws import (
+    _abort_bot_handback,
     _bot_pick_keepers,
     _bot_take_turn,
+    _cancel_afk,
     _resolve_user_from_token,
     _schedule_afk,
 )
@@ -183,6 +185,109 @@ class TestBotTakeTurnGameAware:
         assert starter.turn.done is True
         # Sec/charge means 1 throw max → rolls_left must be exactly 2 after.
         assert starter.turn.rolls_left == 2
+
+
+class TestBotHandback:
+    """G2: cancelling a pending bot turn restores the human's snapshot."""
+
+    def _make_game(self, with_pending: bool = True) -> tuple[Game, Player]:
+        p = Player(id="p1", name="Alice")
+        p.turn = PlayerTurn(
+            dice=[6, 6, 6], rolls_left=0, combo="666", rank=2600, fiches=6, done=True
+        )
+        game = Game(
+            id="HAND1234",
+            players=[p],
+            phase=GamePhase.CHARGE,
+            round_starter_id="p1",
+            current_index=0,
+            max_throws_this_round=3,
+        )
+        if with_pending:
+            # Pre-bot snapshot: human had rolled once, kept partial state.
+            snapshot_turn = PlayerTurn(
+                dice=[2, 3, 4], rolls_left=2, combo="234", rank=1200, fiches=2, done=False
+            )
+
+            # Use a real (but never awaited) coroutine wrapper to mimic asyncio.Task.
+            class _FakeTask:
+                def __init__(self):
+                    self._cancelled = False
+
+                def cancel(self):
+                    self._cancelled = True
+
+                def done(self):
+                    return False
+
+            game.bot_handback_tasks["p1"] = _FakeTask()
+            game.bot_handback_snapshots["p1"] = {
+                "turn": snapshot_turn,
+                "max_throws_this_round": 3,
+                "log_events_len": 0,
+                "log_len": 0,
+            }
+            # Simulate the bot's log entries that handback should roll back.
+            game.log.append("Alice est AFK — le bot prend la main.")
+            game.log.append("Alice (AFK): [6,6,6] → 666 (6f)")
+            game.log_events.append({"key": "log_afk_takeover", "name": "Alice"})
+            game.log_events.append(
+                {
+                    "key": "log_afk_turn",
+                    "name": "Alice",
+                    "dice": [6, 6, 6],
+                    "combo": "666",
+                    "fiches": 6,
+                }
+            )
+        return game, p
+
+    def test_abort_with_no_pending_returns_false(self):
+        game, _ = self._make_game(with_pending=False)
+        assert _abort_bot_handback(game, "p1") is False
+
+    def test_abort_restores_turn_snapshot(self):
+        game, p = self._make_game()
+        assert _abort_bot_handback(game, "p1") is True
+        assert p.turn.dice == [2, 3, 4]
+        assert p.turn.rolls_left == 2
+        assert p.turn.done is False
+        assert p.turn.combo == "234"
+
+    def test_abort_cancels_the_deferred_task(self):
+        game, _ = self._make_game()
+        task = game.bot_handback_tasks["p1"]
+        _abort_bot_handback(game, "p1")
+        assert task._cancelled is True
+        assert "p1" not in game.bot_handback_tasks
+        assert "p1" not in game.bot_handback_snapshots
+
+    def test_abort_rolls_back_bot_log_entries(self):
+        game, _ = self._make_game()
+        _abort_bot_handback(game, "p1")
+        # The handback adds 1 entry of its own; bot's 2 entries are gone.
+        assert len(game.log_events) == 1
+        assert game.log_events[0]["key"] == "log_bot_handback"
+
+    def test_abort_restores_max_throws_when_bot_locked_rhythm(self):
+        game, _ = self._make_game()
+        # Pretend the bot locked the rhythm down from 3.
+        game.max_throws_this_round = 1
+        game.bot_handback_snapshots["p1"]["max_throws_this_round"] = 3
+        _abort_bot_handback(game, "p1")
+        assert game.max_throws_this_round == 3
+
+    def test_cancel_afk_also_cancels_pending_handback(self):
+        """leave / kick / disconnect should drop the deferred task, not restore."""
+        game, p = self._make_game()
+        task = game.bot_handback_tasks["p1"]
+        _cancel_afk(game, "p1")
+        assert task._cancelled is True
+        assert "p1" not in game.bot_handback_tasks
+        assert "p1" not in game.bot_handback_snapshots
+        # No restoration — turn stays as bot left it.
+        assert p.turn.done is True
+        assert p.turn.dice == [6, 6, 6]
 
 
 class TestScheduleAfkStartedAt:

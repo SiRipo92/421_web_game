@@ -125,6 +125,17 @@ def _join_lock(game_id: str) -> asyncio.Lock:
 # WebSocket message limits (H1)
 _MAX_WS_MSG_BYTES = 1024
 
+# G2: grace window after the AFK bot plays during which the human can
+# reconnect or send a play action to cancel the deferred cycle advance and
+# reclaim their original turn. Short enough not to slow the table for the
+# common "really AFK" case; long enough that a reconnect + click fits.
+BOT_HANDBACK_GRACE_SECONDS = 3
+
+# G2: play actions that should trigger handback abort when arriving from a
+# player whose bot turn is still in the grace window. `leave` and `kick` are
+# intentionally excluded — neither implies the player is reclaiming their turn.
+_HANDBACK_PLAY_ACTIONS = frozenset({"roll", "keep", "done", "tiebreak_roll", "initial_roll"})
+
 
 def _bot_pick_keepers(dice: list[int]) -> list[bool]:
     """Decide which of three dice to re-roll. Returns a [bool, bool, bool] mask
@@ -291,12 +302,18 @@ def _bot_take_turn(player: Player, game: Optional[Game] = None) -> None:
 
 async def _afk_timer(game: Game, player_id: str, game_id: str):
     """Wait afk_seconds then auto-play for the player if they still haven't acted."""
+    from copy import deepcopy
+
     await asyncio.sleep(game.afk_seconds)
     player = next((p for p in game.players if p.id == player_id), None)
     if not player or player.turn is None or player.turn.done:
         return
     if game.current_player() and game.current_player().id != player_id:
         return
+    # G2: snapshot BEFORE the bot mutates anything. If the human reconnects /
+    # acts during the grace window, we restore this snapshot and the bot's
+    # play is undone — they get to play their own turn from where they left off.
+    snapshot = deepcopy(player.turn)
     # Surface the AFK takeover separately from the bot's actual play so the table
     # sees who stepped away before the throw appears in the log.
     _log(
@@ -309,12 +326,16 @@ async def _afk_timer(game: Game, player_id: str, game_id: str):
     t = player.turn
     # G9: if the bot is the starter, lock the rhythm based on how many throws
     # it actually used. Mirrors the human `done` handler so the rest of the
-    # table inherits the correct cap for the cycle.
+    # table inherits the correct cap for the cycle. Snapshot the prior value
+    # so handback can restore it if the human aborts.
+    prior_max_throws = game.max_throws_this_round
+    rhythm_locked_by_bot = False
     if player_id == game.round_starter_id:
         if game.phase == GamePhase.CHARGE and game.bank_rule == "sec":
             game.max_throws_this_round = 1
         else:
             game.max_throws_this_round = max(3 - t.rolls_left, 1)
+        rhythm_locked_by_bot = True
     dice_sorted = sorted(t.dice, reverse=True)
     _log(
         game,
@@ -325,11 +346,70 @@ async def _afk_timer(game: Game, player_id: str, game_id: str):
         combo=t.combo,
         fiches=t.fiches,
     )
+    # G2: stash the snapshot + rhythm-restore info before broadcasting so a
+    # reconnect-driven abort race always finds it.
+    game.bot_handback_snapshots[player_id] = {
+        "turn": snapshot,
+        "max_throws_this_round": prior_max_throws if rhythm_locked_by_bot else None,
+        "log_events_len": len(game.log_events),
+        "log_len": len(game.log),
+    }
+    # Broadcast the bot's play immediately so the table sees what happened.
+    await manager.broadcast(game_id, game_state(game))
+    # Defer the cycle advance for the grace window. If the human aborts in
+    # time, `_abort_bot_handback` cancels this task and restores state.
+    task = asyncio.create_task(_finalize_bot_turn(game, player_id, game_id))
+    game.bot_handback_tasks[player_id] = task
+
+
+async def _finalize_bot_turn(game: Game, player_id: str, game_id: str):
+    """G2: after the bot's play sits visible for the grace window, run the
+    deferred advance + resolve + AFK-reschedule chain. If the human aborted
+    in the window this task is cancelled before it gets here."""
+    try:
+        await asyncio.sleep(BOT_HANDBACK_GRACE_SECONDS)
+    except asyncio.CancelledError:
+        return
+    # Drop our bookkeeping now — past this point, the turn is committed.
+    game.bot_handback_tasks.pop(player_id, None)
+    game.bot_handback_snapshots.pop(player_id, None)
     game.advance()
     if game.all_done():
         await _resolve_round(game)
     await manager.broadcast(game_id, game_state(game))
     _schedule_afk(game, game_id)
+
+
+def _abort_bot_handback(game: Game, player_id: str) -> bool:
+    """G2: cancel a pending bot-handback for this player and restore the turn
+    snapshot the bot was about to commit. Returns True if a handback was
+    actually aborted, False if there wasn't one pending (e.g. window already
+    expired). Caller is responsible for any post-restore broadcast / logging."""
+    task = game.bot_handback_tasks.pop(player_id, None)
+    snapshot = game.bot_handback_snapshots.pop(player_id, None)
+    if task is None or snapshot is None:
+        return False
+    if not task.done():
+        task.cancel()
+    player = next((p for p in game.players if p.id == player_id), None)
+    if player is not None:
+        player.turn = snapshot["turn"]
+    # Restore the rhythm if the bot's play locked it as starter.
+    if snapshot.get("max_throws_this_round") is not None:
+        game.max_throws_this_round = snapshot["max_throws_this_round"]
+    # Roll back the AFK takeover + bot-turn log entries so the human's
+    # reclaimed turn isn't shadowed by stale event banners.
+    new_log_len = snapshot.get("log_len", len(game.log))
+    new_events_len = snapshot.get("log_events_len", len(game.log_events))
+    del game.log[new_log_len:]
+    del game.log_events[new_events_len:]
+    _log(
+        game,
+        "log_bot_handback",
+        f"{player.name if player else player_id} reprend la main.",
+        name=player.name if player else "",
+    )
+    return True
 
 
 async def _afk_initial_timer(game: Game, player_id: str, game_id: str):
@@ -358,10 +438,21 @@ async def _afk_initial_timer(game: Game, player_id: str, game_id: str):
 
 
 def _cancel_afk(game: Game, player_id: str):
-    """Cancel any running AFK timer for the given player."""
+    """Cancel any running AFK timer AND any pending bot-handback for the player.
+
+    G2: leave / kick / disconnect cleanup paths should drop both timers; the
+    handback task in particular would otherwise fire later and try to
+    `game.advance()` on behalf of a player who's no longer at the table.
+    Restoration is NOT performed here — caller intent is "this slot is gone",
+    not "the human is back."
+    """
     task = game.afk_tasks.pop(player_id, None)
     if task:
         task.cancel()
+    handback = game.bot_handback_tasks.pop(player_id, None)
+    if handback and not handback.done():
+        handback.cancel()
+    game.bot_handback_snapshots.pop(player_id, None)
 
 
 async def _afk_tiebreak_timer(game: Game, player_id: str, game_id: str):
@@ -591,6 +682,12 @@ async def _dispatch(
     "keep listening". An exception here is caught by ``websocket_endpoint`` and
     logged without dropping the connection.
     """
+    # G2: a play action arriving from a player whose bot turn is still in the
+    # grace window means the human is back at the keyboard. Abort the deferred
+    # advance and restore the snapshot BEFORE the handler reads/mutates state.
+    if action in _HANDBACK_PLAY_ACTIONS and player_id in game.bot_handback_tasks:
+        _abort_bot_handback(game, player_id)
+
     if action == "start":
         if game.phase != GamePhase.WAITING:
             return None
@@ -944,6 +1041,9 @@ async def websocket_endpoint(
 
     await manager.connect(game_id, ws, player_id)
     player.connected = True
+    # G2: a reconnect inside the bot-handback grace window aborts the deferred
+    # advance and restores the human's pre-bot turn before they even act.
+    _abort_bot_handback(game, player_id)
     await manager.broadcast(game_id, game_state(game))
 
     try:

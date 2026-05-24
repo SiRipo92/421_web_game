@@ -141,6 +141,13 @@ class Game:
     # countdown actually resets when the server resets the timer (which happens on
     # every action — `roll`/`keep`/`done` — not just on player change).
     afk_started_at: Optional[int] = None
+    # G2: bot-handback bookkeeping. After the AFK bot plays a turn, instead of
+    # advancing the cycle immediately we sleep `BOT_HANDBACK_GRACE_SECONDS` and
+    # then finalize. If the human reconnects or sends a play action during the
+    # grace window, the deferred task is cancelled and `player.turn` is restored
+    # from the snapshot taken just before the bot mutated it.
+    bot_handback_tasks: dict = field(default_factory=dict, compare=False, repr=False)
+    bot_handback_snapshots: dict = field(default_factory=dict, compare=False, repr=False)
 
     def current_player(self) -> Optional[Player]:
         """Return the player whose turn it is, skipping sat-out players.
