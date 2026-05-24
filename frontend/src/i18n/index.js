@@ -277,6 +277,20 @@ const I18N = {
     log_afk_initial: "{name} (AFK) lance {roll}",
     log_round_all_tie: "Tous à égalité au rang {rank} — pas de transfert.",
 
+    // G6: second-person variants used by formatLogEntries when the viewer is
+    // the subject. Missing variants silently fall back to the neutral key.
+    you_round_start: "Tour {num} · {phase} · vous donnez le rythme",
+    you_new_set: "Nouvelle manche · Tour {num} · vous donnez le rythme",
+    you_charge_takes: "Vous prenez {n} jeton(s) · Banque : {pool}",
+    you_decharge_gives_winner: "Vous donnez {n} jeton(s) à {loser}",
+    you_decharge_gives_loser: "{winner} vous donne {n} jeton(s)",
+    you_match_lost: "Vous avez les 11 — manché ({count}/2)",
+    you_round_point: "Vous prenez un point de partie ({count}).",
+    you_player_sits_out: "Vous n'avez plus de fiches — pause jusqu'à la prochaine manche.",
+    you_turn: "Vous : {dice} → {combo} ({fiches}f)",
+    you_afk_takeover: "Vous êtes AFK — le bot prend la main.",
+    you_afk_turn: "Vous (AFK) : {dice} → {combo} ({fiches}f)",
+
     // Commentary ticker (G21) — left rail with rolling headline events
     ticker_eyebrow: "EN DIRECT",
     ticker_title: "Le fil de la table",
@@ -445,6 +459,8 @@ const I18N = {
     tiebreak_waiting_other: "En attente du prochain joueur…",
     tiebreak_spectate: "Ce départage ne vous concerne pas — patientez quelques instants.",
     dice_keep_hint: "Cliquez sur un dé pour le garder (il se soulève) · les autres seront relancés.",
+    dice_legend_keep: "gardé",
+    dice_legend_reroll: "à relancer",
     rhythm_label: "Rythme",
     rhythm_free: "Libre",
     match_end_eyebrow: "Fin de la manche",
@@ -772,6 +788,20 @@ const I18N = {
     log_afk_initial: "{name} (AFK) rolls {roll}",
     log_round_all_tie: "All tied at rank {rank} — no transfer.",
 
+    // G6: second-person variants used by formatLogEntries when the viewer is
+    // the subject. Missing variants silently fall back to the neutral key.
+    you_round_start: "Round {num} · {phase} · you set the pace",
+    you_new_set: "New set · Round {num} · you set the pace",
+    you_charge_takes: "You take {n} chip(s) · Pool: {pool}",
+    you_decharge_gives_winner: "You give {n} chip(s) to {loser}",
+    you_decharge_gives_loser: "{winner} gives you {n} chip(s)",
+    you_match_lost: "You hold 11 — manché ({count}/2)",
+    you_round_point: "You take a round point ({count}).",
+    you_player_sits_out: "You're out of chips — sitting out until the next match.",
+    you_turn: "You: {dice} → {combo} ({fiches}f)",
+    you_afk_takeover: "You're AFK — the bot takes over.",
+    you_afk_turn: "You (AFK): {dice} → {combo} ({fiches}f)",
+
     // Commentary ticker (G21)
     ticker_eyebrow: "LIVE",
     ticker_title: "Table feed",
@@ -940,6 +970,8 @@ const I18N = {
     tiebreak_waiting_other: "Waiting for the next player…",
     tiebreak_spectate: "This tiebreak doesn't involve you — hold on.",
     dice_keep_hint: "Click a die to keep it (it lifts up) · the others will be re-rolled.",
+    dice_legend_keep: "keep",
+    dice_legend_reroll: "re-roll",
     rhythm_label: "Rhythm",
     rhythm_free: "Open",
     match_end_eyebrow: "Match over",

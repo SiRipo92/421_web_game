@@ -15,7 +15,7 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 
 ## Now
 
-### G1. AFK-timer reset on every player interaction (not just per-turn)
+### G1. (DONE — pending PR merge) AFK-timer reset on every player interaction (not just per-turn)
 **Why:** Reported by playtest. Today the AfkBar countdown only resets when the current player changes — but selecting dice (`keep` action) on the backend DOES reset the AFK timer, so the displayed countdown is misleading. The user sees the timer ticking down even though they're actively interacting.
 **Scope:**
 - Server: emit `afk_started_at` (epoch ms) in `game_state`. Update it whenever `_schedule_afk` (re-)starts the current player's timer (roll/keep/done/tiebreak_roll).
@@ -27,20 +27,21 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 **Scope:** Defer the bot's `advance() → _resolve_round` chain by 2–3 seconds. If the human reconnects via any WS action in that window, abort the bot's pending advance and restore the player's normal turn.
 **Acceptance:** Player AFKs through one bot turn, returns mid-cycle, and is back in control immediately for the next throw.
 
-### G3. Auto-validate `done` when the player is at max throws with no choice left
+### G3. (DONE) Auto-validate `done` when the player is at max throws with no choice left
 **Why:** If a non-starter has used the starter's max throws and can't roll anymore, the "Done" button is the only action and should fire automatically.
+**Status:** Already implemented inline in `ws.py` `roll` handler at lines 540–566 (tagged `# Auto-validate (G3)`). Verified during the polish-bundle work; no code change needed.
 **Scope:** In the `roll`/`keep` handlers, after applying state, check whether `rolls_used >= max_throws_this_round` AND there are no kept-out dice. If so, treat as if the player called `done`.
 **Acceptance:** Starter rolls once + clicks done → other players auto-validate after their single throw, no extra click needed.
 
-### G4. Hide the throw counter when there's only one throw to make
+### G4. (DONE — pending PR merge) Hide the throw counter when there's only one throw to make
 **Why:** Showing "0/3 throws" before the starter has set the rhythm is fine; showing "0/1" or hiding altogether once the starter capped the rhythm at 1 makes the UI cleaner.
 **Scope:** In `Game.jsx`'s `RollDots`: render only when `max_throws_this_round > 1` OR for the starter when the rhythm isn't yet set.
 
-### G5. Clarify "keep vs reroll" affordance on dice selection
+### G5. (DONE — pending PR merge) Clarify "keep vs reroll" affordance on dice selection
 **Why:** Reported. Today clicking a die toggles `reroll[i]` but the visual encoding isn't clear about what each state means.
 **Scope:** Add an on-die badge/icon (✓ for "keep", ↺ for "reroll"). Add a one-line legend above the dice row ("Cliquez pour relancer / Click to re-roll").
 
-### G6. Personalize log entries with "Vous" / "You" for the current viewer
+### G6. (DONE — pending PR merge) Personalize log entries with "Vous" / "You" for the current viewer
 **Why:** Reported. "TheWitch donne 1 jeton(s) à Sisi" reads as third-person even when you are TheWitch.
 **Scope:** Frontend `formatLogEntries`: when `params.name` (or `winner`/`loser`/`starter`) matches the local `playerId`'s name, substitute the `you_*` i18n string. Could also display contextual flash messages: "You just received 2 chips. Your turn."
 
@@ -753,6 +754,7 @@ Past commits that captured incorrect rules — superseded by **R1**, **R2**, **R
 
 ## Done
 
+- **2026-05-23** _(pending PR merge — `feature/playtest-polish-g1-g3-g4-g5-g6`)_ — **Playtest polish bundle: G1, G3 (verified-existing), G4, G5, G6**. Five reported gameplay quality fixes in one PR. **G1** AFK timer: backend stamps `Game.afk_started_at` (epoch ms) whenever `_schedule_afk` (re-)starts the per-turn timer in CHARGE/DECHARGE/TIEBREAK; AfkBar now derives remaining from `state.afk_started_at` instead of mounting a stale local countdown — clicking dice visibly resets the bar. **G3** verified: auto-validate on final roll was already inline in `ws.py` (line 540+, comment tagged `# Auto-validate (G3)`); roadmap updated. **G4** `RollDots` hidden when `max_throws === 1` unless the starter hasn't acted yet (no more "0/1" noise). **G5** Die.jsx gets corner ✓/↺ badges on interactive dice (brass when kept, rouge when set to re-roll); new `KeepLegend` component sits above the dice cluster with chip-labeled "gardé / à relancer" so the encoding reads at a glance. **G6** `formatLogEntries` swaps to second-person `you_*` variants when the viewer is the event's subject — covers turn / charge_takes / decharge_gives (winner + loser perspectives) / match_lost / round_point / sits_out / afk_takeover / afk_turn / round_start / new_set. 11 new i18n keys × 2 locales. 5 new unit tests on `_schedule_afk` stamping behavior across phases (CHARGE/DECHARGE stamp, INITIAL_ROLL doesn't, FINISHED clears, bot-disabled clears). Gates: 236 passed, coverage 84.15%, ruff + format clean, frontend lint + build clean.
 - **2026-05-23** _(pending PR merge — `feature/g18-round-point-persistence`)_ — **G18 leave/kick path**. New `persist_player_session(user_id, game_code, round_points)` in `app/services/game_persistence.py` bumps `PlayerStats.games_played` and attributes the leaver's `round_points` to `losses` (or counts a `win` if they left with 0). Wired into the WS leave **and** kick handlers as a background task, snapshotting values before the cleanup mutates them. ELO recalc deliberately deferred — we don't have a canonical game-end to define "opponents" for the rating sense. 6 new integration tests cover normal / zero / accumulate / unknown-user / invalid-uuid / empty-id paths. Coverage 83.62%. Still queued: `GameRecord` / `GamePlayer` history-row writes on room dissolve (Recent Games panel stays empty until then) + ELO trigger.
 - **2026-05-23** `0f1676d` (PR #19) — **G38 first cut**. Adds `User.role` (`player | moderator | admin`, default `player`), `User.strike_count`, `User.chat_banned_until`, `User.banned_until`, `User.ban_reason`. Alembic migration `g38admin0001` (chained off the current head `a1b2c3d4e5f6`) adds the columns AND promotes the seed admin (`ripochesierra@gmail.com`) to `admin` via an idempotent UPDATE. New `require_moderator` / `require_admin` deps in `app/core/security.py`. New `app/routers/admin.py` with `GET /api/admin/dashboard-summary` (moderator-gated counts) + `PATCH /api/admin/users/{user_id}/role` (admin-only, audited via GdprAuditLog). `/auth/me` now returns role + strike + ban fields. `POST /auth/login` rejects accounts with `banned_until > now()` with 403 + structured payload (`{error, reason, until}`) the frontend uses to render a blocked-login screen. Frontend: new `/admin` route with `AdminDashboard.jsx` (live summary grid + 3 placeholder panels for G39 inbox / G40 strikes / G41 room bans, non-admins redirected to /profile); admin/moderator badge + dashboard link injected into `Profile.jsx`. 9 new integration tests cover default-role default values, player→403 on admin route, moderator→200, admin role promotion, moderator-cannot-promote, unknown-role rejection, login ban gate (active + expired), chat_banned_until doesn't gate login. 22 new i18n keys (FR + EN). Gates: 225 passed, coverage 84.42%, ruff + format clean, frontend lint + build clean. **Still queued:** G39 inbox, G40 strike engine, G41 room-ban uphold UI, G42 login-blocked screens.
 - **2026-05-23** `302cefa` (PR #17) — **G14 + G21 first cut**. Three-column game-room grid (`260px | 1fr | 320px`) with a new left-rail `CommentaryTicker` (rolling stack of up to 5 headline events: manche/round-point/tiebreak/player-left/kick/afk-takeover/pool-empty/all-tie/sit-out; colored eyebrow per category, slide-in animation, naturally cycles as new headlines arrive). The piste itself grows to `min(820px, 85vh)` and gets a clearer visual hierarchy: « La piste » label up top, new `ScoreToBeatBanner` pinned at top-of-piste (reads `current_round_plays`, surfaces the highest-rank play as "Score à battre : {name} · {combo} ({fiches}f) · N lancers"), pool chips dead-center as the focal point with a small label, dice cluster + combo + keep-hint anchored at the bottom. Mid-width breakpoint (1180px) hides only the ticker so the piste stays roomy on laptops; full mobile stack below 980px. New i18n: ticker_eyebrow/title/empty/aria, 7 ticker_label_* badges, score_to_beat_label/in_throws/aria (FR + EN). Bundle size +5 KB.

@@ -135,6 +135,12 @@ class Game:
     host_player_id: str = ""
     # Runtime state — not serialized
     afk_tasks: dict = field(default_factory=dict, compare=False, repr=False)
+    # G1: epoch-ms timestamp of the current player's active AFK timer. Stamped by
+    # `_schedule_afk` whenever the per-turn timer (re-)starts for CHARGE/DECHARGE.
+    # Client AfkBar reads this + `afk_seconds` to compute remaining time, so the
+    # countdown actually resets when the server resets the timer (which happens on
+    # every action — `roll`/`keep`/`done` — not just on player change).
+    afk_started_at: Optional[int] = None
 
     def current_player(self) -> Optional[Player]:
         """Return the player whose turn it is, skipping sat-out players.
@@ -178,6 +184,7 @@ def game_state(game: Game) -> dict:
         "current_player_id": game.current_player().id if game.current_player() else None,
         "max_throws": game.max_throws_this_round,
         "round_starter_id": game.round_starter_id,
+        "afk_started_at": game.afk_started_at,
         "room": {
             "is_public": game.is_public,
             "max_players": game.max_players,

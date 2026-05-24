@@ -28,6 +28,7 @@ const INITIAL = {
   last_round_plays: [],
   log: [],
   kickedReason: null,
+  afk_started_at: null,
 }
 
 export function useGame(gameId, playerId, token) {
