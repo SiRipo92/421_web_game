@@ -533,6 +533,58 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 **Acceptance:** A player can follow the entire game without ever looking at the right column. The ticker tells them whose turn it is, what each played, the running score-to-beat, and the cycle outcome. When chat ships, the right column becomes the chat surface.
 **Dependencies:** [[item 8]] (chat), [[G34]] (AI moderation), [[G36]] (rate-limiter), [[G37]] (peer reporting) — all need to land before the right-column flip. The ticker enrichment can ship first, independent of chat, as a pure UX upgrade.
 
+### G61. Right-rail panels become collapsible "tabs"
+**Why:** Reported during playtest. The right `<aside>` today is a fixed layout: collapsible **Journal** on top, *always-visible* **Combo hierarchy** at the bottom. The user wants the hierarchy to collapse the same way the journal does — and more broadly, they want the right rail to behave like a small set of *stackable tabs* (Journal · Hierarchy · later: Chat) that each open/close independently. This sets up the eventual chat slot ([[G59]]) without ripping out the existing panels.
+**Scope:**
+- **Component:** new `CollapsiblePanel.jsx` in `frontend/src/components/shared/` taking `{ title, subtitle?, defaultOpen, children, onToggle }`. Renders a sticky header with the panel title + collapse button (▲ / ▼), then the children when open. Mirrors the existing journal header treatment so the visual language stays consistent.
+- **Refactor `Game.jsx`'s right `<aside>`:**
+  - Wrap the journal content in a `<CollapsiblePanel title={t('log')} subtitle={t('log_subtitle')} defaultOpen>`. Lift the existing `logOpen` state in or move it into the new component (lift up if other components need to know).
+  - Wrap the hierarchy in a second `<CollapsiblePanel title={t('combo_hier')} defaultOpen={false}>`. Default-closed so it doesn't compete with the journal for vertical space.
+  - When [[G59]] / chat ships, add a third `<CollapsiblePanel title={t('chat')} />` panel in the same rail.
+- **Vertical layout:** the rail uses `display: flex; flex-direction: column`. Each panel collapses to just its header when closed; the open panel claims the remaining `flex: 1` so users can read it comfortably. Two open panels share the space proportionally.
+- **State persistence:** localStorage `panel_state: { log: bool, hierarchy: bool, chat: bool }` so a user's open/closed choices stick across refreshes / G60 rehydration.
+- **A11y:** each header acts as a button with `aria-expanded` reflecting state; `aria-controls` pointing to the body region; keyboard Enter / Space toggles.
+- **Tests:** none required for this MVP (pure UI state). Manual playtest validates the visual flow.
+**Acceptance:** The hierarchy section now has its own collapse button identical to the journal's. Closing both panels collapses the rail to just two headers + a thin spacer. Reopening either expands smoothly. The toggle states persist across page reloads.
+**Dependencies:** Pairs cleanly with [[G59]] (chat-prep) and [[G60]] (session persistence — the panel_state localStorage key is part of the same persistence layer).
+
+### G62. Game-room layout overflow / overlap fix at 100% browser zoom
+**Why:** Reported during playtest. The user was running at 80 % browser zoom, which masked layout issues. At 100 % zoom the room breaks: the piste is too large for the viewport, text feels oversized, the bottom action bar gets pushed off-screen and forces a page scroll, and the top bar elements overlap (the last-throw dice on a `PlayerStrip` collide with the player's name pill). The host's « ⚙ Room rules » pill in the top-right adds a chunk of width that compounds the overlap.
+**Scope:**
+- **Viewport-fit piste.** The piste container should compute its size from the *available* space (viewport height minus top-bar + action-bar + side rails), not from a fixed % of viewport width. Add `max-height: calc(100vh - top_bar_height - action_bar_height - 32px)` to the piste's outer wrapper. Pair with `aspect-ratio: 1` so it stays square within those bounds.
+- **Bottom action bar always visible.** Use a CSS grid in the centre column with three rows: `[top-bar] auto [piste] 1fr [action-bar] auto`. The action bar locks to the bottom; the piste shrinks to fit. Today the piste pushes the action bar off; the grid fix reverses the priority.
+- **Top-bar `PlayerStrip` overflow.** The dice (3 mini dice ~22 px each) + name pill + score pips fights for horizontal space. Several handles:
+  - The dice should appear *under* the name (column layout) when the strip narrows, not after the name. Add a `flex-wrap: wrap` + tighter `gap` on narrow widths.
+  - On narrow widths, hide the per-strip dice entirely — they're visible on the piste anyway when the player is active.
+  - Cap each `PlayerStrip`'s `max-width` so 5 strips can fit on a 1280-wide screen without scroll. Currently the strips can each grow large.
+- **Host button — icon only on narrow widths.** The « ⚙ Room rules » button reads `⚙ {t('room_rules_button')}` — drop the text label below ~1280 px viewport (or simply make it icon-only always; the `aria-label` already carries the full text for screen readers). User suggested this directly.
+- **Top-bar grid review.** The grid is `auto 1fr auto` today. The middle `1fr` overflows when player strips don't fit. Consider `auto minmax(0, 1fr) auto` so the middle column has a clean shrink behaviour. Add `overflow: auto` on the strip row for a controlled horizontal scroll when truly too narrow.
+- **Text-scale audit.** [[G52]] talks about *upsizing* in-game text. Cross-check sizes at 100 % zoom on 1024 / 1280 / 1440 / 1920 viewports before doing G52 — if anything feels oversized at 100 %, the G52 multiplier needs scaling-down or a wider per-breakpoint table.
+- **Manual matrix.** Verify at: 1024×768, 1280×800, 1440×900, 1920×1080, plus 100 % zoom and 80 % zoom on each. Test as guest + as host (host adds the room-rules button) + with 2 / 3 / 5 player counts.
+**Acceptance:** At 100 % zoom on any laptop-or-larger viewport, the game room fits without a page scroll. Top-bar elements never overlap. The host's room-rules button doesn't push other controls off-screen. The action bar (Lancer / Valider / Quitter) is always visible at the bottom without the user having to scroll.
+**Dependencies:** Bundles with [[G14]] (piste sizing) and [[G52]] (typography pass) — all three target the in-game canvas geometry. Best landed together; partial fixes risk undoing each other.
+
+### G63. Cross-page responsive UX audit + breakpoint discipline
+**Why:** The user wants assurance that *every* page (home, lobby, waiting room, game room, profile, rankings, login/register, reset, contact, how-to-play, terms, privacy) renders cleanly across **mobile (375 px) / tablet (768 px) / laptop (1280 px) / desktop (1920 px)**. Today the responsive treatment is page-by-page and inconsistent — [[G19]] hit the TopBar's 641–835 px band, [[G62]] is fixing the game room, but no end-to-end pass has ever been run.
+**Scope:**
+- **Establish a breakpoint contract.** Pick 4 named breakpoints and stick to them everywhere:
+  - `mobile`: ≤ 640 px (single column, burger nav, stacked panels)
+  - `tablet`: 641–959 px (compact desktop or wide mobile depending on page)
+  - `laptop`: 960–1439 px (full desktop layout, side rails compress)
+  - `desktop`: ≥ 1440 px (full layout with breathing room)
+- **Audit each page** at the four breakpoints + the two common zoom levels (80 % and 100 %). Document each finding in a checklist (PR description or `docs/RESPONSIVE_AUDIT.md`).
+- **Common failure modes to catch:**
+  - Horizontal scroll on `<body>` (always a layout bug)
+  - Text < 14 px effective size (below comfortable read threshold)
+  - Buttons < 40×40 px tap target on mobile
+  - Overlapping elements (the playtest report)
+  - Content cut off by the viewport without a scroll affordance
+  - CTAs pushed below the fold
+- **Tooling.** Use Chrome DevTools' device emulation for the breakpoints. Add a Playwright snapshot suite once the layout settles? (defer — would be high-maintenance until the surfaces are stable).
+- **Fix list.** Each audited issue becomes its own roadmap entry (G64+) so the audit produces a *prioritised punch list*, not a single sprawling PR.
+**Acceptance:** A documented audit covering all pages at all four breakpoints, with a prioritised punch list of issues. The audit itself is the deliverable for this entry; the fixes ship as follow-up items.
+**Dependencies:** None — this is investigation work. Should ship before any major UI rewrites so we know the current state of play.
+
 ---
 
 ## Next
