@@ -135,6 +135,19 @@ class Game:
     host_player_id: str = ""
     # Runtime state — not serialized
     afk_tasks: dict = field(default_factory=dict, compare=False, repr=False)
+    # G1: epoch-ms timestamp of the current player's active AFK timer. Stamped by
+    # `_schedule_afk` whenever the per-turn timer (re-)starts for CHARGE/DECHARGE.
+    # Client AfkBar reads this + `afk_seconds` to compute remaining time, so the
+    # countdown actually resets when the server resets the timer (which happens on
+    # every action — `roll`/`keep`/`done` — not just on player change).
+    afk_started_at: Optional[int] = None
+    # G2: bot-handback bookkeeping. After the AFK bot plays a turn, instead of
+    # advancing the cycle immediately we sleep `BOT_HANDBACK_GRACE_SECONDS` and
+    # then finalize. If the human reconnects or sends a play action during the
+    # grace window, the deferred task is cancelled and `player.turn` is restored
+    # from the snapshot taken just before the bot mutated it.
+    bot_handback_tasks: dict = field(default_factory=dict, compare=False, repr=False)
+    bot_handback_snapshots: dict = field(default_factory=dict, compare=False, repr=False)
 
     def current_player(self) -> Optional[Player]:
         """Return the player whose turn it is, skipping sat-out players.
@@ -178,6 +191,7 @@ def game_state(game: Game) -> dict:
         "current_player_id": game.current_player().id if game.current_player() else None,
         "max_throws": game.max_throws_this_round,
         "round_starter_id": game.round_starter_id,
+        "afk_started_at": game.afk_started_at,
         "room": {
             "is_public": game.is_public,
             "max_players": game.max_players,
@@ -452,7 +466,14 @@ async def _finalize_cycle(game: Game, next_starter_id: Optional[str]) -> None:
     """Common post-resolution work: sit-outs, match-end check, next cycle setup."""
     all_players = game.players
 
-    if game.phase == GamePhase.DECHARGE:
+    # G44: Detect a manché winner BEFORE announcing sit-outs. When the same
+    # cycle that empties a player also pushes someone to 11, `_start_new_set`
+    # below clears `out_of_match` and resets every player's chips — so any
+    # "sits out until the next match" announcement is misleading (the new
+    # match starts fresh on the very next line).
+    manche = next((p for p in all_players if p.tokens >= 11), None)
+
+    if not manche and game.phase == GamePhase.DECHARGE:
         for p in all_players:
             if p.tokens == 0 and p.id not in game.out_of_match:
                 game.out_of_match.add(p.id)
@@ -463,7 +484,6 @@ async def _finalize_cycle(game: Game, next_starter_id: Optional[str]) -> None:
                     name=p.name,
                 )
 
-    manche = next((p for p in all_players if p.tokens >= 11), None)
     if manche:
         ml_id = manche.id
         game.match_losses[ml_id] = game.match_losses.get(ml_id, 0) + 1

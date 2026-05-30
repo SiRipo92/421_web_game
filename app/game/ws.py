@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import random
+import time
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -124,25 +125,195 @@ def _join_lock(game_id: str) -> asyncio.Lock:
 # WebSocket message limits (H1)
 _MAX_WS_MSG_BYTES = 1024
 
+# G2: grace window after the AFK bot plays during which the human can
+# reconnect or send a play action to cancel the deferred cycle advance and
+# reclaim their original turn. Short enough not to slow the table for the
+# common "really AFK" case; long enough that a reconnect + click fits.
+BOT_HANDBACK_GRACE_SECONDS = 3
 
-def _bot_take_turn(player: Player):
-    """Roll all dice once and mark the turn done."""
-    for i in range(3):
-        player.turn.dice[i] = random.randint(1, 6)
-    player.turn.combo, player.turn.rank, player.turn.fiches = classify(player.turn.dice)
-    player.turn.reroll = [False, False, False]
-    player.turn.rolls_left = 0
-    player.turn.done = True
+# G2: play actions that should trigger handback abort when arriving from a
+# player whose bot turn is still in the grace window. `leave` and `kick` are
+# intentionally excluded — neither implies the player is reclaiming their turn.
+_HANDBACK_PLAY_ACTIONS = frozenset({"roll", "keep", "done", "tiebreak_roll", "initial_roll"})
+
+
+def _bot_pick_keepers(dice: list[int]) -> list[bool]:
+    """Decide which of three dice to re-roll. Returns a [bool, bool, bool] mask
+    (True = re-roll, False = keep).
+
+    G9 heuristic — rules ordered by potential rank ceiling:
+      1. Two or more 1s → keep all 1s (path to 111 = 7f or 11x = 2-6f).
+      2. A 4 AND a 2 (with or without a 1) → keep them (chase 421 = 8f).
+      3. Any pair → keep the pair (chase a triple). If a lone 1 is also
+         present, keep it too — cheap upgrade path to 11x / 111.
+      4. A lone 1 → keep it + the highest other die (cheap chase at 421/11x).
+      5. Two consecutive values → keep them (chase a suite).
+      6. Default → keep the highest, re-roll the other two.
+
+    Pure function: caller decides whether to actually use it (e.g. only
+    when the bot is still behind its target combo and has throws left).
+    """
+    counts = [0] * 7
+    for d in dice:
+        counts[d] += 1
+
+    # Rule 1: 2+ aces. Path to 111 / 11x.
+    if counts[1] >= 2:
+        return [d != 1 for d in dice]
+
+    # Rule 2: 4 + 2 (421 chase). Also keep any 1 already present.
+    if counts[4] >= 1 and counts[2] >= 1:
+        kept = {4: 0, 2: 0, 1: 0}
+        reroll = [True, True, True]
+        for i, d in enumerate(dice):
+            if d in (4, 2, 1) and kept[d] < 1:
+                reroll[i] = False
+                kept[d] += 1
+        return reroll
+
+    # Rule 3: any pair. Keep the pair + any lone 1.
+    for v in (6, 5, 4, 3, 2):
+        if counts[v] >= 2:
+            kept_count = 0
+            reroll = [True, True, True]
+            for i, d in enumerate(dice):
+                if d == v and kept_count < 2:
+                    reroll[i] = False
+                    kept_count += 1
+            if counts[1] >= 1:
+                for i, d in enumerate(dice):
+                    if d == 1 and reroll[i]:
+                        reroll[i] = False
+                        break
+            return reroll
+
+    # Rule 4: lone 1. Keep it + the highest other die.
+    if counts[1] >= 1:
+        reroll = [True, True, True]
+        for i, d in enumerate(dice):
+            if d == 1:
+                reroll[i] = False
+                break
+        non_ones = [(i, d) for i, d in enumerate(dice) if d != 1]
+        if non_ones:
+            best_i, _ = max(non_ones, key=lambda t: t[1])
+            reroll[best_i] = False
+        return reroll
+
+    # Rule 5: two consecutive values. Chase a suite (2 fiches).
+    sorted_vals = sorted(dice)
+    pair_consec = None
+    if sorted_vals[2] - sorted_vals[1] == 1:
+        pair_consec = (sorted_vals[1], sorted_vals[2])
+    elif sorted_vals[1] - sorted_vals[0] == 1:
+        pair_consec = (sorted_vals[0], sorted_vals[1])
+    if pair_consec:
+        a, b = pair_consec
+        seen = {a: False, b: False}
+        reroll = [True, True, True]
+        for i, d in enumerate(dice):
+            if d in seen and not seen[d]:
+                reroll[i] = False
+                seen[d] = True
+        return reroll
+
+    # Rule 6: keep the highest, re-roll the rest.
+    best_i = max(range(3), key=lambda i: dice[i])
+    return [i != best_i for i in range(3)]
+
+
+def _bot_take_turn(player: Player, game: Optional[Game] = None) -> None:
+    """Bot plays the player's turn (G9: now reads the table to play to win).
+
+    Behavior:
+      * If `game` is None (used by isolated unit tests of the bot helper),
+        roll all three dice once and mark done — the legacy single-throw
+        behavior, preserved as a fallback.
+      * If `game` is provided, the bot reads `current_round_plays` to find
+        the highest combo to beat, then iteratively re-rolls within the
+        cycle's rhythm cap. Each iteration calls `_bot_pick_keepers` to
+        decide which dice to keep, and stops on any of:
+          - current rank strictly beats the target
+          - no throws left
+          - reached the rhythm cap (max_throws_this_round for non-starters,
+            or 1 for everyone under bank_rule=="sec" + CHARGE)
+          - already holding a 421 (ceiling)
+
+    On exit, `turn.rolls_left` reflects the actual throws used (mirrors the
+    human `done` handler) so the caller can read it for starter-rhythm lock.
+    """
+    turn = player.turn
+
+    # Fresh turn → take the first roll.
+    if turn.rolls_left == 3:
+        for i in range(3):
+            turn.dice[i] = random.randint(1, 6)
+        turn.rolls_left -= 1
+        turn.combo, turn.rank, turn.fiches = classify(turn.dice)
+
+    # Legacy path: no game context → one-shot roll, done.
+    if game is None:
+        turn.reroll = [False, False, False]
+        turn.rolls_left = 0
+        turn.done = True
+        return
+
+    # Target rank to beat: the highest rank among players who have already
+    # played this cycle. Bot wants strictly higher to avoid being the loser.
+    target_rank = 0
+    for p in game.players:
+        if p.id == player.id or not p.turn or not p.turn.done:
+            continue
+        if p.turn.rank > target_rank:
+            target_rank = p.turn.rank
+
+    # Per-turn cap. bank_rule=="sec" + CHARGE = single roll for everyone.
+    is_starter = player.id == game.round_starter_id
+    if game.phase == GamePhase.CHARGE and game.bank_rule == "sec":
+        max_throws_for_me = 1
+    elif not is_starter and game.max_throws_this_round > 0:
+        max_throws_for_me = game.max_throws_this_round
+    else:
+        max_throws_for_me = 3
+
+    while True:
+        rolls_used = 3 - turn.rolls_left
+        if turn.rank > target_rank and turn.rank > 0:
+            break
+        if turn.rolls_left <= 0:
+            break
+        if rolls_used >= max_throws_for_me:
+            break
+        if turn.combo == "421":
+            break
+
+        reroll = _bot_pick_keepers(turn.dice)
+        if not any(reroll):
+            break
+        for i, do_reroll in enumerate(reroll):
+            if do_reroll:
+                turn.dice[i] = random.randint(1, 6)
+        turn.rolls_left -= 1
+        turn.combo, turn.rank, turn.fiches = classify(turn.dice)
+
+    turn.reroll = [False, False, False]
+    turn.done = True
 
 
 async def _afk_timer(game: Game, player_id: str, game_id: str):
     """Wait afk_seconds then auto-play for the player if they still haven't acted."""
+    from copy import deepcopy
+
     await asyncio.sleep(game.afk_seconds)
     player = next((p for p in game.players if p.id == player_id), None)
     if not player or player.turn is None or player.turn.done:
         return
     if game.current_player() and game.current_player().id != player_id:
         return
+    # G2: snapshot BEFORE the bot mutates anything. If the human reconnects /
+    # acts during the grace window, we restore this snapshot and the bot's
+    # play is undone — they get to play their own turn from where they left off.
+    snapshot = deepcopy(player.turn)
     # Surface the AFK takeover separately from the bot's actual play so the table
     # sees who stepped away before the throw appears in the log.
     _log(
@@ -151,8 +322,20 @@ async def _afk_timer(game: Game, player_id: str, game_id: str):
         f"{player.name} est AFK — le bot prend la main.",
         name=player.name,
     )
-    _bot_take_turn(player)
+    _bot_take_turn(player, game)
     t = player.turn
+    # G9: if the bot is the starter, lock the rhythm based on how many throws
+    # it actually used. Mirrors the human `done` handler so the rest of the
+    # table inherits the correct cap for the cycle. Snapshot the prior value
+    # so handback can restore it if the human aborts.
+    prior_max_throws = game.max_throws_this_round
+    rhythm_locked_by_bot = False
+    if player_id == game.round_starter_id:
+        if game.phase == GamePhase.CHARGE and game.bank_rule == "sec":
+            game.max_throws_this_round = 1
+        else:
+            game.max_throws_this_round = max(3 - t.rolls_left, 1)
+        rhythm_locked_by_bot = True
     dice_sorted = sorted(t.dice, reverse=True)
     _log(
         game,
@@ -163,11 +346,70 @@ async def _afk_timer(game: Game, player_id: str, game_id: str):
         combo=t.combo,
         fiches=t.fiches,
     )
+    # G2: stash the snapshot + rhythm-restore info before broadcasting so a
+    # reconnect-driven abort race always finds it.
+    game.bot_handback_snapshots[player_id] = {
+        "turn": snapshot,
+        "max_throws_this_round": prior_max_throws if rhythm_locked_by_bot else None,
+        "log_events_len": len(game.log_events),
+        "log_len": len(game.log),
+    }
+    # Broadcast the bot's play immediately so the table sees what happened.
+    await manager.broadcast(game_id, game_state(game))
+    # Defer the cycle advance for the grace window. If the human aborts in
+    # time, `_abort_bot_handback` cancels this task and restores state.
+    task = asyncio.create_task(_finalize_bot_turn(game, player_id, game_id))
+    game.bot_handback_tasks[player_id] = task
+
+
+async def _finalize_bot_turn(game: Game, player_id: str, game_id: str):
+    """G2: after the bot's play sits visible for the grace window, run the
+    deferred advance + resolve + AFK-reschedule chain. If the human aborted
+    in the window this task is cancelled before it gets here."""
+    try:
+        await asyncio.sleep(BOT_HANDBACK_GRACE_SECONDS)
+    except asyncio.CancelledError:
+        return
+    # Drop our bookkeeping now — past this point, the turn is committed.
+    game.bot_handback_tasks.pop(player_id, None)
+    game.bot_handback_snapshots.pop(player_id, None)
     game.advance()
     if game.all_done():
         await _resolve_round(game)
     await manager.broadcast(game_id, game_state(game))
     _schedule_afk(game, game_id)
+
+
+def _abort_bot_handback(game: Game, player_id: str) -> bool:
+    """G2: cancel a pending bot-handback for this player and restore the turn
+    snapshot the bot was about to commit. Returns True if a handback was
+    actually aborted, False if there wasn't one pending (e.g. window already
+    expired). Caller is responsible for any post-restore broadcast / logging."""
+    task = game.bot_handback_tasks.pop(player_id, None)
+    snapshot = game.bot_handback_snapshots.pop(player_id, None)
+    if task is None or snapshot is None:
+        return False
+    if not task.done():
+        task.cancel()
+    player = next((p for p in game.players if p.id == player_id), None)
+    if player is not None:
+        player.turn = snapshot["turn"]
+    # Restore the rhythm if the bot's play locked it as starter.
+    if snapshot.get("max_throws_this_round") is not None:
+        game.max_throws_this_round = snapshot["max_throws_this_round"]
+    # Roll back the AFK takeover + bot-turn log entries so the human's
+    # reclaimed turn isn't shadowed by stale event banners.
+    new_log_len = snapshot.get("log_len", len(game.log))
+    new_events_len = snapshot.get("log_events_len", len(game.log_events))
+    del game.log[new_log_len:]
+    del game.log_events[new_events_len:]
+    _log(
+        game,
+        "log_bot_handback",
+        f"{player.name if player else player_id} reprend la main.",
+        name=player.name if player else "",
+    )
+    return True
 
 
 async def _afk_initial_timer(game: Game, player_id: str, game_id: str):
@@ -196,10 +438,21 @@ async def _afk_initial_timer(game: Game, player_id: str, game_id: str):
 
 
 def _cancel_afk(game: Game, player_id: str):
-    """Cancel any running AFK timer for the given player."""
+    """Cancel any running AFK timer AND any pending bot-handback for the player.
+
+    G2: leave / kick / disconnect cleanup paths should drop both timers; the
+    handback task in particular would otherwise fire later and try to
+    `game.advance()` on behalf of a player who's no longer at the table.
+    Restoration is NOT performed here — caller intent is "this slot is gone",
+    not "the human is back."
+    """
     task = game.afk_tasks.pop(player_id, None)
     if task:
         task.cancel()
+    handback = game.bot_handback_tasks.pop(player_id, None)
+    if handback and not handback.done():
+        handback.cancel()
+    game.bot_handback_snapshots.pop(player_id, None)
 
 
 async def _afk_tiebreak_timer(game: Game, player_id: str, game_id: str):
@@ -246,10 +499,12 @@ async def _afk_tiebreak_timer(game: Game, player_id: str, game_id: str):
 def _schedule_afk(game: Game, game_id: str):
     """Start AFK timers for the players who need to act in the current phase."""
     if not game.afk_bot:
+        game.afk_started_at = None
         return
     if game.phase == GamePhase.INITIAL_ROLL:
         # Each player needs to roll once; one timer per pending player. Skip slots
         # that already have a live task (covers both first-roll and tie re-rolls).
+        game.afk_started_at = None
         for p in game.players:
             if game.initial_rolls.get(p.id) is not None:
                 continue
@@ -262,19 +517,24 @@ def _schedule_afk(game: Game, game_id: str):
     if game.phase == GamePhase.TIEBREAK and game.tiebreak:
         next_pid = game.tiebreak.get("next_pid")
         if not next_pid:
+            game.afk_started_at = None
             return
         _cancel_afk(game, next_pid)
         task = asyncio.create_task(_afk_tiebreak_timer(game, next_pid, game_id))
         game.afk_tasks[next_pid] = task
+        game.afk_started_at = int(time.time() * 1000)
         return
     if game.phase not in (GamePhase.CHARGE, GamePhase.DECHARGE):
+        game.afk_started_at = None
         return
     current = game.current_player()
     if not current:
+        game.afk_started_at = None
         return
     _cancel_afk(game, current.id)
     task = asyncio.create_task(_afk_timer(game, current.id, game_id))
     game.afk_tasks[current.id] = task
+    game.afk_started_at = int(time.time() * 1000)
 
 
 @router.post("/api/create")
@@ -422,6 +682,12 @@ async def _dispatch(
     "keep listening". An exception here is caught by ``websocket_endpoint`` and
     logged without dropping the connection.
     """
+    # G2: a play action arriving from a player whose bot turn is still in the
+    # grace window means the human is back at the keyboard. Abort the deferred
+    # advance and restore the snapshot BEFORE the handler reads/mutates state.
+    if action in _HANDBACK_PLAY_ACTIONS and player_id in game.bot_handback_tasks:
+        _abort_bot_handback(game, player_id)
+
     if action == "start":
         if game.phase != GamePhase.WAITING:
             return None
@@ -775,6 +1041,9 @@ async def websocket_endpoint(
 
     await manager.connect(game_id, ws, player_id)
     player.connected = True
+    # G2: a reconnect inside the bot-handback grace window aborts the deferred
+    # advance and restores the human's pre-bot turn before they even act.
+    _abort_bot_handback(game, player_id)
     await manager.broadcast(game_id, game_state(game))
 
     try:
