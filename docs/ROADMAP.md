@@ -1,3 +1,4 @@
+
 # 421 Bistro — Roadmap
 
 Living checklist of planned work. The intent is to capture everything we've discussed so nothing slips, group items by readiness, and keep one source of truth for "what's next." Update an item's status when picking it up; move it down to **Done** when it ships.
@@ -94,7 +95,7 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 - Consider a CSS grid: `[ticker 280] | [piste 1fr] | [log 320]` on wide screens, stacked on mobile.
 **Acceptance:** On a 1440-wide screen, the piste fills > 60% of the available width, dice are clearly readable without leaning in, log is still visible.
 
-### G15. Visible turn-rhythm + throws indicator
+### G15. (DONE — pending PR merge) Visible turn-rhythm + throws indicator
 **Why:** Reported. Today the player sees only the `RollDots` (3 small dots) and a small "N lancers restants" line. They don't see explicitly: "the starter set the rhythm at N throws, you're on throw M of N." This makes the bank-rule + free-rythm semantics opaque.
 **Scope:**
 - Top panel: new compact `RhythmIndicator` showing:
