@@ -26,3 +26,13 @@ def _disable_rate_limit():
     limiter.enabled = False
     yield
     limiter.enabled = True
+
+
+@pytest.fixture(autouse=True)
+def _zero_validate_hold(monkeypatch):
+    """G56: collapse the 1.5s post-validate hold so tests don't pay the
+    sleep cost on every cycle-advance. The advance itself still fires —
+    sleep(0) yields once but doesn't delay. Tests that observe the *held*
+    state read the broadcast before the advance broadcast.
+    """
+    monkeypatch.setattr("app.game.ws.HUMAN_VALIDATE_HOLD_SECONDS", 0)
