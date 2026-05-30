@@ -282,7 +282,13 @@ def test_keep_action_toggles_reroll_flag(tc):
 
 
 def test_done_action_marks_turn_done_and_advances(tc):
-    """`done` flips turn.done True and advances current_index."""
+    """`done` flips turn.done True and advances current_index.
+
+    G56: `done` now broadcasts twice — first the held state (turn.done=True,
+    dice still visible, viewer hasn't advanced) then the post-hold advance
+    state. We assert against the second frame to verify both halves of the
+    flow ran.
+    """
     gid = _create_room(tc)
     host = _join(tc, gid, "Alice")
     other = _join(tc, gid, "Bob")
@@ -293,7 +299,12 @@ def test_done_action_marks_turn_done_and_advances(tc):
     with tc.websocket_connect(f"/ws/{gid}/{host}") as ws:
         _recv(ws)
         ws.send_text(json.dumps({"action": "done"}))
-        state = _recv(ws)
+        held = _recv(ws)  # G56 held frame: done=True but not yet advanced
+        state = _recv(ws)  # post-hold frame: advanced to next player
+
+    me_held = next(p for p in held["players"] if p["id"] == host)
+    assert me_held["turn"]["done"] is True
+    assert held["current_player_id"] == host  # held — not yet advanced
 
     me = next(p for p in state["players"] if p["id"] == host)
     assert me["turn"]["done"] is True

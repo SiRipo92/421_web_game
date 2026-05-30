@@ -131,6 +131,14 @@ _MAX_WS_MSG_BYTES = 1024
 # common "really AFK" case; long enough that a reconnect + click fits.
 BOT_HANDBACK_GRACE_SECONDS = 3
 
+# G56: pause between a human turn validating (manual done, auto-validate, or
+# tiebreak final throw) and the cycle advance. Without this, the validated
+# dice flash off-screen before the player can read what they rolled — the
+# right-side journal still records it, but the player's eye is on the piste.
+# Mirrors G2's bot-handback grace on the human side, but shorter — humans
+# don't need a "reclaim" window, just a beat to register the result.
+HUMAN_VALIDATE_HOLD_SECONDS = 1.5
+
 # G2: play actions that should trigger handback abort when arriving from a
 # player whose bot turn is still in the grace window. `leave` and `kick` are
 # intentionally excluded — neither implies the player is reclaiming their turn.
@@ -467,6 +475,20 @@ def _cancel_afk(game: Game, player_id: str):
     # leave a stale entry that would mis-fire `log_afk_return` if the
     # player_id were ever recycled.
     game.afk_session.discard(player_id)
+
+
+async def _validate_hold(game: Game, game_id: str) -> None:
+    """G56: broadcast the validated state then hold so the player can read
+    what they just rolled before the cycle advances.
+
+    Caller has already mutated `turn.done = True` and emitted the `log_turn`
+    event but has NOT yet called `game.advance()` / `_resolve_round`. We
+    broadcast the held state (dice visible, turn marked done) and sleep —
+    the caller resumes after `await` and runs the advance/resolve mutations,
+    then broadcasts again.
+    """
+    await manager.broadcast(game_id, game_state(game))
+    await asyncio.sleep(HUMAN_VALIDATE_HOLD_SECONDS)
 
 
 async def _afk_tiebreak_timer(game: Game, player_id: str, game_id: str):
@@ -856,6 +878,12 @@ async def _dispatch(
                 combo=t.combo,
                 fiches=t.fiches,
             )
+            # G56: hold the validated dice on the piste so the player can
+            # actually read the auto-validated throw before the board advances.
+            # This is the path where the original complaint hits hardest —
+            # max-throws-reached fires synchronously after the roll, with no
+            # intervening human action.
+            await _validate_hold(game, game_id)
             game.advance()
             if game.all_done():
                 await _resolve_round(game)
@@ -908,6 +936,9 @@ async def _dispatch(
             combo=t.combo,
             fiches=t.fiches,
         )
+        # G56: hold the validated dice on the piste for a beat so the player
+        # actually sees what they rolled before the cycle moves on.
+        await _validate_hold(game, game_id)
         game.advance()
         if game.all_done():
             await _resolve_round(game)
@@ -942,7 +973,11 @@ async def _dispatch(
         tied = game.tiebreak["tied_pids"]
         idx = tied.index(player_id) + 1
         if idx >= len(tied):
+            # G56: this throw was the final one of the tiebreak — hold the
+            # dice on-piste so the player can see their result before the
+            # resolution + cycle advance overwrite the visible state.
             game.tiebreak["next_pid"] = None
+            await _validate_hold(game, game_id)
             await _resolve_tiebreak(game)
         else:
             game.tiebreak["next_pid"] = tied[idx]
