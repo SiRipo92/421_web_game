@@ -187,6 +187,136 @@ class TestBotTakeTurnGameAware:
         assert starter.turn.rolls_left == 2
 
 
+class TestBotStarterFloor:
+    """G55: a starter bot must not commit on a basic figure when it has throws
+    available. Reported in playtest: the bot accepted 5-3-2 as starter because
+    `rank > target_rank (0)` evaluated true for any non-zero rank — handing
+    the rhythm at a basic and forcing followers to merely tie or exceed it.
+    """
+
+    def _make_starter_only_game(self) -> tuple[Game, Player]:
+        """Build a 1-player CHARGE game where the bot is the round starter
+        and no other player has played (target_rank == 0)."""
+        bot = Player(id="s1", name="BotStarter")
+        bot.turn = PlayerTurn()  # fresh, rolls_left=3
+        game = Game(
+            id="GAME5555",
+            players=[bot],
+            phase=GamePhase.CHARGE,
+            round_starter_id="s1",
+            current_index=0,
+            max_throws_this_round=3,
+            afk_bot=False,
+            bank_rule="free",
+        )
+        return game, bot
+
+    def test_starter_does_not_commit_on_basic_5_3_2(self, monkeypatch):
+        """The exact case the user reported: first throw lands on 5-3-2
+        (basic, rank 532). Bot should re-roll instead of accepting.
+        """
+        # Sequence: first roll fills [5, 3, 2]; _bot_pick_keepers rule 5
+        # (consecutive 3 & 2) returns reroll mask [True, False, False] so
+        # the next call refills only position 0. We seed enough values to
+        # cover up to 3 throws.
+        values = iter([5, 3, 2, 4, 6, 1, 2, 3, 4])
+        monkeypatch.setattr("app.game.ws.random.randint", lambda a, b: next(values))
+
+        game, bot = self._make_starter_only_game()
+        _bot_take_turn(bot, game)
+
+        # Used at least 2 throws — didn't commit on the basic first roll.
+        assert (3 - bot.turn.rolls_left) >= 2
+
+    def test_starter_commits_on_suite(self, monkeypatch):
+        """First throw lands on 4-3-2 (suite, rank 1200, above floor 1000).
+        Bot should stop — committing to a suite is reasonable as starter."""
+        values = iter([4, 3, 2])
+        monkeypatch.setattr("app.game.ws.random.randint", lambda a, b: next(values))
+
+        game, bot = self._make_starter_only_game()
+        _bot_take_turn(bot, game)
+
+        # Used exactly 1 throw — stopped at the suite.
+        assert bot.turn.rolls_left == 2
+        assert bot.turn.combo == "234"
+
+    def test_starter_commits_on_421_ceiling(self, monkeypatch):
+        """First throw is 4-2-1 — the absolute ceiling. Bot stops immediately
+        (ceiling check fires before any other branch)."""
+        values = iter([4, 2, 1])
+        monkeypatch.setattr("app.game.ws.random.randint", lambda a, b: next(values))
+
+        game, bot = self._make_starter_only_game()
+        _bot_take_turn(bot, game)
+
+        assert bot.turn.combo == "421"
+        assert bot.turn.rolls_left == 2
+
+    def test_starter_basic_uses_remaining_throws(self, monkeypatch):
+        """If all three throws produce only basics, bot stops after the cap
+        — not earlier, even though every state is `rank > target_rank == 0`.
+        """
+        # Three rolls all producing basics — bot keeps re-rolling, eventually
+        # capped by max_throws_for_me. We don't care what the final dice are.
+        values = iter([6, 5, 3, 6, 4, 3, 5, 4, 2, 6, 5, 4])  # enough for any reroll pattern
+        monkeypatch.setattr("app.game.ws.random.randint", lambda a, b: next(values))
+
+        game, bot = self._make_starter_only_game()
+        _bot_take_turn(bot, game)
+
+        # Bot exhausted throws (rolls_left == 0) OR stopped on a non-basic.
+        # Either way, it shouldn't have stopped at throws_used == 1 with a basic.
+        used = 3 - bot.turn.rolls_left
+        committed_basic = bot.turn.rank < 1000
+        assert not (used == 1 and committed_basic), (
+            f"Bot committed on a basic after 1 throw: combo={bot.turn.combo}, rank={bot.turn.rank}"
+        )
+
+
+class TestBotDecisionLog:
+    """G55: every game-aware bot turn emits a `log_bot_decision` event so the
+    bot's reasoning is inspectable in the journal.
+    """
+
+    def test_decision_event_emitted(self, monkeypatch):
+        values = iter([4, 3, 2])  # commit on the suite
+        monkeypatch.setattr("app.game.ws.random.randint", lambda a, b: next(values))
+
+        bot = Player(id="s1", name="BotPlayer")
+        bot.turn = PlayerTurn()
+        game = Game(
+            id="DECISN01",
+            players=[bot],
+            phase=GamePhase.CHARGE,
+            round_starter_id="s1",
+            current_index=0,
+            max_throws_this_round=3,
+            afk_bot=False,
+            bank_rule="free",
+        )
+        _bot_take_turn(bot, game)
+
+        decisions = [e for e in game.log_events if e.get("key") == "log_bot_decision"]
+        assert len(decisions) == 1
+        d = decisions[0]
+        assert d["name"] == "BotPlayer"
+        assert d["combo"] == "234"
+        assert d["throws"] == 1
+        assert d["target"] == 0
+        assert d["reason"] == "starter_floor_met"
+        assert d["is_starter"] is True
+
+    def test_legacy_path_no_decision_event(self):
+        """`_bot_take_turn(player)` with no game context (unit-test legacy
+        path) must not crash and must not try to emit an event — there's
+        no game to write to."""
+        bot = Player(id="b1", name="UnitTestBot")
+        bot.turn = PlayerTurn()
+        _bot_take_turn(bot)  # game=None
+        assert bot.turn.done is True
+
+
 class TestBotHandback:
     """G2: cancelling a pending bot turn restores the human's snapshot."""
 
