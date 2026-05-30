@@ -1053,37 +1053,43 @@ function MatchEndBanner({ t, name, count, onClose }) {
 }
 
 function RhythmIndicator({ t, isMyTurn, isStarter, hasRolled, rollsUsed, maxThrows, bankRule }) {
-  // Two pieces of info we want surfaced:
-  //   1. The rhythm cap for this cycle (locked once the starter validates)
-  //   2. The current player's progress against it
-  // We keep it compact so it sits next to the existing RollDots without crowding.
-  const rhythmLocked = !isStarter || rollsUsed > 0  // starter sets it on first action
-  const cap = bankRule === 'sec' ? 1 : maxThrows
-  const youUsed = isMyTurn ? rollsUsed : 0
+  // Surfaces three things in one compact pill:
+  //   1. Bank rule (Sec / Libre) — eyebrow line, always visible
+  //   2. Whether the rhythm is still "open" (starter pre-roll in libre rooms)
+  //   3. Your progress (M/N) when it's your turn, or the locked cap when spectating
+  const isSec = bankRule === 'sec'
+  const cap = isSec ? 1 : maxThrows
+  const ruleLabel = isSec ? t('rhythm_bank_sec') : t('rhythm_bank_libre')
+  const starterStillFree = isStarter && isMyTurn && !hasRolled && !isSec
+
+  let status
+  if (starterStillFree) {
+    status = t('rhythm_free')
+  } else if (isMyTurn) {
+    status = t('rhythm_you_progress', { used: rollsUsed, cap })
+  } else {
+    status = t('rhythm_cap_max', { cap })
+  }
 
   return (
     <div
-      aria-label={t('rhythm_label')}
+      aria-label={`${t('rhythm_label')} · ${ruleLabel}`}
       style={{
         display: 'flex',
         flexDirection: 'column',
         gap: 2,
-        padding: '0.35rem 0.75rem',
+        padding: '0.35rem 0.85rem',
         background: 'var(--paper-deep)',
         border: '1px solid var(--rule)',
         borderRadius: 999,
-        minWidth: 110,
+        minWidth: 120,
       }}
     >
       <span className="eyebrow" style={{ fontSize: '0.6rem', color: 'var(--ink-mute)' }}>
-        {t('rhythm_label')}
+        {t('rhythm_label')} · {ruleLabel}
       </span>
       <span className="mono" style={{ fontSize: '0.85rem', fontWeight: 700 }}>
-        {!rhythmLocked && isStarter && !hasRolled
-          ? t('rhythm_free')
-          : isMyTurn
-          ? `${youUsed}/${cap}`
-          : `${cap}`}
+        {status}
       </span>
     </div>
   )
