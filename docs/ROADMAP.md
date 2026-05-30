@@ -307,6 +307,118 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 **Acceptance:** No instance of `round` or `set` in the code that refers to user-facing terminology means something different from this doc.
 **Dependencies:** Best bundled with R1 + R2 so it's one rename, not several.
 
+### G44. Fix: spurious "sits out" log at match-end
+**Why:** Reported during playtest. In a 2-player game, after décharge resolved with TheWitch holding 11 (manché) and Julien at 0, the log read « Julien is out of chips — sitting out until the next match. » immediately followed by the next match starting. Julien isn't sitting out — he won the manche; the next match starts with fresh chips for everyone. The "sits out" message is irrelevant (and misleading) when the same cycle that emptied a player also triggered the match-end.
+**Scope:**
+- `_finalize_cycle` in `app/game/logic.py` currently adds the zero-token player to `out_of_match` *before* the `manche` check that resets chips. Two clean fixes to weigh:
+  - (a) reorder: detect a manché winner first; if the cycle ends the match, skip the `log_player_sits_out` emit (and don't add to `out_of_match`) for any player who'd be reset on the new match anyway.
+  - (b) keep the order but, when the manché check fires, splice out any `log_player_sits_out` events that landed in the same cycle and clear the `out_of_match` entries that the new match would reset.
+- Prefer (a) — fewer state mutations to walk back. Verify nothing downstream depends on `out_of_match` being populated transiently within `_finalize_cycle`.
+- Add a regression test in `tests/unit/` that simulates a 2-player end-of-décharge where one player hits 0 and the other hits 11, and asserts no `log_player_sits_out` event lands in the resulting log.
+**Acceptance:** Two-player game; player A reaches 11 (manché) while player B reaches 0 in the same cycle. The journal shows the manché entry and a fresh-match start, but no "sits out" line for player B.
+**Dependencies:** None. Pure bug fix.
+
+### G45. Host: edit room rules mid-game (apply after current match)
+**Why:** The room owner today only has a « View room rules » affordance during play — the rules panel is read-only. Reported as a gap: the host should be able to *adjust* the room rules (e.g. bank rule, max throws, AFK timeout, spectators on/off) while a match is in progress, with the change taking effect after the current match/round finishes so live play isn't disrupted mid-cycle.
+**Scope:**
+- Backend: new WS action `update_room_rules {bank_rule?, max_throws?, afk_seconds?, afk_bot?, spectators?}` — host-only. Validates the partial payload against the room-config schema, stores the diff in a `Game.pending_room_rules` dict, broadcasts the pending changes so the UI can preview them.
+- Apply on match-end: in `_finalize_cycle` (or wherever a new match is bootstrapped after a manché → round-point reset), if `pending_room_rules` is non-empty, merge it into the live `Game.room` and clear the pending dict. Emit a `log_room_rules_updated` event so players see what changed.
+- Frontend: in `RoomSettingsPanel`, when the viewer is the host AND the game is in-progress, switch the read-only fields to editable; a « Sauvegarder pour la prochaine manche » CTA fires the new WS action. Visual badge on the panel — « En attente : prendra effet à la prochaine manche » — when `pending_room_rules` is set.
+- i18n keys: `room_rules_edit_cta`, `room_rules_pending_banner`, `log_room_rules_updated`.
+- Tests: host can update; non-host rejected; changes don't take effect until match-end; multiple consecutive edits stack into the same pending diff (last write wins per field).
+**Acceptance:** Host opens room settings mid-match, flips libre → sec, saves. A banner shows « Prendra effet à la prochaine manche ». When the current manché resolves and a new match starts, the rhythm cap moves to 1 and the log entry confirms the change.
+**Dependencies:** None. Builds on the existing `RoomSettingsPanel`. Pairs naturally with [[G15]].
+
+### G46. In-game language toggle (FR ↔ EN inside the game room)
+**Why:** Reported during playtest. The TopBar carries the FR/EN switcher on every other page, but the game room hides the TopBar (intentional — the action bar takes precedence), and there's no in-room equivalent. A player who landed on the wrong language can't switch mid-game without leaving the room.
+**Scope:**
+- Add a compact `LangSwitch` to the game-room action bar (or the room settings panel header) — a 2-state toggle showing « FR » / « EN ». Reuses `useLang().setLang` and the existing localStorage persistence.
+- Placement: prefer the bottom action bar so it's adjacent to the player's other controls (Quitter, ⚙ Room rules). Keep it small so it doesn't compete with primary CTAs.
+- If the user is logged in, mirror the existing `updateMe({lang_pref})` background write that the TopBar toggle does — so the per-account preference stays in sync. See [[G26]] for the broader login-time sync.
+**Acceptance:** A player in any game room can flip FR ↔ EN; all UI strings + log events re-render in the chosen language; the choice persists across reloads. Logged-in users see their account's `lang_pref` update.
+**Dependencies:** None. Light-touch UI change.
+
+### G47. Local player anchored at the bottom of the piste
+**Why:** Reported during playtest. The piste shows all players' seats arranged around the table, but the *viewer's* seat isn't anchored — it can land anywhere on the ring depending on turn order. The user wants the local player to always sit at the bottom (closest to the action bar) so they can identify themselves at a glance, like every poker / card-game UI does.
+**Scope:**
+- Frontend: in `Game.jsx`'s `PisteSeat` rendering loop, compute the player order so the local `playerId` is always at index 0 of the visual ring; other players fill the remaining seats in their original turn-order. The bottom slot in the piste maps to index 0.
+- Verify with 2, 3, 4, and 5 players that the ring stays geometrically sensible (the viewer always at the south position, others distributed clockwise from there preserving turn order).
+- Add a subtle "you" indicator (e.g. a thin brass underline or an « ↓ Vous » caret) on the bottom seat to reinforce identification, especially in 2-player rooms where the visual asymmetry alone might not read.
+- Don't break the existing turn-indicator (active-player glow) — that still follows the current player wherever they sit on the rotated ring.
+**Acceptance:** Joining a room from any account always renders that account's seat at the bottom of the piste; the other player(s) sit above. Switching accounts in two browser windows shows each viewer their own seat at the bottom.
+**Dependencies:** Pairs nicely with [[G14]] (piste sizing overhaul) — both touch the piste geometry. Worth bundling if [[G14]] is still in flight.
+
+### G48. Public-rooms list pagination
+**Why:** The public/open-rooms list today renders every visible room in one shot. With even modest growth (50–100 concurrent open rooms) this becomes a perf cliff (DOM size + initial fetch + render thrash on each WS room-list update) AND a UX cliff (scrolling through dozens of identical cards isn't logical browsing). Pagination + a smarter card layout keep both bounded.
+**Scope:**
+- Backend: `GET /api/games/public` paginates — `?page=1&page_size=12` (default 12 per page; cap `page_size` at 24). Response: `{items: [...], page, page_size, total, has_more}`. Add `ORDER BY created_at DESC` for deterministic ordering. Index on `(is_private, phase, created_at)` to keep the count + slice fast.
+- WS broadcast: instead of pushing the full list on every change, push a `public_rooms_changed {page_hint?}` event; the client re-fetches the current page when it lands. Avoids broadcasting growing payloads. Optional v1: keep the existing full-list broadcast but bump it to a small enough fixed window (top 24 by recency) so the wire never gets huge.
+- Frontend: `Lobby.jsx` (or wherever `/rooms` lives) renders a paginated list with « ‹ Précédent · 1 / 5 · Suivant › » controls. Cards stay compact — host avatar, room name, phase pill, player count `N/Max`, bank rule badge, AFK config indicator, « Rejoindre » CTA. 3-column grid on desktop, single column on mobile.
+- Filter / sort affordances (defer to v2 if scope creeps): filter by bank rule (sec/libre), by phase (waiting/in-play), by player count. Sort options: newest / fewest-players-needed-to-fill / room name.
+- Empty state: « Aucune table publique pour le moment — créez la vôtre ! » with a primary CTA to the create-room flow.
+- Tests: backend pagination — first/middle/last page, page beyond `total`, page_size clamping. Frontend — page changes trigger re-fetch, WS change refreshes current page, pagination disabled when `total ≤ page_size`.
+**Acceptance:** 100 open rooms exist; the lobby page loads in < 200 ms, shows page 1 of ~9 with 12 cards, pagination controls work, WS room-state changes refresh only the visible window.
+**Dependencies:** None. Pair-friendly with [[G11]] (single-player waiting modal) — both touch room-state UX.
+
+### G49. Password field show/hide toggle (login + registration)
+**Why:** Standard accessibility / usability affordance: an eye icon inside the password input lets the user reveal what they typed before submitting. Reduces failed-login frustration (typos in masked input), helps users on touch keyboards verify their entry. Today both `/login` and `/register` mask the input with no reveal option.
+**Scope:**
+- Promote the existing password `<input>`s into a small reusable component `PasswordField.jsx` (in `frontend/src/components/shared/`) that wraps an `<input>` + an absolutely-positioned eye/eye-off icon button at the right edge. Toggling the button flips `type` between `"password"` and `"text"`.
+- Accessibility: `aria-pressed` on the toggle, `aria-label="Afficher le mot de passe"` / `"Masquer le mot de passe"` (i18n keys `password_show` / `password_hide`), focus stays on the input when toggling. Keyboard-only users reach the toggle via Tab.
+- Icon: SVG inline (no new dep). Lucide-style eye + eye-off paths inlined for consistency with the rest of the codebase (the project already uses inline SVGs).
+- Wire into `LoginForm` + `RegisterForm` (the password + confirm-password fields). Same component, no duplication.
+- Don't auto-reveal — default to masked; user opt-in only.
+- Consider a small affordance for "your password is currently visible" (e.g. soft red ring around the field) so users don't accidentally screenshot or share-screen a visible password.
+- Tests: toggling flips the input type; aria-label updates; focus stays on the input; default state is masked on every form mount (don't persist).
+**Acceptance:** On both login + register pages, every password field has an eye icon at the right edge. Clicking reveals the current value; clicking again re-masks. Keyboard + screen-reader accessible.
+**Dependencies:** None.
+
+### G50. « En Direct » ticker — dedup repeats, allow scroll, raise card cap
+**Why:** Reported during playtest. The commentary ticker filled up with six near-identical lines (`TheWitch is AFK — the bot takes over.` · `Julien is AFK — the bot takes over.` · repeat × 6). Two compounding problems: (1) `CommentaryTicker` doesn't coalesce consecutive events with the same `(key, name)` — every AFK timeout creates a brand-new card; (2) both the outer container and the inner card column use `overflow: hidden` with no scroll fallback, so when content does exceed the slot it just clips. Combined effect: the panel becomes a wall of duplicates that scroll *off the screen* with no way for the player to read what they missed.
+**Scope:**
+- **Dedup pass.** Inside `CommentaryTicker.useMemo`, walk events newest-first and collapse runs where the current and previous accepted card share the same `(key, name)` (or `(key, names)` for plural events). Annotate the surviving card with a `repeat: N` count when N > 1. The card UI renders « X is AFK — the bot takes over. (×3) » when `repeat > 1`. Non-adjacent recurrences stay as separate cards — only consecutive runs collapse.
+- **Scroll-on-overflow.** Bump `MAX_CARDS` from 5 to ~10, switch the inner card column from `overflow: hidden` to `overflow-y: auto`, give it a sensible `flex: 1` so it claims the remaining vertical space inside the ticker's parent column. The outer container keeps `overflow: hidden` for the slide-in animation framing; the inner list scrolls.
+- **Subtle scroll affordance.** Tiny brass scrollbar styling (matches the existing right-side log) so the user can tell content extends below.
+- **Auto-scroll behavior.** When a new card lands, scroll the inner list back to the top (newest at top) — don't strand the player in the middle of old cards.
+- **Edge case.** The repeat-counter should reset when the active player rotates: « TheWitch AFK · Julien AFK · TheWitch AFK » should stay three cards, not collapse to two with `repeat: 2` on the first. The collapse key already includes `name`, so this falls out for free, but explicitly test it.
+- Tests (frontend, if a vitest harness exists; otherwise document a manual checklist):
+  - 5 identical AFK events → 1 card with `(×5)`.
+  - 3 mixed AFK events (alternating names) → 3 separate cards.
+  - 12 distinct events → 10 cards visible; oldest 2 scroll into view.
+**Acceptance:** Playing a match where both players AFK multiple times produces a ticker showing at most one card per consecutive run (with a count), the inner list scrolls when content overflows, and the most recent event always sits at the top.
+**Dependencies:** None. Touches only `CommentaryTicker.jsx` + its styles.
+
+### G51. SelfPlayToast — bigger, centered, more presence
+**Why:** Reported during playtest. The post-turn toast (G23) lands as a 360px-wide card pinned to the bottom-right corner. Easy to miss on a 1440-wide screen, and the bistrot-voice content (« Vous avez joué [4-2-1] → 421 ») is one of the moments the player *should* feel addressed. The G13 manché banner already lands centered over the piste; the self-play toast should follow the same visual language — large, anchored over the piste, brief.
+**Scope:**
+- Reposition the toast from `position: fixed; right: 1.2rem; bottom: 1.2rem` to a centered overlay anchored to the *piste container* (not the viewport): `position: absolute; left: 50%; transform: translateX(-50%); bottom: 8%` inside the piste. Falls back to a centered fixed overlay on mobile (single-column layout).
+- Bump width from 360 → ~520 px, padding from `0.85rem 1.1rem` → `1.3rem 1.8rem`, fontSize from the current ~0.9 rem body → ~1.05 rem (eyebrow ~0.72 rem). Keeps the brass left-border + paper background — same vocabulary as the existing banner just larger.
+- Keep auto-dismiss at ~4 s with click-to-dismiss. Add a subtle bottom progress bar that drains over the 4 s so the player feels the urgency without surprise dismissal.
+- Don't fight with the G13 match-end banner: if both fire on the same frame (rare — manché + self-play turn coincide), the manché banner wins and the self-play toast is suppressed. Add a guard in `Game.jsx` where `selfPlay` is set: skip the set when `matchEnd` is also non-null.
+- Tests: toast renders centered over the piste; click dismisses; auto-dismiss at 4 s; manché banner suppresses the toast.
+**Acceptance:** After a self-play turn (or AFK-bot turn on your seat), a clearly readable banner appears centered over the piste with the rolled combo + chip outcome + next-up text; auto-dismisses cleanly.
+**Dependencies:** Should land alongside [[G14]] piste-sizing if that work moves — both depend on the piste container being a known size + position anchor.
+
+### G52. In-game typography pass — raise text scale against the piste
+**Why:** Reported. The piste dominates the screen at ~600 px+ wide, but most surrounding text (action bar, ticker cards, log entries, dice hints, RhythmIndicator) sits at 0.6–0.95 rem. Result: the page reads as a giant green table surrounded by tiny print, and players have to lean in to scan critical info during play. The fix isn't bigger fonts everywhere — it's a coordinated step up of the in-game UI scale so the *important* labels and status text feel readable from a meter away.
+**Scope:**
+- **Baseline shift.** Inside `Game.jsx`'s root, expose a CSS custom property `--game-ui-scale: 1.15` (configurable later via Room settings). All relative font sizes inside the game viewport multiply against this base. Cleanest path: wrap the game viewport in a `<div style={{ fontSize: 'calc(1rem * var(--game-ui-scale))' }}>` so every `rem`-based child scales together.
+- **Targeted bumps** that aren't `rem`-relative today:
+  - Action bar eyebrows: 0.62 → 0.78 rem
+  - Action bar serif lines: 1.05 → 1.2 rem
+  - Ticker card body: 0.82 → 0.95 rem
+  - Ticker card eyebrow: 0.62 → 0.7 rem
+  - RhythmIndicator body: 0.85 → 0.95 rem (eyebrow stays)
+  - Dice keep hint: 0.85 → 1 rem, weight 400 → 500 (overlaps with G16)
+  - Right-side log entries: ~0.82 → 0.95 rem; eyebrow 0.62 → 0.7 rem
+  - Player strip name: 0.95 → 1.1 rem
+- **Don't touch** the piste-internal labels (dice values, the central combo display) — those already scale with the piste itself.
+- **Verify against narrow widths.** Run at 1024 / 1280 / 1440 / 1920 viewport widths; if 1024 starts to feel cramped at scale 1.15, drop the scale to 1.08 there via a media query rather than killing the bump entirely.
+- **Theme audit.** Make sure the contrast ratios still meet WCAG AA at the larger sizes (they should, since size doesn't change color, but bigger weight on `dice_keep_hint` might tip a pale brass into low-contrast on light theme — eyeball it).
+- Pairs naturally with [[G14]] (piste-sizing) + [[G16]] (in-piste hint legibility) — both touch the same neighborhood.
+**Acceptance:** On a 1440-wide screen, every in-game label (action bar, ticker, log, dice hint, rhythm indicator) is comfortably readable without leaning in. The piste still dominates the layout but doesn't drown out the surrounding UI.
+**Dependencies:** None, but should ship after (or alongside) [[G16]] so the dice-hint changes aren't undone.
+
 ---
 
 ## Next
