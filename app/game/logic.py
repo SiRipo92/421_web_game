@@ -148,6 +148,11 @@ class Game:
     # from the snapshot taken just before the bot mutated it.
     bot_handback_tasks: dict = field(default_factory=dict, compare=False, repr=False)
     bot_handback_snapshots: dict = field(default_factory=dict, compare=False, repr=False)
+    # G50 follow-up: player IDs whose AFK timer has fired at least one bot turn
+    # for them. When they next resume a play action OUTSIDE the bot-handback
+    # grace window, we emit `log_afk_return` so the table sees them come back.
+    # The in-grace return path uses `bot_handback_tasks` + `log_bot_handback`.
+    afk_session: set = field(default_factory=set, compare=False, repr=False)
 
     def current_player(self) -> Optional[Player]:
         """Return the player whose turn it is, skipping sat-out players.
