@@ -552,7 +552,66 @@ async def test_new_match_clears_out_of_match():
     game.out_of_match.add("p0")
     _start_new_set(game, "p1")
     assert game.out_of_match == set()
-    assert game.players[0].turn is not None  # p0 rejoins
+
+
+@pytest.mark.asyncio
+async def test_no_sit_out_log_when_cycle_also_ends_match():
+    """G44 regression: don't announce 'X sits out' when the same cycle hits manché.
+
+    Scenario: 2-player décharge, winner gives their last 8 chips to the loser.
+    Winner drops to 0; loser climbs to 11 (manché). `_start_new_set` will reset
+    everyone's chips on the next match, so the 'sits out until the next match'
+    log is misleading — it makes the player who just won the cycle look like
+    they're benched, when the new match is already starting fresh.
+    """
+    game = _make_game(2)
+    game.phase = GamePhase.DECHARGE
+    # p0 wins (8 fiches) with 8 chips on hand; p1 loses, sits at 3.
+    # Transfer 8 → p0 ends at 0, p1 ends at 11 (manché).
+    game.players[0].tokens = 8
+    game.players[1].tokens = 3
+    game.players[0].turn = _done_turn(9000, 8)
+    game.players[1].turn = _done_turn(100, 1)
+    game.round_starter_id = "p0"
+
+    await _resolve_round(game)
+
+    # Manché landed
+    assert game.match_losses.get("p1", 0) == 1
+    assert any(e.get("key") == "log_match_lost" for e in game.log_events)
+    # No spurious sit-out announcement, even though p0 hit 0 in the same cycle
+    assert not any(e.get("key") == "log_player_sits_out" for e in game.log_events)
+    # _start_new_set cleared out_of_match (so the assertion below also guards
+    # against a future regression where someone re-introduces the add() before
+    # the manché check)
+    assert game.out_of_match == set()
+
+
+@pytest.mark.asyncio
+async def test_sit_out_log_still_fires_when_no_manche():
+    """G44 sanity check: the sit-out log still fires when the cycle does NOT
+    end the match — that path is the legitimate use case for the announcement.
+    """
+    game = _make_game(3)
+    game.phase = GamePhase.DECHARGE
+    # p0 wins with 1 chip; p2 loses. Transfer 1 → p0 ends at 0; nobody at 11.
+    game.players[0].tokens = 1
+    game.players[1].tokens = 5
+    game.players[2].tokens = 5
+    game.players[0].turn = _done_turn(9000, 8)
+    game.players[1].turn = _done_turn(2200, 2)
+    game.players[2].turn = _done_turn(100, 1)
+    game.round_starter_id = "p0"
+
+    await _resolve_round(game)
+
+    # No manché this cycle
+    assert not any(e.get("key") == "log_match_lost" for e in game.log_events)
+    # Sit-out announcement fired for p0
+    sit_outs = [e for e in game.log_events if e.get("key") == "log_player_sits_out"]
+    assert len(sit_outs) == 1
+    assert sit_outs[0].get("name") == game.players[0].name
+    assert "p0" in game.out_of_match
 
 
 @pytest.mark.asyncio

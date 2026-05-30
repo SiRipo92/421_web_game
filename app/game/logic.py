@@ -466,7 +466,14 @@ async def _finalize_cycle(game: Game, next_starter_id: Optional[str]) -> None:
     """Common post-resolution work: sit-outs, match-end check, next cycle setup."""
     all_players = game.players
 
-    if game.phase == GamePhase.DECHARGE:
+    # G44: Detect a manché winner BEFORE announcing sit-outs. When the same
+    # cycle that empties a player also pushes someone to 11, `_start_new_set`
+    # below clears `out_of_match` and resets every player's chips — so any
+    # "sits out until the next match" announcement is misleading (the new
+    # match starts fresh on the very next line).
+    manche = next((p for p in all_players if p.tokens >= 11), None)
+
+    if not manche and game.phase == GamePhase.DECHARGE:
         for p in all_players:
             if p.tokens == 0 and p.id not in game.out_of_match:
                 game.out_of_match.add(p.id)
@@ -477,7 +484,6 @@ async def _finalize_cycle(game: Game, next_starter_id: Optional[str]) -> None:
                     name=p.name,
                 )
 
-    manche = next((p for p in all_players if p.tokens >= 11), None)
     if manche:
         ml_id = manche.id
         game.match_losses[ml_id] = game.match_losses.get(ml_id, 0) + 1
