@@ -533,6 +533,20 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 **Acceptance:** A player can follow the entire game without ever looking at the right column. The ticker tells them whose turn it is, what each played, the running score-to-beat, and the cycle outcome. When chat ships, the right column becomes the chat surface.
 **Dependencies:** [[item 8]] (chat), [[G34]] (AI moderation), [[G36]] (rate-limiter), [[G37]] (peer reporting) — all need to land before the right-column flip. The ticker enrichment can ship first, independent of chat, as a pure UX upgrade.
 
+### G60. Persist the game session across page refreshes
+**Why:** Reported during playtest. Refreshing the page mid-game drops the player back to an empty home/lobby instead of resuming their seat at the table. The backend already keeps the `Game` in-memory (it survives any single client refresh; the WS just closes and the player's `connected` flips False until reconnect), so the gap is purely client-side: the frontend doesn't remember which game it was just in, so after refresh it has nowhere to navigate.
+**Scope:**
+- **localStorage handshake.** When `Game.jsx` mounts with a valid `gameId` + `playerId` from the URL, write `{gameId, playerId, name, token}` to `localStorage.last_session` (TTL via a `created_at` timestamp; clear if older than ~6 h since rooms don't usually outlive that). When a `leave` action fires (or the game's `FINISHED` phase is reached), clear `last_session`.
+- **Home / Lobby rehydration.** On `/` (home) mount, check `localStorage.last_session`. If present + not stale, ping `GET /api/games/{gameId}` (a new lightweight endpoint that returns 200 with the game's phase + the player's `connected` flag, or 404 if the room is gone). If the room still exists AND the player is still in `game.players`, render a banner: « Reprendre votre partie en cours · {room_code} · {N} joueurs » with a primary CTA to navigate to `/game/{gameId}?pid={pid}` and a secondary "Quitter cette partie" that clears the session + posts an explicit leave.
+- **Direct-URL refresh** (already works partially): `/game/:gameId?pid=...` does preserve the pid through refresh, but the WS reconnect path must handle the case where the player's `connected` was False and re-engage them cleanly. Verify against current code; if there's a gap, the `websocket_endpoint` already calls `_abort_bot_handback` + broadcasts state on reconnect, which should be sufficient.
+- **Stale-session UX.** If the GET returns 404 (room dissolved) or the player isn't in the roster anymore, surface a one-time toast on home: « Votre dernière partie n'est plus active. » Clear localStorage.
+- **Guest token handling.** Guest sessions store the random `playerId` only — no JWT. Registered users also store the JWT, which can refresh-validate via `/auth/me` on mount; if the token is expired, clear the session.
+- **Tests:**
+  - Backend: new `GET /api/games/{game_id}/info` returns phase + connected map for valid game, 404 for missing.
+  - Frontend (manual): refresh during CHARGE → land back in the same game; refresh after `leave` → no rehydration banner; refresh after the room is dissolved → stale-session toast.
+**Acceptance:** A player in an active game refreshes their browser tab and returns to the same game state — same seat, same dice in front of them, same turn order. If the room ended/dissolved during their absence, they see a one-time explanatory toast and a clean home page.
+**Dependencies:** None for the v1 flow. Pairs with [[G11]] (single-player searching modal) — both target session continuity. Could later be extended to "reconnect across devices" but that needs proper auth-token-as-session-key.
+
 ---
 
 ## Next
