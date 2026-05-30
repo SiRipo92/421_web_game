@@ -805,46 +805,78 @@ function PisteSeat({ p, active, isSelf, x, y, t }) {
     <div style={{
       position: 'absolute', left: `${x}%`, top: `${y}%`,
       transform: 'translate(-50%, -50%)',
-      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
       pointerEvents: 'none',
     }}>
-      <Avatar name={p.name} userId={p.user_id} hasAvatar={p.has_avatar ?? false} active={active} isSelf={isSelf} size={avatarSize} />
-      <div style={{
-        background: active ? 'var(--ink)' : 'var(--paper-soft)',
-        color: active ? 'var(--paper)' : 'var(--ink)',
-        border: '1px solid var(--rule)',
-        padding: namePadding, borderRadius: 2,
-        fontFamily: 'var(--display)', fontWeight: 700, fontSize: nameSize,
-        whiteSpace: 'nowrap',
-        display: 'flex', alignItems: 'center', gap: 6,
-        boxShadow: active ? '0 4px 0 rgba(0,0,0,0.3)' : '0 2px 0 rgba(0,0,0,0.1)',
-        // G47: subtle brass underline on the viewer's seat to reinforce
-        // "this is you" alongside the rotation + sizing.
-        borderBottom: isSelf ? '3px solid var(--brass)' : undefined,
-      }}>
-        <span>{p.name}{isSelf ? ' ★' : ''}</span>
-        <ScorePips matchLosses={p.match_losses ?? 0} roundPoints={p.round_points ?? 0} active={active} />
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      {/* G53: when it's this seat's turn, the inner stack pulses (gentle
+          scale + brass glow) so the rotation is visible from across the
+          table. The wrapping div carries the animation so the absolute-
+          positioned outer transform stays untouched. */}
+      <div
+        className={active ? 'piste-seat piste-seat-active' : 'piste-seat'}
+        style={{
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+          transformOrigin: 'center center',
+        }}
+      >
+        <Avatar name={p.name} userId={p.user_id} hasAvatar={p.has_avatar ?? false} active={active} isSelf={isSelf} size={avatarSize} />
         <div style={{
-          fontFamily: 'var(--mono)', fontWeight: 700, fontSize: chipSize,
-          background: 'var(--paper-deep)', border: '1px solid var(--rule)',
-          padding: '2px 8px', borderRadius: 999, color: 'var(--ink-soft)',
-        }}>{p.tokens ?? 0} 🪙</div>
-        {p.turn?.done && p.turn.dice && (
-          <div style={{ display: 'flex', gap: 2 }}>
-            {p.turn.dice.map((v, i) => <Die key={i} value={v} mini />)}
-          </div>
-        )}
+          background: active ? 'var(--ink)' : 'var(--paper-soft)',
+          color: active ? 'var(--paper)' : 'var(--ink)',
+          border: '1px solid var(--rule)',
+          padding: namePadding, borderRadius: 2,
+          fontFamily: 'var(--display)', fontWeight: 700, fontSize: nameSize,
+          whiteSpace: 'nowrap',
+          display: 'flex', alignItems: 'center', gap: 6,
+          boxShadow: active ? '0 4px 0 rgba(0,0,0,0.3)' : '0 2px 0 rgba(0,0,0,0.1)',
+          // G47: subtle brass underline on the viewer's seat to reinforce
+          // "this is you" alongside the rotation + sizing.
+          borderBottom: isSelf ? '3px solid var(--brass)' : undefined,
+        }}>
+          <span>{p.name}{isSelf ? ' ★' : ''}</span>
+          <ScorePips matchLosses={p.match_losses ?? 0} roundPoints={p.round_points ?? 0} active={active} />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{
+            fontFamily: 'var(--mono)', fontWeight: 700, fontSize: chipSize,
+            background: 'var(--paper-deep)', border: '1px solid var(--rule)',
+            padding: '2px 8px', borderRadius: 999, color: 'var(--ink-soft)',
+          }}>{p.tokens ?? 0} 🪙</div>
+          {p.turn?.done && p.turn.dice && (
+            <div style={{ display: 'flex', gap: 2 }}>
+              {p.turn.dice.map((v, i) => <Die key={i} value={v} mini />)}
+            </div>
+          )}
+        </div>
       </div>
       {isSelf && t && (
         <div className="eyebrow" style={{
           fontSize: '0.6rem', color: 'var(--brass-deep)',
-          letterSpacing: '0.12em', marginTop: 2,
+          letterSpacing: '0.12em', marginTop: 2, textAlign: 'center',
         }}>
           ↓ {t('you_label_caret')}
         </div>
       )}
+      <style>{`
+        @keyframes pisteSeatPulse {
+          0%, 100% {
+            transform: scale(1);
+            filter: drop-shadow(0 0 0 transparent);
+          }
+          50% {
+            transform: scale(1.06);
+            filter: drop-shadow(0 0 10px var(--brass, rgba(212,171,103,0.7)));
+          }
+        }
+        .piste-seat-active {
+          animation: pisteSeatPulse 1.4s ease-in-out infinite;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .piste-seat-active {
+            animation: none;
+            filter: drop-shadow(0 0 8px var(--brass, rgba(212,171,103,0.7)));
+          }
+        }
+      `}</style>
     </div>
   )
 }
