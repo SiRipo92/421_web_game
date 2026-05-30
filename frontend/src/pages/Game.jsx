@@ -360,6 +360,7 @@ export function Game({ token }) {
               rollsUsed={rollsUsed}
               maxThrows={state.max_throws ?? 3}
               bankRule={state.room?.bank_rule}
+              phase={state.phase}
             />
             {/* G4: hide throw counter when the rhythm is locked at 1 (no choice
                 to display). Keep showing for the starter before they've set the
@@ -1052,15 +1053,22 @@ function MatchEndBanner({ t, name, count, onClose }) {
   )
 }
 
-function RhythmIndicator({ t, isMyTurn, isStarter, hasRolled, rollsUsed, maxThrows, bankRule }) {
+function RhythmIndicator({ t, isMyTurn, isStarter, hasRolled, rollsUsed, maxThrows, bankRule, phase }) {
   // Surfaces three things in one compact pill:
   //   1. Bank rule (Sec / Libre) — eyebrow line, always visible
   //   2. Whether the rhythm is still "open" (starter pre-roll in libre rooms)
   //   3. Your progress (M/N) when it's your turn, or the locked cap when spectating
-  const isSec = bankRule === 'sec'
-  const cap = isSec ? 1 : maxThrows
-  const ruleLabel = isSec ? t('rhythm_bank_sec') : t('rhythm_bank_libre')
-  const starterStillFree = isStarter && isMyTurn && !hasRolled && !isSec
+  //
+  // G54: the « sec » rule only constrains throws during CHARGE (bank
+  // distribution). Once the bank empties → DECHARGE, every player has the
+  // normal 3-throw allowance, so the eyebrow flips to LIBRE and the cap
+  // tracks `maxThrows` (the backend already enforces this — see
+  // `app/game/ws.py:272`). The `isSec` config persists across phases for
+  // future matches, but it's not in effect mid-DECHARGE.
+  const isSecActive = bankRule === 'sec' && phase === 'charge'
+  const cap = maxThrows
+  const ruleLabel = isSecActive ? t('rhythm_bank_sec') : t('rhythm_bank_libre')
+  const starterStillFree = isStarter && isMyTurn && !hasRolled && !isSecActive
 
   let status
   if (starterStillFree) {
