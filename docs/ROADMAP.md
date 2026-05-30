@@ -444,7 +444,7 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 **Acceptance:** A sec room's RhythmIndicator displays « SEC · 1 max » during CHARGE only; the moment the bank empties and DECHARGE begins, it switches to « LIBRE » with the actual throw cap.
 **Dependencies:** None — small follow-up to [[G15]].
 
-### G55. Bot strategy upgrade — probability-aware + decision-log
+### G55. (partially DONE — pending PR merge) Bot strategy upgrade — probability-aware + decision-log
 **Why:** Reported during playtest. The current bot accepts very low first-throw combos (e.g., `5-3-2`, a basic figure rank ≈ 5) when it's the round starter, because `_bot_take_turn`'s win check fires `turn.rank > target_rank and turn.rank > 0`. As the starter, `target_rank == 0`, so any non-zero rank trips the break and the bot commits its first throw without ever considering re-rolls — even when `_bot_pick_keepers` would have correctly identified the `3-2` as a consecutive pair worth keeping (rule 5) and re-rolled the 5 toward a suite. The user wants the bot to play like a human: factor in **probability** (more throws given to opponents = more chance they beat me), **strategy** (a starter should set the bar high so others can't easily match in their own throw allowance), and **luck** (still accept a great first roll instead of throwing it away).
 **Scope:**
 - **Starter-aware floor.** When `target_rank == 0` AND the bot is the round starter, replace the win-check with a *floor check*: only stop on a "respectable" rank. Candidate floor: a pair (rule-3 territory, rank ≥ 2200), or any suite / 11x / 421 / 111. Below that, keep iterating until throws run out. This single change fixes the `5-3-2` case directly.

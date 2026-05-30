@@ -222,25 +222,44 @@ def _bot_pick_keepers(dice: list[int]) -> list[bool]:
     return [i != best_i for i in range(3)]
 
 
+# G55: rank threshold below which a starter shouldn't commit if it has throws
+# available. Basic figures classify with rank `a*100 + b*10 + c` (max 665);
+# the lowest suite is rank 1100. So `>= 1000` means "anything but a basic" —
+# the bot's starter-floor target. If a starter has thrown a basic with throws
+# still in hand, it should re-roll for a structured combo (the heuristic in
+# `_bot_pick_keepers` knows how to chase one). Without this floor, the bot
+# was committing to basics like `5-3-2` because `rank > target_rank == 0`
+# trivially held — handing the cycle's rhythm to opponents at a basic rank.
+_BOT_STARTER_FLOOR_RANK = 1000
+
+
 def _bot_take_turn(player: Player, game: Optional[Game] = None) -> None:
-    """Bot plays the player's turn (G9: now reads the table to play to win).
+    """Bot plays the player's turn.
+
+    G9 introduced game-awareness (read the table, beat the target). G55
+    refines the heuristic so a *starter* doesn't lock the cycle's rhythm
+    at a basic figure — if the starter has throws left and only a basic
+    in hand, push for a structured combo (suite, pair, 11x, 421, ...).
+    Non-starter logic stays: beat the highest combo at the table, then
+    stop.
 
     Behavior:
-      * If `game` is None (used by isolated unit tests of the bot helper),
-        roll all three dice once and mark done — the legacy single-throw
-        behavior, preserved as a fallback.
-      * If `game` is provided, the bot reads `current_round_plays` to find
-        the highest combo to beat, then iteratively re-rolls within the
-        cycle's rhythm cap. Each iteration calls `_bot_pick_keepers` to
-        decide which dice to keep, and stops on any of:
-          - current rank strictly beats the target
-          - no throws left
-          - reached the rhythm cap (max_throws_this_round for non-starters,
-            or 1 for everyone under bank_rule=="sec" + CHARGE)
-          - already holding a 421 (ceiling)
+      * If `game` is None (isolated unit tests of the bot helper), roll
+        all three dice once and mark done — legacy fallback.
+      * If `game` is provided:
+          - Compute `target_rank` from players who've already played.
+          - For non-starters: stop on `rank > target_rank` (existing).
+          - For starters with `target_rank == 0`: stop only when rank
+            meets the starter floor (>= 1000, i.e. any non-basic).
+          - Always stop on: no throws left, max_throws cap reached, 421
+            ceiling, or `_bot_pick_keepers` says keep everything.
+      * Emits a `log_bot_decision` event on `game.log_events` summarizing
+        the turn (final dice, throws used, target, reason for stopping)
+        so the bot's reasoning is inspectable in the journal.
 
-    On exit, `turn.rolls_left` reflects the actual throws used (mirrors the
-    human `done` handler) so the caller can read it for starter-rhythm lock.
+    On exit, `turn.rolls_left` reflects the actual throws used (mirrors
+    the human `done` handler) so the caller can read it for starter-
+    rhythm lock.
     """
     turn = player.turn
 
@@ -276,19 +295,34 @@ def _bot_take_turn(player: Player, game: Optional[Game] = None) -> None:
     else:
         max_throws_for_me = 3
 
+    # Track why we stopped so the decision event can be inspected.
+    stop_reason = "unknown"
     while True:
         rolls_used = 3 - turn.rolls_left
-        if turn.rank > target_rank and turn.rank > 0:
+        # G55: the win check differs for starter vs non-starter.
+        # - Non-starter (target_rank > 0): any rank above target wins the
+        #   cycle, commit it.
+        # - Starter (target_rank == 0): a "basic" rank under 1000 hands
+        #   the rhythm cheaply; only commit when rank >= STARTER_FLOOR
+        #   *or* we're out of throws/options (those break paths below).
+        beats_target = turn.rank > target_rank and turn.rank > 0
+        meets_starter_floor = turn.rank >= _BOT_STARTER_FLOOR_RANK
+        if beats_target and (target_rank > 0 or meets_starter_floor):
+            stop_reason = "beats_target" if target_rank > 0 else "starter_floor_met"
             break
         if turn.rolls_left <= 0:
+            stop_reason = "no_throws_left"
             break
         if rolls_used >= max_throws_for_me:
+            stop_reason = "max_throws_cap"
             break
         if turn.combo == "421":
+            stop_reason = "ceiling_421"
             break
 
         reroll = _bot_pick_keepers(turn.dice)
         if not any(reroll):
+            stop_reason = "keepers_say_hold"
             break
         for i, do_reroll in enumerate(reroll):
             if do_reroll:
@@ -298,6 +332,25 @@ def _bot_take_turn(player: Player, game: Optional[Game] = None) -> None:
 
     turn.reroll = [False, False, False]
     turn.done = True
+
+    # G55: surface the bot's reasoning so the journal shows what it did
+    # and why. One event per turn — not in HEADLINE_KEYS, so the ticker
+    # ignores it; the right-side log renders it via the raw-msg fallback.
+    final_throws = 3 - turn.rolls_left
+    sorted_dice = sorted(turn.dice, reverse=True)
+    _log(
+        game,
+        "log_bot_decision",
+        f"🤖 {player.name} → {turn.combo} en {final_throws} lancer(s) · {stop_reason}",
+        name=player.name,
+        throws=final_throws,
+        dice=sorted_dice,
+        combo=turn.combo,
+        rank=turn.rank,
+        target=target_rank,
+        reason=stop_reason,
+        is_starter=is_starter,
+    )
 
 
 async def _afk_timer(game: Game, player_id: str, game_id: str):
