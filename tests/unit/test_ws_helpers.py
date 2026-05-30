@@ -289,6 +289,27 @@ class TestBotHandback:
         assert p.turn.done is True
         assert p.turn.dice == [6, 6, 6]
 
+    def test_abort_handback_clears_afk_session(self):
+        """G50 follow-up: in-grace abort already announces the return via
+        log_bot_handback; the AFK-session set must be cleared so the post-grace
+        log_afk_return path (in _dispatch) doesn't double-fire on the next
+        play action.
+        """
+        game, _ = self._make_game()
+        game.afk_session.add("p1")
+        _abort_bot_handback(game, "p1")
+        assert "p1" not in game.afk_session
+
+    def test_cancel_afk_clears_afk_session(self):
+        """G50 follow-up: leave / kick / disconnect releases the slot — the
+        AFK-session set must drop the player too, so a recycled player_id
+        doesn't inherit a stale flag.
+        """
+        game, _ = self._make_game()
+        game.afk_session.add("p1")
+        _cancel_afk(game, "p1")
+        assert "p1" not in game.afk_session
+
 
 class TestScheduleAfkStartedAt:
     """G1: _schedule_afk stamps game.afk_started_at for per-turn phases only."""

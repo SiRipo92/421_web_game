@@ -346,6 +346,12 @@ async def _afk_timer(game: Game, player_id: str, game_id: str):
         combo=t.combo,
         fiches=t.fiches,
     )
+    # G50 follow-up: mark this player as in an open AFK session. Cleared when
+    # they take a play action (post-grace return → `log_afk_return`) or when
+    # the in-grace handback aborts (covered by `_abort_bot_handback` →
+    # `log_bot_handback`). Idempotent on a set, so back-to-back bot turns just
+    # keep the player in the session.
+    game.afk_session.add(player_id)
     # G2: stash the snapshot + rhythm-restore info before broadcasting so a
     # reconnect-driven abort race always finds it.
     game.bot_handback_snapshots[player_id] = {
@@ -391,6 +397,10 @@ def _abort_bot_handback(game: Game, player_id: str) -> bool:
         return False
     if not task.done():
         task.cancel()
+    # G50 follow-up: in-grace handback already announces the return via
+    # `log_bot_handback`; drop the player from the AFK-session set so the
+    # post-grace `log_afk_return` path doesn't double-fire on the next action.
+    game.afk_session.discard(player_id)
     player = next((p for p in game.players if p.id == player_id), None)
     if player is not None:
         player.turn = snapshot["turn"]
@@ -453,6 +463,10 @@ def _cancel_afk(game: Game, player_id: str):
     if handback and not handback.done():
         handback.cancel()
     game.bot_handback_snapshots.pop(player_id, None)
+    # G50 follow-up: leave / kick / disconnect releases the slot — don't
+    # leave a stale entry that would mis-fire `log_afk_return` if the
+    # player_id were ever recycled.
+    game.afk_session.discard(player_id)
 
 
 async def _afk_tiebreak_timer(game: Game, player_id: str, game_id: str):
@@ -687,6 +701,21 @@ async def _dispatch(
     # advance and restore the snapshot BEFORE the handler reads/mutates state.
     if action in _HANDBACK_PLAY_ACTIONS and player_id in game.bot_handback_tasks:
         _abort_bot_handback(game, player_id)
+    # G50 follow-up: post-grace return — the bot already finished one or more
+    # turns for this player and the handback window expired. The G2 branch
+    # above didn't fire (no pending task), so we announce the return here so
+    # the table sees the player come back. `_abort_bot_handback` already
+    # discards from `afk_session`, so the two branches don't double-emit.
+    elif action in _HANDBACK_PLAY_ACTIONS and player_id in game.afk_session:
+        game.afk_session.discard(player_id)
+        returning = next((p for p in game.players if p.id == player_id), None)
+        if returning is not None:
+            _log(
+                game,
+                "log_afk_return",
+                f"{returning.name} reprend la main.",
+                name=returning.name,
+            )
 
     if action == "start":
         if game.phase != GamePhase.WAITING:

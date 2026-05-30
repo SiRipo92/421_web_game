@@ -40,7 +40,11 @@ export function Game({ token }) {
   const showAfkBar = isMyTurn && state.room?.afk_bot && state.room?.afk_seconds > 0
 
   useEffect(() => {
-    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
+    // formatLogEntries reverses events so newest renders at top — keep the
+    // viewport pinned there as new entries arrive so the most recent plays
+    // are always in view. Scrolling to scrollHeight (the old behavior) hid
+    // them under the older entries.
+    if (logRef.current) logRef.current.scrollTop = 0
   }, [state.log])
 
   // G13: pop a transient banner whenever a new manché event lands. We diff against
