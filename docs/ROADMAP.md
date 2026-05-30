@@ -484,6 +484,55 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 **Acceptance:** Player rolls their final throw → the dice + combo stay visible on the piste for ~1.5 s with a centered chip-outcome ribbon → then the next player's turn renders. Works identically for manual validate, auto-validate, and AFK-bot turns. End-of-match plays remain visible through the G13 banner overlay.
 **Dependencies:** Bundles with [[G51]] (bigger toast) and benefits from [[G14]] (piste sizing) since the centered ribbon competes for space with the dice area.
 
+### G57. Tiebreak AFK bot fallback (CRITICAL — game can hang)
+**Why:** Reported during playtest. The tiebreak phase has no AFK fallback. If a tied player goes idle while waiting for their tiebreak throw, the game stalls indefinitely — no timer fires, no bot plays for them, the next tied player can't act because `game.tiebreak.next_pid` never advances. Two AFK players in a tiebreak = stuck game. Compare CHARGE/DECHARGE which auto-resolve via `_afk_timer` → `_bot_take_turn`.
+**Scope:**
+- A `_afk_tiebreak_timer` helper already exists at `app/game/ws.py:480` per a grep — confirm whether it's wired or just defined. If unwired:
+  - Schedule it whenever `game.tiebreak.next_pid` changes, mirroring how `_schedule_afk` rearms on each turn.
+  - On timeout, roll three dice for the tied player, log a `log_tiebreak_throw` event with `(AFK)` annotation, advance `next_pid` to the next tied player, and call `_resolve_tiebreak` if this was the last throw.
+- Add `_cancel_afk` for tiebreak timers when the human takes the throw themselves (or leaves / is kicked).
+- Apply the [[G56]] piste hold to the bot's final tiebreak throw too so the resolution doesn't flash by.
+- The bot's tiebreak throw should be a single random roll — no `_bot_pick_keepers` heuristic (tiebreak is a single all-three-dice roll per the rules; no rerolls).
+- Tests: `test_afk_tiebreak_timer_fires`, `test_afk_tiebreak_resolves_when_last_tied_player_idle`, `test_cancel_afk_drops_tiebreak_timer`.
+**Acceptance:** Tied players who AFK during tiebreak get auto-rolled by the bot after the timer fires; the tiebreak resolves and the cycle continues. Game cannot hang on idle tiebreak players.
+**Dependencies:** None. Pure backend fix. Bundles cleanly with [[G55]] (bot strategy) since both touch bot behavior.
+
+### G58. Investigate why `log_afk_return` isn't visible in playtest
+**Why:** Reported during playtest. After G50 introduced the `log_afk_return` event for post-grace return from AFK, the user expects to see a « ↩ {name} est de retour à la table. » card in the ticker when they reclaim play outside the bot-handback window. They still haven't seen it.
+**Scope:**
+- **Hypothesis 1: the user always returns DURING the 3-second grace window.** The G2 path then fires `log_bot_handback` instead of `log_afk_return` — and the wording is different (« reprend la main avant la fin du tour du bot »). Both events appear in the ticker, but with different copy. If this is the case, the fix is wording-only: align the two events' phrasings (or merge them).
+- **Hypothesis 2: `afk_session` is being cleared spuriously.** The `_abort_bot_handback` discard branch runs on every reconnect (`app/game/ws.py:1110`), even when no handback is pending — but only past the early return. Double-check the discard truly sits below the early-return guard; if not, the set gets emptied without the event ever firing.
+- **Hypothesis 3: the `elif` branch is shadowed.** Confirm `_HANDBACK_PLAY_ACTIONS` actually matches what the user sends on return (e.g., a stale `keep` from the previous turn doesn't count as "returning"). Add server-side debug logging temporarily.
+- **Verification approach:** add a `logger.info("afk_session state pre-dispatch: %s, action: %s", ...)` line at the top of `_dispatch`, replay the AFK scenario, read logs.
+- Once the cause is known, the fix is small (rewording, ordering, or a missed action key). Don't merge the diagnostic logging — it's noisy.
+**Acceptance:** A player goes AFK, the bot plays several turns, the player returns and clicks roll. A « ↩ {name} est de retour à la table. » card appears in the ticker. The G2 in-grace path still emits `log_bot_handback` for its narrower case.
+**Dependencies:** None.
+
+### G59. Restructure in-game info surfaces — gameplay feed left, chat right
+**Why:** Captured for future. Today the in-game UI has two information panels: a **right-side journal** with every log event (useful for debugging, but visually heavy) and a **left-side ticker** (the « En Direct » feed, currently showing only filtered headlines). When chat ships ([[item 8]] + [[G34]] + [[G36]] + [[G37]]), it needs a permanent home, and the right-side journal is the most natural slot — it's already a scrolling text column. But losing the journal means the left ticker must absorb *all* essential gameplay information, becoming the single source of truth for what's happening at the table.
+**Vision (target end-state):**
+- **Left ticker = full gameplay feed.** Replaces the current minimal headline filter with a richer per-cycle stream:
+  - Round start: « Tour 4 · Sierra donne le rythme »
+  - Each player's submitted play, in turn order starting with the rhythm-setter:
+    - « Sierra a joué un **421 en 3 lancers** » (the rhythm-setter; explicit throw count)
+    - « June a joué **1-1-4 (114)** · 114 to beat for 8 fiches » (a follower, with the "score to beat / chips in play" rolled in)
+  - Tie detection: « Égalité entre Sierra et June à 114 — départage en cours »
+  - Tiebreak throws as they land: « June (départage) : 632 → 1f »
+  - Cycle resolution: « June prend 8 fiches · Banque : 3 » / « Sierra donne 2 fiches à June »
+  - Phase transitions, sit-outs, manchés, round points — all surfaced here.
+  - "Score to beat" line auto-updates as new plays push the bar.
+- **Right column = chat (future).** Replaces the current right-side journal once chat ships. Same width, same scroll behavior; users gain real-time chat with their tablemates. Moderation (G34 / G36 / G37) gates message visibility.
+- **Debug/dev access to the raw log.** The user values the raw event log for debugging — preserve it via a `/devtools` route or a host-only "Show event log" toggle that opens an overlay. Not in the default play layout.
+**Scope (sketch only — not for immediate implementation):**
+- Backend: expand HEADLINE_KEYS in `CommentaryTicker.jsx` toward "include everything that matters" rather than "include only the highlights." Likely additions: `log_turn`, `log_charge_takes`, `log_decharge_gives`, `log_round_start`. Drop the dedup-collapse for non-AFK events (each play is its own announcement).
+- Backend: emit a new `log_score_to_beat` event whenever a play raises the highest rank in `current_round_plays`, so the ticker can render the "X to beat for Y fiches" line without re-computing client-side.
+- Frontend: a new card variant in `TickerCard` for player plays — more visual presence (small dice glyph + combo name + chip outcome). The "headline" cards (manché, pool empty, tiebreak start) keep their existing accent treatment.
+- Frontend: right-side `<aside>` swaps `<LogPanel>` → `<ChatPanel>` once chat ships. Until then, leave the journal in place as the dev/debug view (or add the host-only toggle).
+- Grid: today is `260px 1fr 320px`. With chat ascending to first-class status, may need to widen to `320px 1fr 380px` so both side rails have breathing room.
+- **Coordinate with [[G50]]:** the ticker dedup logic stays for AFK events (one card per session) but doesn't apply to plays — each play is unique by design.
+**Acceptance:** A player can follow the entire game without ever looking at the right column. The ticker tells them whose turn it is, what each played, the running score-to-beat, and the cycle outcome. When chat ships, the right column becomes the chat surface.
+**Dependencies:** [[item 8]] (chat), [[G34]] (AI moderation), [[G36]] (rate-limiter), [[G37]] (peer reporting) — all need to land before the right-column flip. The ticker enrichment can ship first, independent of chat, as a pure UX upgrade.
+
 ---
 
 ## Next
