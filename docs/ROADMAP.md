@@ -338,7 +338,7 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 **Acceptance:** A player in any game room can flip FR ↔ EN; all UI strings + log events re-render in the chosen language; the choice persists across reloads. Logged-in users see their account's `lang_pref` update.
 **Dependencies:** None. Light-touch UI change.
 
-### G47. Local player anchored at the bottom of the piste — and visually emphasized
+### G47. (DONE — pending PR merge) Local player anchored at the bottom of the piste — and visually emphasized
 **Why:** Reported during playtest. The piste shows all players' seats arranged around the table, but the *viewer's* seat isn't anchored — it can land anywhere on the ring depending on turn order. The user wants the local player to always sit at the bottom (closest to the action bar) so they can identify themselves at a glance, like every poker / card-game UI does. Compounding it: today every seat renders at the same size, so even once anchored, the viewer's seat can be hard to spot at first glance — the user wants their own avatar *larger* than the competitors'.
 **Scope:**
 - Frontend: in `Game.jsx`'s `PisteSeat` rendering loop, compute the player order so the local `playerId` is always at index 0 of the visual ring; other players fill the remaining seats in their original turn-order. The bottom slot in the piste maps to index 0.
@@ -420,7 +420,7 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 **Acceptance:** On a 1440-wide screen, every in-game label (action bar, ticker, log, dice hint, rhythm indicator) is comfortably readable without leaning in. The piste still dominates the layout but doesn't drown out the surrounding UI.
 **Dependencies:** None, but should ship after (or alongside) [[G16]] so the dice-hint changes aren't undone.
 
-### G53. Animate the current player's seat to signal whose turn it is
+### G53. (DONE — pending PR merge) Animate the current player's seat to signal whose turn it is
 **Why:** Reported during playtest. The piste shows whose turn it is via a subtle highlight on the active seat, but the cue is weak — a player who looks away for a moment can come back unsure whether it's their turn or someone else's. The user wants a clearer animation (pulse, glow, blink) on the active *non-local* player's seat so the table reads at a glance: "their turn." For the local player's own active turn, the existing CTAs (« Lancer », « Valider ») already shout the answer — the animation matters most for *spectating* other players.
 **Scope:**
 - Frontend: in `PisteSeat`, when `active === true` AND `isSelf === false`, apply a CSS keyframe animation. Candidate: a soft brass pulse (`box-shadow` 0 → 12px brass-soft → 0, period ~1.4 s, infinite). Avoid full-brightness or color-shift effects — the piste is already a busy surface; this needs to read as "alive" without screaming.

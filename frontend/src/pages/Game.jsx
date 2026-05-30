@@ -312,22 +312,34 @@ export function Game({ token }) {
               </div>
             </div>
 
-            {/* Players around piste */}
-            {state.players?.map((p, i) => {
-              const total = state.players.length
-              const angle = 90 + (360 / total) * i
-              const rad = (angle * Math.PI) / 180
-              const r = 50
-              const x = 50 + r * Math.cos(rad)
-              const y = 50 + r * Math.sin(rad)
-              return (
-                <PisteSeat key={p.id} p={p}
-                  active={p.id === state.current_player_id}
-                  isSelf={p.id === playerId}
-                  x={x} y={y}
-                />
-              )
-            })}
+            {/* G47: rotate seats so the local viewer always sits at the
+                bottom of the piste (the 90° / south slot). Other players
+                fill the remaining positions preserving turn order. This
+                gives each screen a personal vantage-point perspective —
+                "my dice are at the bottom, opponents above" — instead of
+                everyone seeing the same fixed seating where the rotation
+                winner sits south regardless of who they are. */}
+            {(() => {
+              const players = state.players || []
+              const myIdx = Math.max(0, players.findIndex(p => p.id === playerId))
+              const rotated = [...players.slice(myIdx), ...players.slice(0, myIdx)]
+              return rotated.map((p, i) => {
+                const total = rotated.length
+                const angle = 90 + (360 / total) * i
+                const rad = (angle * Math.PI) / 180
+                const r = 50
+                const x = 50 + r * Math.cos(rad)
+                const y = 50 + r * Math.sin(rad)
+                return (
+                  <PisteSeat key={p.id} p={p}
+                    active={p.id === state.current_player_id}
+                    isSelf={p.id === playerId}
+                    x={x} y={y}
+                    t={t}
+                  />
+                )
+              })
+            })()}
           </div>
         </div>
 
@@ -781,40 +793,90 @@ function ScorePips({ matchLosses, roundPoints, active }) {
   )
 }
 
-function PisteSeat({ p, active, isSelf, x, y }) {
+function PisteSeat({ p, active, isSelf, x, y, t }) {
+  // G47: the local viewer's own seat is rendered larger so the player can
+  // spot themselves at a glance — pairs with the G47 rotation that anchors
+  // the viewer at the bottom slot.
+  const avatarSize = isSelf ? 4.0 : 3.2
+  const nameSize = isSelf ? '1.05rem' : '0.9rem'
+  const namePadding = isSelf ? '0.4rem 0.85rem' : '0.3rem 0.7rem'
+  const chipSize = isSelf ? '0.9rem' : '0.78rem'
   return (
     <div style={{
       position: 'absolute', left: `${x}%`, top: `${y}%`,
       transform: 'translate(-50%, -50%)',
-      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
       pointerEvents: 'none',
     }}>
-      <Avatar name={p.name} userId={p.user_id} hasAvatar={p.has_avatar ?? false} active={active} isSelf={isSelf} size={3.2} />
-      <div style={{
-        background: active ? 'var(--ink)' : 'var(--paper-soft)',
-        color: active ? 'var(--paper)' : 'var(--ink)',
-        border: '1px solid var(--rule)',
-        padding: '0.3rem 0.7rem', borderRadius: 2,
-        fontFamily: 'var(--display)', fontWeight: 700, fontSize: '0.9rem',
-        whiteSpace: 'nowrap',
-        display: 'flex', alignItems: 'center', gap: 6,
-        boxShadow: active ? '0 4px 0 rgba(0,0,0,0.3)' : '0 2px 0 rgba(0,0,0,0.1)',
-      }}>
-        <span>{p.name}{isSelf ? ' ★' : ''}</span>
-        <ScorePips matchLosses={p.match_losses ?? 0} roundPoints={p.round_points ?? 0} active={active} />
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      {/* G53: when it's this seat's turn, the inner stack pulses (gentle
+          scale + brass glow) so the rotation is visible from across the
+          table. The wrapping div carries the animation so the absolute-
+          positioned outer transform stays untouched. */}
+      <div
+        className={active ? 'piste-seat piste-seat-active' : 'piste-seat'}
+        style={{
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+          transformOrigin: 'center center',
+        }}
+      >
+        <Avatar name={p.name} userId={p.user_id} hasAvatar={p.has_avatar ?? false} active={active} isSelf={isSelf} size={avatarSize} />
         <div style={{
-          fontFamily: 'var(--mono)', fontWeight: 700, fontSize: '0.78rem',
-          background: 'var(--paper-deep)', border: '1px solid var(--rule)',
-          padding: '2px 8px', borderRadius: 999, color: 'var(--ink-soft)',
-        }}>{p.tokens ?? 0} 🪙</div>
-        {p.turn?.done && p.turn.dice && (
-          <div style={{ display: 'flex', gap: 2 }}>
-            {p.turn.dice.map((v, i) => <Die key={i} value={v} mini />)}
-          </div>
-        )}
+          background: active ? 'var(--ink)' : 'var(--paper-soft)',
+          color: active ? 'var(--paper)' : 'var(--ink)',
+          border: '1px solid var(--rule)',
+          padding: namePadding, borderRadius: 2,
+          fontFamily: 'var(--display)', fontWeight: 700, fontSize: nameSize,
+          whiteSpace: 'nowrap',
+          display: 'flex', alignItems: 'center', gap: 6,
+          boxShadow: active ? '0 4px 0 rgba(0,0,0,0.3)' : '0 2px 0 rgba(0,0,0,0.1)',
+          // G47: subtle brass underline on the viewer's seat to reinforce
+          // "this is you" alongside the rotation + sizing.
+          borderBottom: isSelf ? '3px solid var(--brass)' : undefined,
+        }}>
+          <span>{p.name}{isSelf ? ' ★' : ''}</span>
+          <ScorePips matchLosses={p.match_losses ?? 0} roundPoints={p.round_points ?? 0} active={active} />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{
+            fontFamily: 'var(--mono)', fontWeight: 700, fontSize: chipSize,
+            background: 'var(--paper-deep)', border: '1px solid var(--rule)',
+            padding: '2px 8px', borderRadius: 999, color: 'var(--ink-soft)',
+          }}>{p.tokens ?? 0} 🪙</div>
+          {p.turn?.done && p.turn.dice && (
+            <div style={{ display: 'flex', gap: 2 }}>
+              {p.turn.dice.map((v, i) => <Die key={i} value={v} mini />)}
+            </div>
+          )}
+        </div>
       </div>
+      {isSelf && t && (
+        <div className="eyebrow" style={{
+          fontSize: '0.6rem', color: 'var(--brass-deep)',
+          letterSpacing: '0.12em', marginTop: 2, textAlign: 'center',
+        }}>
+          ↓ {t('you_label_caret')}
+        </div>
+      )}
+      <style>{`
+        @keyframes pisteSeatPulse {
+          0%, 100% {
+            transform: scale(1);
+            filter: drop-shadow(0 0 0 transparent);
+          }
+          50% {
+            transform: scale(1.06);
+            filter: drop-shadow(0 0 10px var(--brass, rgba(212,171,103,0.7)));
+          }
+        }
+        .piste-seat-active {
+          animation: pisteSeatPulse 1.4s ease-in-out infinite;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .piste-seat-active {
+            animation: none;
+            filter: drop-shadow(0 0 8px var(--brass, rgba(212,171,103,0.7)));
+          }
+        }
+      `}</style>
     </div>
   )
 }
