@@ -338,7 +338,7 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 **Acceptance:** A player in any game room can flip FR ↔ EN; all UI strings + log events re-render in the chosen language; the choice persists across reloads. Logged-in users see their account's `lang_pref` update.
 **Dependencies:** None. Light-touch UI change.
 
-### G47. Local player anchored at the bottom of the piste — and visually emphasized
+### G47. (DONE — pending PR merge) Local player anchored at the bottom of the piste — and visually emphasized
 **Why:** Reported during playtest. The piste shows all players' seats arranged around the table, but the *viewer's* seat isn't anchored — it can land anywhere on the ring depending on turn order. The user wants the local player to always sit at the bottom (closest to the action bar) so they can identify themselves at a glance, like every poker / card-game UI does. Compounding it: today every seat renders at the same size, so even once anchored, the viewer's seat can be hard to spot at first glance — the user wants their own avatar *larger* than the competitors'.
 **Scope:**
 - Frontend: in `Game.jsx`'s `PisteSeat` rendering loop, compute the player order so the local `playerId` is always at index 0 of the visual ring; other players fill the remaining seats in their original turn-order. The bottom slot in the piste maps to index 0.

@@ -312,22 +312,34 @@ export function Game({ token }) {
               </div>
             </div>
 
-            {/* Players around piste */}
-            {state.players?.map((p, i) => {
-              const total = state.players.length
-              const angle = 90 + (360 / total) * i
-              const rad = (angle * Math.PI) / 180
-              const r = 50
-              const x = 50 + r * Math.cos(rad)
-              const y = 50 + r * Math.sin(rad)
-              return (
-                <PisteSeat key={p.id} p={p}
-                  active={p.id === state.current_player_id}
-                  isSelf={p.id === playerId}
-                  x={x} y={y}
-                />
-              )
-            })}
+            {/* G47: rotate seats so the local viewer always sits at the
+                bottom of the piste (the 90° / south slot). Other players
+                fill the remaining positions preserving turn order. This
+                gives each screen a personal vantage-point perspective —
+                "my dice are at the bottom, opponents above" — instead of
+                everyone seeing the same fixed seating where the rotation
+                winner sits south regardless of who they are. */}
+            {(() => {
+              const players = state.players || []
+              const myIdx = Math.max(0, players.findIndex(p => p.id === playerId))
+              const rotated = [...players.slice(myIdx), ...players.slice(0, myIdx)]
+              return rotated.map((p, i) => {
+                const total = rotated.length
+                const angle = 90 + (360 / total) * i
+                const rad = (angle * Math.PI) / 180
+                const r = 50
+                const x = 50 + r * Math.cos(rad)
+                const y = 50 + r * Math.sin(rad)
+                return (
+                  <PisteSeat key={p.id} p={p}
+                    active={p.id === state.current_player_id}
+                    isSelf={p.id === playerId}
+                    x={x} y={y}
+                    t={t}
+                  />
+                )
+              })
+            })()}
           </div>
         </div>
 
@@ -781,7 +793,14 @@ function ScorePips({ matchLosses, roundPoints, active }) {
   )
 }
 
-function PisteSeat({ p, active, isSelf, x, y }) {
+function PisteSeat({ p, active, isSelf, x, y, t }) {
+  // G47: the local viewer's own seat is rendered larger so the player can
+  // spot themselves at a glance — pairs with the G47 rotation that anchors
+  // the viewer at the bottom slot.
+  const avatarSize = isSelf ? 4.0 : 3.2
+  const nameSize = isSelf ? '1.05rem' : '0.9rem'
+  const namePadding = isSelf ? '0.4rem 0.85rem' : '0.3rem 0.7rem'
+  const chipSize = isSelf ? '0.9rem' : '0.78rem'
   return (
     <div style={{
       position: 'absolute', left: `${x}%`, top: `${y}%`,
@@ -789,23 +808,26 @@ function PisteSeat({ p, active, isSelf, x, y }) {
       display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
       pointerEvents: 'none',
     }}>
-      <Avatar name={p.name} userId={p.user_id} hasAvatar={p.has_avatar ?? false} active={active} isSelf={isSelf} size={3.2} />
+      <Avatar name={p.name} userId={p.user_id} hasAvatar={p.has_avatar ?? false} active={active} isSelf={isSelf} size={avatarSize} />
       <div style={{
         background: active ? 'var(--ink)' : 'var(--paper-soft)',
         color: active ? 'var(--paper)' : 'var(--ink)',
         border: '1px solid var(--rule)',
-        padding: '0.3rem 0.7rem', borderRadius: 2,
-        fontFamily: 'var(--display)', fontWeight: 700, fontSize: '0.9rem',
+        padding: namePadding, borderRadius: 2,
+        fontFamily: 'var(--display)', fontWeight: 700, fontSize: nameSize,
         whiteSpace: 'nowrap',
         display: 'flex', alignItems: 'center', gap: 6,
         boxShadow: active ? '0 4px 0 rgba(0,0,0,0.3)' : '0 2px 0 rgba(0,0,0,0.1)',
+        // G47: subtle brass underline on the viewer's seat to reinforce
+        // "this is you" alongside the rotation + sizing.
+        borderBottom: isSelf ? '3px solid var(--brass)' : undefined,
       }}>
         <span>{p.name}{isSelf ? ' ★' : ''}</span>
         <ScorePips matchLosses={p.match_losses ?? 0} roundPoints={p.round_points ?? 0} active={active} />
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <div style={{
-          fontFamily: 'var(--mono)', fontWeight: 700, fontSize: '0.78rem',
+          fontFamily: 'var(--mono)', fontWeight: 700, fontSize: chipSize,
           background: 'var(--paper-deep)', border: '1px solid var(--rule)',
           padding: '2px 8px', borderRadius: 999, color: 'var(--ink-soft)',
         }}>{p.tokens ?? 0} 🪙</div>
@@ -815,6 +837,14 @@ function PisteSeat({ p, active, isSelf, x, y }) {
           </div>
         )}
       </div>
+      {isSelf && t && (
+        <div className="eyebrow" style={{
+          fontSize: '0.6rem', color: 'var(--brass-deep)',
+          letterSpacing: '0.12em', marginTop: 2,
+        }}>
+          ↓ {t('you_label_caret')}
+        </div>
+      )}
     </div>
   )
 }
