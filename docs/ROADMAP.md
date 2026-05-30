@@ -338,15 +338,16 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 **Acceptance:** A player in any game room can flip FR ↔ EN; all UI strings + log events re-render in the chosen language; the choice persists across reloads. Logged-in users see their account's `lang_pref` update.
 **Dependencies:** None. Light-touch UI change.
 
-### G47. Local player anchored at the bottom of the piste
-**Why:** Reported during playtest. The piste shows all players' seats arranged around the table, but the *viewer's* seat isn't anchored — it can land anywhere on the ring depending on turn order. The user wants the local player to always sit at the bottom (closest to the action bar) so they can identify themselves at a glance, like every poker / card-game UI does.
+### G47. Local player anchored at the bottom of the piste — and visually emphasized
+**Why:** Reported during playtest. The piste shows all players' seats arranged around the table, but the *viewer's* seat isn't anchored — it can land anywhere on the ring depending on turn order. The user wants the local player to always sit at the bottom (closest to the action bar) so they can identify themselves at a glance, like every poker / card-game UI does. Compounding it: today every seat renders at the same size, so even once anchored, the viewer's seat can be hard to spot at first glance — the user wants their own avatar *larger* than the competitors'.
 **Scope:**
 - Frontend: in `Game.jsx`'s `PisteSeat` rendering loop, compute the player order so the local `playerId` is always at index 0 of the visual ring; other players fill the remaining seats in their original turn-order. The bottom slot in the piste maps to index 0.
 - Verify with 2, 3, 4, and 5 players that the ring stays geometrically sensible (the viewer always at the south position, others distributed clockwise from there preserving turn order).
+- **Viewer-emphasis sizing:** the bottom seat (the local player) renders at ~1.25× the avatar size + font size of the other seats. Variant: a `isSelf` prop on `PisteSeat` that scales `transform: scale(1.25)` with the transform-origin at the bottom edge so it grows up/in rather than spilling past the ring boundary.
 - Add a subtle "you" indicator (e.g. a thin brass underline or an « ↓ Vous » caret) on the bottom seat to reinforce identification, especially in 2-player rooms where the visual asymmetry alone might not read.
-- Don't break the existing turn-indicator (active-player glow) — that still follows the current player wherever they sit on the rotated ring.
-**Acceptance:** Joining a room from any account always renders that account's seat at the bottom of the piste; the other player(s) sit above. Switching accounts in two browser windows shows each viewer their own seat at the bottom.
-**Dependencies:** Pairs nicely with [[G14]] (piste sizing overhaul) — both touch the piste geometry. Worth bundling if [[G14]] is still in flight.
+- Don't break the existing turn-indicator (active-player glow) — that still follows the current player wherever they sit on the rotated ring. The viewer's larger-seat treatment is *orthogonal* to the active-player highlight: it persists even when it's not the viewer's turn, so they can always locate themselves.
+**Acceptance:** Joining a room from any account always renders that account's seat at the bottom of the piste, noticeably larger than the other seats; the other player(s) sit above at their normal size. Switching accounts in two browser windows shows each viewer their own seat at the bottom and larger.
+**Dependencies:** Pairs nicely with [[G14]] (piste sizing overhaul) — both touch the piste geometry. Worth bundling if [[G14]] is still in flight. Coordinates with [[G53]] (current-player animation) — both target seat affordances.
 
 ### G48. Public-rooms list pagination
 **Why:** The public/open-rooms list today renders every visible room in one shot. With even modest growth (50–100 concurrent open rooms) this becomes a perf cliff (DOM size + initial fetch + render thrash on each WS room-list update) AND a UX cliff (scrolling through dozens of identical cards isn't logical browsing). Pagination + a smarter card layout keep both bounded.
@@ -418,6 +419,70 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 - Pairs naturally with [[G14]] (piste-sizing) + [[G16]] (in-piste hint legibility) — both touch the same neighborhood.
 **Acceptance:** On a 1440-wide screen, every in-game label (action bar, ticker, log, dice hint, rhythm indicator) is comfortably readable without leaning in. The piste still dominates the layout but doesn't drown out the surrounding UI.
 **Dependencies:** None, but should ship after (or alongside) [[G16]] so the dice-hint changes aren't undone.
+
+### G53. Animate the current player's seat to signal whose turn it is
+**Why:** Reported during playtest. The piste shows whose turn it is via a subtle highlight on the active seat, but the cue is weak — a player who looks away for a moment can come back unsure whether it's their turn or someone else's. The user wants a clearer animation (pulse, glow, blink) on the active *non-local* player's seat so the table reads at a glance: "their turn." For the local player's own active turn, the existing CTAs (« Lancer », « Valider ») already shout the answer — the animation matters most for *spectating* other players.
+**Scope:**
+- Frontend: in `PisteSeat`, when `active === true` AND `isSelf === false`, apply a CSS keyframe animation. Candidate: a soft brass pulse (`box-shadow` 0 → 12px brass-soft → 0, period ~1.4 s, infinite). Avoid full-brightness or color-shift effects — the piste is already a busy surface; this needs to read as "alive" without screaming.
+- Respect `@media (prefers-reduced-motion: reduce)` — drop the pulse to a static brass ring so the affordance survives without motion.
+- Active local player (your own turn) gets either nothing (CTAs are loud enough) or a much quieter version of the pulse (debate during implementation).
+- Variant to consider: a small dice-shake icon next to the active seat that animates rather than the whole seat. Less visually intrusive on the ring layout.
+- Tests / verification: at 2 / 3 / 5 players, the pulse is unambiguous — you can tell whose turn it is from across the room (3 m sight test).
+**Acceptance:** Watching another player's turn, the active seat is visibly animated; the moment the turn passes, the previous seat goes static and the next one starts. With reduced-motion, the same information lands via a static ring instead.
+**Dependencies:** Coordinates with [[G47]] — both target seat affordances; bundle the work if either is in flight.
+
+### G54. Fix: RhythmIndicator's "Sec" rule applies only during CHARGE
+**Why:** Reported during playtest. The G15 RhythmIndicator hard-codes `cap = bankRule === 'sec' ? 1 : maxThrows`, treating `sec` as a constant gameplay rule. Per the actual rules, *sec* only applies while the bank is being distributed (CHARGE) — once the bank empties (`pool == 0` → DECHARGE), the rhythm reverts to free 3 throws max. So in a sec room, the indicator currently shows « RYTHME · SEC · 1 max » throughout *all* phases, including DECHARGE where everyone has 3 throws available. Players read the wrong cap.
+**Scope:**
+- Pass `phase` (string from `state.phase`) into `RhythmIndicator` from `Game.jsx`.
+- Compute `isSecActive = bankRule === 'sec' && phase === 'charge'` (lowercase per the serialized GamePhase). Use `isSecActive` everywhere the indicator currently uses `isSec`:
+  - Eyebrow label: in DECHARGE, even sec rooms show « RYTHME · LIBRE ».
+  - Cap derivation: drop the `cap = isSecActive ? 1 : maxThrows` override entirely — `maxThrows` (which is `state.max_throws` from the backend, already phase-correct, see `app/game/ws.py:272`) is the truth.
+- Smoke-check: the backend already gates sec on phase (see the four `phase == CHARGE and bank_rule == "sec"` sites in `ws.py`). The fix is purely client-side display alignment.
+- Update FR + EN copy if the eyebrow phrasing reads awkwardly when switching mid-match ("RYTHME · LIBRE" suddenly appears in a sec room when discharge starts — that's actually informative, but make sure the visual transition isn't jarring).
+- Tests (manual): create a sec room, play through CHARGE (eyebrow `SEC`, cap 1), force bank to empty (eyebrow `LIBRE`, cap 3); reverse on a libre room (sec rule never activates, eyebrow stays `LIBRE` always).
+**Acceptance:** A sec room's RhythmIndicator displays « SEC · 1 max » during CHARGE only; the moment the bank empties and DECHARGE begins, it switches to « LIBRE » with the actual throw cap.
+**Dependencies:** None — small follow-up to [[G15]].
+
+### G55. Bot strategy upgrade — probability-aware + decision-log
+**Why:** Reported during playtest. The current bot accepts very low first-throw combos (e.g., `5-3-2`, a basic figure rank ≈ 5) when it's the round starter, because `_bot_take_turn`'s win check fires `turn.rank > target_rank and turn.rank > 0`. As the starter, `target_rank == 0`, so any non-zero rank trips the break and the bot commits its first throw without ever considering re-rolls — even when `_bot_pick_keepers` would have correctly identified the `3-2` as a consecutive pair worth keeping (rule 5) and re-rolled the 5 toward a suite. The user wants the bot to play like a human: factor in **probability** (more throws given to opponents = more chance they beat me), **strategy** (a starter should set the bar high so others can't easily match in their own throw allowance), and **luck** (still accept a great first roll instead of throwing it away).
+**Scope:**
+- **Starter-aware floor.** When `target_rank == 0` AND the bot is the round starter, replace the win-check with a *floor check*: only stop on a "respectable" rank. Candidate floor: a pair (rule-3 territory, rank ≥ 2200), or any suite / 11x / 421 / 111. Below that, keep iterating until throws run out. This single change fixes the `5-3-2` case directly.
+- **Probability buffer when ahead but exposed.** When `target_rank > 0` AND `turn.rank > target_rank` but `rolls_left > 0`, look up `P(survives | remaining_opponents, their_throws, my_rank)` against a precomputed lookup table. If `P < 0.6`, keep re-rolling for a better cushion. Precomputed table lives in a new `app/game/bot_probability.py` — small (~few hundred entries), generated offline from `classify()` over all `6^3 = 216` dice outcomes.
+- **Throw-budget pressure.** As the bot's `rolls_left` drops, raise the floor threshold: the last throw is "go for it" territory; the first throw should keep multiple paths open. Practically: rule fallthrough order in `_bot_pick_keepers` stays the same, but `_bot_take_turn` injects per-throw context (e.g. *"this is your last throw, don't keep two dice unless they're already winning"*).
+- **Decision log.** Each iteration emits a server-side structured event:
+  ```python
+  game.log_events.append({
+      "key": "log_bot_decision",
+      "name": player.name,
+      "throw": rolls_used,
+      "dice": list(turn.dice),
+      "combo": turn.combo,
+      "rank": turn.rank,
+      "target": target_rank,
+      "action": "reroll" | "keep",
+      "reroll_mask": reroll_list,
+      "reason": "starter_low_floor" | "probability_buffer" | "ceiling_421" | ...
+  })
+  ```
+  Surfaced only to spectators + the room host (or all when a debug flag is set) so regular players don't see the bot's internal monologue. This is your fine-tuning surface — replay a match, scroll the journal, see exactly why the bot did what it did.
+- **Tests.** Significant test surface. Property-test: across all 216 first-throw outcomes, the bot starter never commits on a basic rank < 1000 if it has throws available. Targeted: `5-3-2` → re-rolls the 5. Targeted: `4-2-1` → commits immediately (421 ceiling). Probability buffer: feed a synthetic game state where `target_rank` is just-below a pair and `rolls_left == 2` — bot should NOT stop on a marginal win.
+- **Future hook for ML.** The decision-log format is intentionally JSON-shaped so a follow-up could train a small policy network from replay data. Out of scope for v1; mentioned so the field names don't paint the bot into a corner.
+**Acceptance:** Manual playtest: bot as starter rolls 5-3-2 → re-rolls the 5 (rule 5 fires); bot mid-cycle marginally beating target → uses remaining throws to widen the lead; bot's decision log entries appear in the journal for inspection.
+**Dependencies:** None for the core fix. The probability table is a self-contained module. The decision-log surfacing depends on choosing the right audience (debug-flag vs spectator-only) — pick during implementation.
+
+### G56. Hold the dice on the piste through a play-validate transition
+**Why:** Reported during playtest. When the player's turn validates — manual « Valider », auto-validate at max throws (G3), or end-of-match cycle resolution — the piste's dice display resets to blank and the cycle advances on the same broadcast frame. The toast (G23 `SelfPlayToast`) fires, but it's the small bottom-right card; the player's eye is on the piste, and by the time they look down, the toast is mid-fade. Net effect: the player just played, but they never see what they played before everything moves on. Especially bad at end-of-match where the G13 banner takes the centered slot and suppresses the toast entirely.
+**Scope:**
+- **Server-side delay.** After a turn validates (player called `done`, auto-validate fired, or AFK-bot finalized), instead of immediately calling `advance()` + broadcasting the next state, sleep ~1.5 s on the broadcast that holds the validated dice on the piste, *then* advance + broadcast again. Mirrors the [[G2]] bot-handback grace pattern but on the human side. A subsequent play action from the *next* player short-circuits the sleep.
+- **Visual treatment.** During the 1.5 s hold, the validated dice stay on-piste, dimmed slightly, with the combo + chip outcome surfaced in a centered ribbon (« 421 · 8 fiches sent to the pool » or « basic · -1 to Player1 »). After the hold, dice clear and the next player's turn begins.
+- **Match-end interaction.** At end-of-match the G13 banner already provides a 4.5 s pause before resetting — that natural hold *should* cover the last-play visibility, but verify by playtest. If the validated dice clear before the banner appears, add an additional dice-hold flag to the manché path.
+- **Auto-validate specifically.** Currently G3 auto-validate fires synchronously in the `roll` handler when `rolls_used >= max_throws_this_round`. The hold pattern needs to run after this synchronous call returns — i.e. the server emits an interim "play complete, dice held" state, then a deferred final state after the sleep.
+- **Skippable.** A short `?` next to the dice ("→") lets the player skip the hold and advance immediately. Power-user affordance for fast play.
+- **Bundles with [[G51]]** (SelfPlayToast bigger + centered) — together they ensure the player sees their play *both* on the piste and in the toast.
+- **Doesn't break the bot path.** [[G2]]'s `BOT_HANDBACK_GRACE_SECONDS` already holds the bot's play for 3 s. G56 adds the same affordance for human plays.
+**Acceptance:** Player rolls their final throw → the dice + combo stay visible on the piste for ~1.5 s with a centered chip-outcome ribbon → then the next player's turn renders. Works identically for manual validate, auto-validate, and AFK-bot turns. End-of-match plays remain visible through the G13 banner overlay.
+**Dependencies:** Bundles with [[G51]] (bigger toast) and benefits from [[G14]] (piste sizing) since the centered ribbon competes for space with the dice area.
 
 ---
 
