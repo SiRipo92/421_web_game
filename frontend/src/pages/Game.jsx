@@ -3,14 +3,12 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Die } from '../components/shared/Die.jsx'
 import { Avatar } from '../components/shared/Avatar.jsx'
 import { ChipStack } from '../components/shared/ChipStack.jsx'
+import { ComboTable } from '../components/shared/ComboTable.jsx'
 import { RoomSettingsPanel } from '../components/shared/RoomSettingsPanel.jsx'
 import { ConfirmModal } from '../components/shared/ConfirmModal.jsx'
-import { HierarchyModal } from '../components/shared/HierarchyModal.jsx'
 import { CommentaryTicker, ScoreToBeatBanner } from '../components/shared/CommentaryTicker.jsx'
 import { useGame } from '../hooks/useGame.js'
-import { useMediaQuery } from '../hooks/useMediaQuery.js'
 import { useLang } from '../context/useLang.js'
-import { GameMobile } from './GameMobile.jsx'
 
 export function Game({ token }) {
   const { t } = useLang()
@@ -20,12 +18,8 @@ export function Game({ token }) {
   const navigate = useNavigate()
   const { state, roll, keep, done, initialRoll, tiebreakRoll, leave, kick } = useGame(gameId, playerId, token)
   const logRef = useRef(null)
-  // G64: switch to the mobile-shell layout at ≤ 959 px viewports.
-  const isMobile = useMediaQuery('(max-width: 959px)')
 
   const [logOpen, setLogOpen] = useState(true)
-  const [tickerOpen, setTickerOpen] = useState(true)
-  const [showHierarchy, setShowHierarchy] = useState(false)
   const [showRoomSettings, setShowRoomSettings] = useState(false)
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false)
   const [kickTarget, setKickTarget] = useState(null) // {id, name} the host is about to kick
@@ -118,34 +112,6 @@ export function Game({ token }) {
     return <TiebreakScreen state={state} playerId={playerId} t={t} onRoll={tiebreakRoll} />
   }
 
-  // G64: mobile / tablet (≤ 959 px) gets a purpose-built shell — slim
-  // header, full-bleed piste, 2-row dock with drawer toggles instead of the
-  // desktop 3-column rail layout. Initial-roll / tiebreak / finished phases
-  // above fall through to their existing simpler full-screen renders.
-  if (isMobile) {
-    return (
-      <GameMobile
-        state={state}
-        t={t}
-        playerId={playerId}
-        me={me}
-        isHost={isHost}
-        isMyTurn={isMyTurn}
-        myTurn={myTurn}
-        hasRolled={hasRolled}
-        canRoll={canRoll}
-        canDone={canDone}
-        showAfkBar={showAfkBar}
-        roll={roll}
-        keep={keep}
-        done={done}
-        leave={leave}
-        navigate={navigate}
-        formatLogEntries={formatLogEntries}
-      />
-    )
-  }
-
   return (
     <div style={{
       minHeight: '100vh',
@@ -154,110 +120,28 @@ export function Game({ token }) {
       gap: 0,
     }} className="gameroom-grid">
 
-      {/* G64 follow-up: left rail now stacks a PlayerRail (always shown
-          while the rail itself is visible) above the existing
-          CommentaryTicker. With the top-bar PlayerStrips removed (they
-          squished badly at 3+ players), the rail is now the persistent
-          who's-at-the-table surface — avatars, names, tokens, manché
-          pips, and the host's kick affordance, all in one column. */}
       <aside
-        className="gameroom-left-rail side-ticker"
+        className="side-ticker"
         style={{
           borderRight: '1px solid var(--rule)',
           background: 'var(--paper-soft)',
           maxHeight: '100vh',
           overflow: 'hidden',
-          display: 'flex',
-          flexDirection: 'column',
         }}
       >
-        <PlayerRail
-          players={state.players}
-          currentPlayerId={state.current_player_id}
-          playerId={playerId}
-          t={t}
-          isHost={isHost}
-          onKick={(id, name) => setKickTarget({ id, name })}
-        />
-        {/* G64 follow-up: ticker now has a header + collapse button so the
-            user can hide it (it's secondary to the PlayerRail in this rail
-            now). When closed it shrinks to just the header strip — the
-            PlayerRail above gets the freed vertical space. */}
-        <div
-          className="gameroom-left-rail-ticker"
-          style={{
-            borderTop: '1px solid var(--rule)',
-            flex: tickerOpen ? 1 : '0 0 auto',
-            minHeight: 0,
-            display: 'flex',
-            flexDirection: 'column',
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => setTickerOpen(o => !o)}
-            aria-expanded={tickerOpen}
-            aria-label={tickerOpen ? t('ticker_collapse_aria') : t('ticker_expand_aria')}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              width: '100%',
-              padding: '0.6rem 1rem',
-              background: 'transparent',
-              border: 'none',
-              borderBottom: tickerOpen ? '1px solid var(--rule)' : 'none',
-              color: 'var(--ink-soft)',
-              fontFamily: 'var(--body)',
-              fontSize: '0.7rem',
-              letterSpacing: '0.14em',
-              textTransform: 'uppercase',
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
-          >
-            <span>{t('ticker_eyebrow')}</span>
-            <span aria-hidden="true">{tickerOpen ? '▲' : '▼'}</span>
-          </button>
-          {tickerOpen && (
-            <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-              <CommentaryTicker events={state.log_events} t={t} />
-            </div>
-          )}
-        </div>
+        <CommentaryTicker events={state.log_events} t={t} />
       </aside>
 
-      {/* G62: middle column locks to the viewport height via a 3-row grid
-          (top-bar · piste · action-bar). `overflow: hidden` prevents the
-          page from gaining a scrollbar when the piste's intrinsic size
-          would otherwise push the action bar below the fold. */}
-      <div
-        className="gameroom-center gameroom-center-desktop"
-        style={{
-          display: 'grid',
-          gridTemplateRows: 'auto 1fr auto',
-          height: '100vh',
-          minWidth: 0,
-          overflow: 'hidden',
-        }}
-      >
+      <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
 
-        {/* Top panel — G64 follow-up: simplified to a 2-column flex
-            (justify-between) now that the player strips moved to the
-            left rail. Left: phase chip + round. Right: bank · settings
-            · quit. No middle column. */}
-        <div
-          className="gameroom-header gameroom-header-desktop top-panel"
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: 16,
-            padding: '1rem 1.5rem',
-            borderBottom: '1px solid var(--rule)',
-            background: 'var(--paper-soft)',
-          }}
-        >
+        {/* Top panel */}
+        <div style={{
+          display: 'grid', gridTemplateColumns: 'auto 1fr auto', gap: 24,
+          padding: '1.2rem 1.5rem',
+          borderBottom: '1px solid var(--rule)',
+          background: 'var(--paper-soft)',
+          alignItems: 'center',
+        }} className="top-panel">
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
             <div style={{
               padding: '0.4rem 1rem',
@@ -276,40 +160,33 @@ export function Game({ token }) {
             </div>
           </div>
 
-          {/* G64 follow-up: middle column removed — PlayerStrips moved
-              into the new vertical PlayerRail in the left aside, which
-              scales gracefully to any player count without squishing. */}
+          <div style={{ display: 'flex', gap: 10, overflow: 'auto', justifyContent: 'center' }}>
+            {state.players?.map(p => (
+              <PlayerStrip
+                key={p.id}
+                p={p}
+                active={p.id === state.current_player_id}
+                isSelf={p.id === playerId}
+                t={t}
+                canKick={isHost && p.id !== playerId}
+                onKick={() => setKickTarget({ id: p.id, name: p.name })}
+              />
+            ))}
+          </div>
 
-          <div
-            className="gameroom-header-actions"
-            style={{
-              display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap',
-              // G62 follow-up: pin the bank · settings · quit cluster flush
-              // against the right edge of the top bar. Without this, when
-              // `flex-wrap` triggered a second row (at very narrow widths),
-              // wrapped items packed left and Quit ended up visually
-              // centre-of-the-column rather than top-right corner.
-              justifyContent: 'flex-end',
-            }}
-          >
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <CounterChip label={t('pool')} value={state.pool ?? 0} accent="var(--rouge)" />
             {isHost && (
               <button
                 type="button"
                 onClick={() => setShowRoomSettings(true)}
                 aria-label={t('room_rules_button')}
-                title={t('room_rules_button')}
                 style={{
-                  // G62: icon-only at all widths. The text label pushed
-                  // the top-bar's right column wide enough to crowd the
-                  // PlayerStrips. Screen readers + tooltip keep the
-                  // affordance discoverable; the ⚙ icon carries the load.
                   display: 'inline-flex',
                   alignItems: 'center',
-                  justifyContent: 'center',
-                  width: 36,
-                  height: 36,
-                  fontSize: '1.05rem',
+                  gap: 6,
+                  padding: '0.4rem 0.75rem',
+                  fontSize: '0.82rem',
                   fontFamily: 'var(--body)',
                   color: 'var(--ink-soft)',
                   background: 'var(--paper)',
@@ -327,7 +204,7 @@ export function Game({ token }) {
                   e.currentTarget.style.background = 'var(--paper)'
                   e.currentTarget.style.color = 'var(--ink-soft)'
                 }}
-              >⚙</button>
+              >⚙ {t('room_rules_button')}</button>
             )}
             <button
               type="button"
@@ -362,29 +239,12 @@ export function Game({ token }) {
         </div>
 
         {/* Piste area — G14: piste grows to fill the column, dice anchored to bottom,
-            pool dead-center as the focal point, score-to-beat banner pinned at top.
-            G62: the parent grid row carries the height; `minHeight: 0` lets this
-            container shrink instead of pushing the action bar off-screen.
-            G62 follow-up: `containerType: size` registers this as a container
-            so the piste-stage can size from BOTH axes — `min(cqi, cqb)` returns
-            the smaller of width/height, keeping the inner square truly square
-            (and the `.piste` circle truly circular) regardless of which axis
-            is the binding constraint. */}
-        <div
-          className="gameroom-main gameroom-piste-area"
-          style={{
-            minHeight: 0, padding: '1.2rem',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            position: 'relative',
-            // G62 follow-up: previously had `overflow: hidden` which clipped
-            // the player seats that hang above and below the piste perimeter.
-            // The parent middle column carries its own `overflow: hidden`, so
-            // page scroll is still prevented — content can extend into the
-            // padding without spilling further.
-            overflow: 'visible',
-            containerType: 'size',
-          }}
-        >
+            pool dead-center as the focal point, score-to-beat banner pinned at top. */}
+        <div style={{
+          flex: 1, padding: '1.2rem',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          position: 'relative',
+        }}>
           {matchEnd && (
             <MatchEndBanner
               t={t}
@@ -394,67 +254,35 @@ export function Game({ token }) {
             />
           )}
           <div
-            className="gameroom-piste-stage piste-stage"
-            style={{
-              position: 'relative',
-              // G62 follow-up: reserve ~22 % of the available space (11 %
-              // on each side) for the player seats hanging off the piste
-              // perimeter. Without this the seats clipped at the rail edges;
-              // with it the circle reads as a focal point and the seats
-              // have visible breathing room above/below/around it.
-              width: 'min(700px, 78cqi, 78cqb)',
-              aspectRatio: '1/1',
-            }}
+            className="piste-stage"
+            style={{ position: 'relative', width: 'min(820px, 85vh, 100%)', aspectRatio: '1/1' }}
           >
-            <div className="gameroom-piste piste" style={{ position: 'absolute', inset: 0 }} role="region" aria-label="Piste de jeu">
-              {/* G47 follow-up: the « ❦ LA PISTE ❦ » decorative label used
-                  to sit at top: 5 % of the piste. With G47 rotation putting
-                  an opponent at the top of the ring, the label was directly
-                  underneath their avatar/name pill — overlap. Removed; the
-                  piste's brass rim + felt gradient already carry the visual
-                  identity without it. */}
+            <div className="piste" style={{ position: 'absolute', inset: 0 }} role="region" aria-label="Piste de jeu">
+              <div style={{
+                position: 'absolute', top: '5%', left: '50%', transform: 'translateX(-50%)',
+                fontFamily: 'var(--display)', fontStyle: 'italic',
+                color: 'var(--paper-deep)', fontSize: '1rem', letterSpacing: '0.16em', whiteSpace: 'nowrap',
+              }} aria-hidden="true">❦  L A   P I S T E  ❦</div>
 
               <ScoreToBeatBanner plays={state.current_round_plays} t={t} />
 
-              {/* Pool chips — focal point dead-center.
-                  G62 follow-up: chip stack uses `size="large"` (1.45× scale)
-                  and the label bumps to 0.88rem so the pool count reads as
-                  the centre of attention now that the piste itself is a bit
-                  smaller. */}
-              <div
-                className="gameroom-pool"
-                style={{
-                  position: 'absolute', top: '46%', left: '50%', transform: 'translate(-50%,-50%)',
-                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14,
-                }}
-              >
-                {(state.pool ?? 0) > 0 && <ChipStack count={state.pool} size="large" />}
-                <span
-                  className="gameroom-pool-label eyebrow"
-                  style={{
-                    fontSize: '0.88rem',
-                    color: 'var(--paper-deep)',
-                    letterSpacing: '0.14em',
-                  }}
-                >
-                  {t('pool')} · <span className="mono" style={{ fontSize: '1rem', fontWeight: 700 }}>{state.pool ?? 0}</span>
+              {/* Pool chips — focal point dead-center */}
+              <div style={{
+                position: 'absolute', top: '46%', left: '50%', transform: 'translate(-50%,-50%)',
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+              }}>
+                {(state.pool ?? 0) > 0 && <ChipStack count={state.pool} />}
+                <span className="eyebrow" style={{ fontSize: '0.6rem', color: 'var(--paper-deep)' }}>
+                  {t('pool')} · <span className="mono">{state.pool ?? 0}</span>
                 </span>
               </div>
 
-              {/* Dice cluster — anchored at the bottom of the felt.
-                  G64 follow-up: lifted from `bottom: 6%` → `14%`. With
-                  G62's bigger piste (700px / 78cqi/cqb) the dice were
-                  sitting too close to the local viewer's avatar at the
-                  ring bottom. Moving up creates clearance and balances
-                  the visual weight against the pool at top: 46%. */}
-              <div
-                className="gameroom-dice-cluster"
-                style={{
-                  position: 'absolute', bottom: '14%', left: '50%', transform: 'translateX(-50%)',
-                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
-                  maxWidth: '90%',
-                }}
-              >
+              {/* Dice cluster — anchored at the bottom of the felt */}
+              <div style={{
+                position: 'absolute', bottom: '6%', left: '50%', transform: 'translateX(-50%)',
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
+                maxWidth: '90%',
+              }}>
                 {/* G5: badge legend — always visible while the player can choose
                     which dice to lock, so the on-die ✓/↺ icons read at a glance. */}
                 {isMyTurn && hasRolled && !myTurn?.done && (myTurn?.rolls_left ?? 0) > 0 && (
@@ -484,63 +312,38 @@ export function Game({ token }) {
               </div>
             </div>
 
-            {/* Players around piste.
-                G64 follow-up: rotate so the local player anchors at the
-                bottom slot (G47 logic), and push the seat anchor outside
-                the piste edge (r=58 instead of 50). With r=50 the viewer's
-                seat content sat *inside* the piste, overlapping the now-
-                lifted dice cluster (bottom: 14 %). r=58 + smaller seat
-                heights = clean separation. */}
-            {(() => {
-              const players = state.players || []
-              const myIdx = Math.max(0, players.findIndex(p => p.id === playerId))
-              const rotated = [...players.slice(myIdx), ...players.slice(0, myIdx)]
-              return rotated.map((p, i) => {
-                const total = rotated.length
-                const angle = 90 + (360 / total) * i
-                const rad = (angle * Math.PI) / 180
-                const r = 58
-                const x = 50 + r * Math.cos(rad)
-                const y = 50 + r * Math.sin(rad)
-                return (
-                  <PisteSeat key={p.id} p={p}
-                    active={p.id === state.current_player_id}
-                    isSelf={p.id === playerId}
-                    x={x} y={y}
-                    t={t}
-                  />
-                )
-              })
-            })()}
+            {/* Players around piste */}
+            {state.players?.map((p, i) => {
+              const total = state.players.length
+              const angle = 90 + (360 / total) * i
+              const rad = (angle * Math.PI) / 180
+              const r = 50
+              const x = 50 + r * Math.cos(rad)
+              const y = 50 + r * Math.sin(rad)
+              return (
+                <PisteSeat key={p.id} p={p}
+                  active={p.id === state.current_player_id}
+                  isSelf={p.id === playerId}
+                  x={x} y={y}
+                />
+              )
+            })}
           </div>
         </div>
 
-        {/* Action bar — G64 follow-up: 3-column grid (info · secondary
-            · primary) so the play buttons (Roll, Validate) always anchor
-            flush against the right edge, even when secondary controls
-            (RhythmIndicator, RollDots) wrap on narrow widths. Previous
-            `flex-wrap + justify-content: space-between` left the wrapped
-            row left-aligned, putting the play buttons in the middle of
-            the bar instead of the corner. */}
-        <div
-          className="gameroom-dock gameroom-dock-desktop"
-          role="region"
-          aria-label="Contrôles"
-          style={{
-            padding: '1rem 1.5rem',
-            borderTop: '1px solid var(--rule)',
-            background: 'var(--paper-soft)',
-            display: 'grid',
-            gridTemplateColumns: 'minmax(0, 1fr) auto auto',
-            gap: 16,
-            alignItems: 'center',
-          }}
-        >
-          <div className="gameroom-dock-info" style={{ minWidth: 0 }}>
+        {/* Action bar */}
+        <div style={{
+          padding: '1.2rem 1.5rem',
+          borderTop: '1px solid var(--rule)',
+          background: 'var(--paper-soft)',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          gap: 16, flexWrap: 'wrap',
+        }} role="region" aria-label="Contrôles">
+          <div>
             <div className="eyebrow" style={{ fontSize: '0.78rem' }}>
               {isMyTurn ? t('your_turn') : `${t('waiting_turn')} — ${state.players?.find(p => p.id === state.current_player_id)?.name || ''}`}
             </div>
-            <div className="serif" style={{ fontStyle: 'italic', color: 'var(--ink-soft)', marginTop: 6, fontSize: '1rem' }}>
+            <div className="serif" style={{ fontStyle: 'italic', color: 'var(--ink-soft)', marginTop: 6, fontSize: '1.05rem' }}>
               {isMyTurn
                 ? !hasRolled ? t('keep_hint') : `${myTurn?.rolls_left ?? 0} ${t('rolls_left')}.`
                 : <span>{t('waiting_for')} <span className="mono pulse-soft">…</span></span>}
@@ -552,7 +355,7 @@ export function Game({ token }) {
               />
             )}
           </div>
-          <div className="gameroom-dock-secondary" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
             <RhythmIndicator
               t={t}
               isMyTurn={isMyTurn}
@@ -569,15 +372,13 @@ export function Game({ token }) {
             {(state.max_throws > 1 || (isStarter && !hasRolled)) && (
               <RollDots rollsLeft={myTurn?.rolls_left ?? 3} />
             )}
-          </div>
-          <div className="gameroom-dock-primary" style={{ display: 'flex', gap: 10, alignItems: 'center', justifySelf: 'end' }}>
             {isMyTurn && (
               <>
                 <button
                   type="button"
                   onClick={roll}
                   disabled={!canRoll}
-                  className="btn btn-rouge gameroom-roll-btn"
+                  className="btn btn-rouge"
                   style={{ opacity: canRoll ? 1 : 0.4, minHeight: 44 }}
                   aria-label={!hasRolled ? t('roll') : t('reroll')}
                 >
@@ -587,7 +388,7 @@ export function Game({ token }) {
                   type="button"
                   onClick={done}
                   disabled={!canDone}
-                  className="btn btn-primary gameroom-validate-btn"
+                  className="btn btn-primary"
                   style={{ opacity: canDone ? 1 : 0.4, minHeight: 44 }}
                   aria-label={t('validate')}
                 >
@@ -632,69 +433,23 @@ export function Game({ token }) {
             ))}
           </div>
         )}
-        {/* G62 follow-up: the combo hierarchy table used to live here as a
-            permanent footer of the right aside, eating real estate every
-            game even for players who already know the rules. Now it's a
-            button that pops a lightbox with the full hierarchy on demand —
-            free space for the journal, one click away when needed. */}
-        <div style={{ padding: '0.9rem 1.4rem', borderTop: '1px solid var(--rule)' }}>
-          <button
-            type="button"
-            onClick={() => setShowHierarchy(true)}
-            aria-label={t('hierarchy_open')}
-            style={{
-              width: '100%',
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 8,
-              padding: '0.55rem 0.9rem',
-              fontSize: '0.85rem',
-              fontFamily: 'var(--body)',
-              color: 'var(--ink-soft)',
-              background: 'var(--paper)',
-              border: '1px solid var(--rule)',
-              borderRadius: 4,
-              cursor: 'pointer',
-              transition: 'background 0.15s, color 0.15s, border-color 0.15s',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'var(--paper-deep)'
-              e.currentTarget.style.color = 'var(--ink)'
-              e.currentTarget.style.borderColor = 'var(--brass)'
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'var(--paper)'
-              e.currentTarget.style.color = 'var(--ink-soft)'
-              e.currentTarget.style.borderColor = 'var(--rule)'
-            }}
-          >
-            <span>📖 {t('hierarchy_open')}</span>
-            <span style={{ color: 'var(--ink-mute)', fontSize: '0.9rem' }}>›</span>
-          </button>
+        <div style={{ padding: '1rem 1.4rem', borderTop: '1px solid var(--rule)' }}>
+          <div className="eyebrow" style={{ marginBottom: 8 }}>{t('combo_hier')}</div>
+          <ComboTable compact />
         </div>
       </aside>
 
       <style>{`
-        /* Mid-width: at ≤ 1180 px the left rail keeps the PlayerRail
-           (so the table roster stays visible — there's no top-bar
-           strip to fall back on after G64) but the CommentaryTicker
-           below it hides to claim vertical room. */
+        /* Mid-width: hide the ticker rail, keep log + piste */
         @media (max-width: 1180px) {
-          .gameroom-grid { grid-template-columns: 220px 1fr 320px !important; }
-          .gameroom-left-rail-ticker { display: none !important; }
-        }
-        /* G62: at narrow widths, the per-strip mini dice would overlap the
-           player name. Hide them — the active player's dice are visible
-           in the piste anyway, and inactive players' last-throw dice can
-           be read from the right-side journal. */
-        @media (max-width: 1280px) {
-          .player-strip-dice { display: none !important; }
+          .gameroom-grid { grid-template-columns: 1fr 320px !important; }
+          .side-ticker { display: none !important; }
         }
         @media (max-width: 980px) {
           .gameroom-grid { grid-template-columns: 1fr !important; }
           .side-log { max-height: 300px !important; border-left: none !important; border-top: 1px solid var(--rule); }
-          .gameroom-left-rail { display: none !important; }
+          .side-ticker { display: none !important; }
+          .top-panel { grid-template-columns: 1fr !important; gap: 12px !important; }
         }
         @media (prefers-reduced-motion: reduce) {
           .die-tumble, .pulse-soft, .glow-421 { animation: none !important; }
@@ -708,12 +463,6 @@ export function Game({ token }) {
           onClose={() => setShowRoomSettings(false)}
         />
       )}
-
-      <HierarchyModal
-        open={showHierarchy}
-        onClose={() => setShowHierarchy(false)}
-        t={t}
-      />
 
       {showLeaveConfirm && (
         <ConfirmModal
@@ -945,215 +694,94 @@ function CounterChip({ label, value, accent }) {
   )
 }
 
-/**
- * G64 follow-up: vertical list of all players in the room, shown in the left
- * rail above the CommentaryTicker. Replaces the squished top-bar PlayerStrip
- * row — strips were fine at 2 players but overlapped badly at 3+. The rail
- * version stacks one strip per row and grows comfortably to 5 players.
- *
- * Reuses the existing `PlayerStrip` component so name/avatar/tokens/score-pip
- * rendering stays consistent with how strips looked horizontally.
- */
-function PlayerRail({ players, currentPlayerId, playerId, t, isHost, onKick }) {
-  if (!players?.length) return null
-  return (
-    <div
-      className="gameroom-player-rail"
-      style={{
-        padding: '1rem 0.85rem',
-        borderBottom: '1px solid var(--rule)',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 6,
-      }}
-    >
-      <div className="eyebrow" style={{ fontSize: '0.62rem', marginBottom: 4 }}>
-        {t('players_at_table')}
-      </div>
-      {players.map(p => (
-        <PlayerStrip
-          key={p.id}
-          p={p}
-          active={p.id === currentPlayerId}
-          isSelf={p.id === playerId}
-          t={t}
-          canKick={isHost && p.id !== playerId}
-          onKick={() => onKick(p.id, p.name)}
-        />
-      ))}
-    </div>
-  )
-}
-
 function PlayerStrip({ p, active, isSelf, t, canKick, onKick }) {
-  // G64 follow-up: card-shaped vertical layout for the left rail. The old
-  // horizontal layout (Avatar · Name/Tokens · Pips · Kick all in one row)
-  // didn't fit the narrow 220 px rail column at 3+ players. Now structured
-  // as two stacked rows:
-  //   Row 1: Avatar + (Name + token line) + Kick (absolute top-right)
-  //   Row 2: Score pips (skull, round-points)
-  // Each card is ~70 px tall — fits everything cleanly without overlap.
   return (
-    <div
-      className="gameroom-player-card"
-      style={{
-        position: 'relative',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 6,
-        padding: '0.55rem 0.7rem',
-        borderRadius: 4,
-        background: active ? 'var(--rouge)' : 'var(--paper-deep)',
-        color: active ? 'var(--paper)' : 'var(--ink)',
-        border: '1px solid var(--rule)',
-      }}
-    >
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 8,
+      padding: '0.4rem 0.8rem', borderRadius: 3,
+      background: active ? 'var(--rouge)' : 'var(--paper-deep)',
+      color: active ? 'var(--paper)' : 'var(--ink)',
+      border: '1px solid var(--rule)', minWidth: 0, whiteSpace: 'nowrap',
+    }}>
+      <Avatar name={p.name} userId={p.user_id} hasAvatar={p.has_avatar ?? false} size={1.6} />
+      <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.1, minWidth: 0 }}>
+        <span className="serif" style={{ fontWeight: 600, fontSize: '0.85rem' }}>{p.name}{isSelf ? ' ★' : ''}</span>
+        <span className="mono" style={{ fontSize: '0.65rem', opacity: 0.7 }}>{p.tokens ?? 0} fiches</span>
+      </div>
+      <ScorePips matchLosses={p.match_losses ?? 0} roundPoints={p.round_points ?? 0} active={active} />
+      {p.turn?.done && p.turn.dice && (
+        <div style={{ display: 'flex', gap: 2, marginLeft: 4 }}>
+          {p.turn.dice.map((v, i) => <Die key={i} value={v} mini />)}
+        </div>
+      )}
       {canKick && (
         <button
           type="button"
           onClick={onKick}
           aria-label={t ? `${t('kick_button')} ${p.name}` : 'Kick'}
           title={t ? t('kick_button') : 'Kick'}
-          className="gameroom-player-card-kick"
           style={{
-            position: 'absolute',
-            top: 4,
-            right: 4,
-            width: 22,
-            height: 22,
-            padding: 0,
+            marginLeft: 4,
+            padding: '2px 6px',
             background: 'transparent',
             border: '1px solid var(--rule)',
             borderRadius: 999,
             color: active ? 'var(--paper)' : 'var(--ink-mute)',
             cursor: 'pointer',
-            fontSize: '0.7rem',
+            fontSize: '0.72rem',
             lineHeight: 1,
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            opacity: 0.75,
+            opacity: 0.7,
           }}
           onMouseEnter={(e) => {
             e.currentTarget.style.opacity = '1'
             e.currentTarget.style.color = 'var(--rouge)'
             e.currentTarget.style.borderColor = 'var(--rouge)'
-            e.currentTarget.style.background = 'var(--paper)'
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.opacity = '0.75'
+            e.currentTarget.style.opacity = '0.7'
             e.currentTarget.style.color = active ? 'var(--paper)' : 'var(--ink-mute)'
             e.currentTarget.style.borderColor = 'var(--rule)'
-            e.currentTarget.style.background = 'transparent'
           }}
         >✕</button>
       )}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-        <Avatar name={p.name} userId={p.user_id} hasAvatar={p.has_avatar ?? false} active={active} isSelf={isSelf} size={2} />
-        <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.15, minWidth: 0, flex: 1, paddingRight: canKick ? 22 : 0 }}>
-          <span className="serif" style={{
-            fontWeight: 600,
-            fontSize: '0.88rem',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}>
-            {p.name}{isSelf ? ' ★' : ''}
-          </span>
-          {/* G64 follow-up: stats line shows all three counters at once:
-              tokens · parties lost · manches lost this partie. Both
-              loss counters always render (alwaysShow), so you can
-              compare players at a glance ("0 / 1" vs "2 / 0") — the
-              user tracks this on their phone as "Sierra : 0, 1m". Zero
-              counters dim so non-zero values jump. Dropped the "fiches"
-              suffix here — the 🪙 glyph is unambiguous in this row
-              and gives room for both pips. */}
-          <span className="mono" style={{
-            fontSize: '0.72rem', marginTop: 2,
-            display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
-          }}>
-            <span title={t ? t('chips_label') : ''}>
-              🪙 <span style={{ fontWeight: 700 }}>{p.tokens ?? 0}</span>
-            </span>
-            <ScorePips
-              matchLosses={p.match_losses ?? 0}
-              roundPoints={p.round_points ?? 0}
-              active={active}
-              t={t}
-              alwaysShow
-            />
-          </span>
-        </div>
-      </div>
     </div>
   )
 }
 
-function ScorePips({ matchLosses, roundPoints, active, t, alwaysShow = false }) {
-  // G64 follow-up: two counters per player, both always numbered so you
-  // can compare players at a glance ("who's losing most / who's still
-  // clean?"). With `alwaysShow=true` (used in the rail card), both pips
-  // render even at 0; without it (used inline next to the piste-ring
-  // name pill where space is tight) only non-zero counts render.
-  //   🩹 = manche perdue cette partie (wounded — single match lost in
-  //         the current partie, caps at 1 before triggering a partie
-  //         loss).
-  //   💀 = parties perdues (dead — cumulative full-game losses across
-  //         the session).
-  // Plain emoji + count, no chip styling, tooltips spell out the
-  // meaning in proper French/English on hover. Zero counts dim to
-  // opacity 0.45 so non-zero values jump visually.
-  const showManche = alwaysShow || matchLosses > 0
-  const showPartie = alwaysShow || roundPoints > 0
-  if (!showManche && !showPartie) return null
-  const mancheTitle = t ? t('manche_loss_tooltip') : 'Manche perdue cette partie'
-  const partieTitle = t ? t('partie_loss_tooltip') : 'Parties perdues'
+function ScorePips({ matchLosses, roundPoints, active }) {
+  // Compact loss markers shown next to the player name. We always render both
+  // counters (even at 0) so the player can see their position at a glance —
+  // 💀 = manche perdue ce round, 🏷 = points de partie cumulés.
+  if (!matchLosses && !roundPoints) return null
   return (
-    <span
+    <div
       style={{
         display: 'inline-flex',
-        gap: 8,
-        alignItems: 'center',
-        fontSize: '0.72rem',
+        gap: 4,
+        marginLeft: 4,
+        fontSize: '0.7rem',
         fontFamily: 'var(--mono)',
-        fontWeight: 700,
         color: active ? 'var(--paper)' : 'var(--ink-soft)',
-        userSelect: 'none',
-        cursor: 'default',
       }}
-      aria-label={`${partieTitle}: ${roundPoints} · ${mancheTitle}: ${matchLosses}`}
+      aria-label={`Manches perdues: ${matchLosses} · Points de partie: ${roundPoints}`}
     >
-      {showPartie && (
-        <span
-          title={partieTitle}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 2,
-            opacity: roundPoints > 0 ? 1 : 0.45,
-          }}
-        >
-          💀 <span>{roundPoints ?? 0}</span>
-        </span>
+      {matchLosses > 0 && (
+        <span style={{
+          padding: '1px 5px', borderRadius: 8, background: active ? 'rgba(255,255,255,0.18)' : 'var(--paper)',
+          border: '1px solid var(--rule)', fontWeight: 700, color: 'var(--rouge)',
+        }} title="Manches perdues ce round">💀 {matchLosses}</span>
       )}
-      {showManche && (
-        <span
-          title={mancheTitle}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 2,
-            opacity: matchLosses > 0 ? 1 : 0.45,
-          }}
-        >
-          🩹 <span>{matchLosses ?? 0}</span>
-        </span>
+      {roundPoints > 0 && (
+        <span style={{
+          padding: '1px 5px', borderRadius: 8, background: active ? 'rgba(255,255,255,0.18)' : 'var(--paper)',
+          border: '1px solid var(--rule)', fontWeight: 700, color: 'var(--brass-deep)',
+        }} title="Points de partie">🏷 {roundPoints}</span>
       )}
-    </span>
+    </div>
   )
 }
 
-function PisteSeat({ p, active, isSelf, x, y, t }) {
+function PisteSeat({ p, active, isSelf, x, y }) {
   return (
     <div style={{
       position: 'absolute', left: `${x}%`, top: `${y}%`,
@@ -1173,7 +801,7 @@ function PisteSeat({ p, active, isSelf, x, y, t }) {
         boxShadow: active ? '0 4px 0 rgba(0,0,0,0.3)' : '0 2px 0 rgba(0,0,0,0.1)',
       }}>
         <span>{p.name}{isSelf ? ' ★' : ''}</span>
-        <ScorePips matchLosses={p.match_losses ?? 0} roundPoints={p.round_points ?? 0} active={active} t={t} />
+        <ScorePips matchLosses={p.match_losses ?? 0} roundPoints={p.round_points ?? 0} active={active} />
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <div style={{
