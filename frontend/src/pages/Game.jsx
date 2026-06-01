@@ -132,11 +132,21 @@ export function Game({ token }) {
         <CommentaryTicker events={state.log_events} t={t} />
       </aside>
 
-      <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+      {/* G62: middle column locks to the viewport height via a 3-row grid
+          (top-bar · piste · action-bar). `overflow: hidden` prevents the
+          page from gaining a scrollbar when the piste's intrinsic size
+          would otherwise push the action bar below the fold. */}
+      <div style={{
+        display: 'grid',
+        gridTemplateRows: 'auto 1fr auto',
+        height: '100vh',
+        minWidth: 0,
+        overflow: 'hidden',
+      }}>
 
         {/* Top panel */}
         <div style={{
-          display: 'grid', gridTemplateColumns: 'auto 1fr auto', gap: 24,
+          display: 'grid', gridTemplateColumns: 'auto minmax(0, 1fr) auto', gap: 24,
           padding: '1.2rem 1.5rem',
           borderBottom: '1px solid var(--rule)',
           background: 'var(--paper-soft)',
@@ -160,7 +170,17 @@ export function Game({ token }) {
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: 10, overflow: 'auto', justifyContent: 'center' }}>
+          {/* G62: PlayerStrips now scroll horizontally when they don't fit
+              the available middle column (instead of overflowing into the
+              host-controls column). The parent grid's `minmax(0, 1fr)`
+              constraint plus this `overflow-x: auto` contains them. */}
+          <div style={{
+            display: 'flex', gap: 10,
+            overflowX: 'auto', overflowY: 'visible',
+            minWidth: 0,
+            justifyContent: 'center',
+            scrollbarWidth: 'thin',
+          }}>
             {state.players?.map(p => (
               <PlayerStrip
                 key={p.id}
@@ -181,12 +201,18 @@ export function Game({ token }) {
                 type="button"
                 onClick={() => setShowRoomSettings(true)}
                 aria-label={t('room_rules_button')}
+                title={t('room_rules_button')}
                 style={{
+                  // G62: icon-only at all widths. The text label pushed
+                  // the top-bar's right column wide enough to crowd the
+                  // PlayerStrips. Screen readers + tooltip keep the
+                  // affordance discoverable; the ⚙ icon carries the load.
                   display: 'inline-flex',
                   alignItems: 'center',
-                  gap: 6,
-                  padding: '0.4rem 0.75rem',
-                  fontSize: '0.82rem',
+                  justifyContent: 'center',
+                  width: 36,
+                  height: 36,
+                  fontSize: '1.05rem',
                   fontFamily: 'var(--body)',
                   color: 'var(--ink-soft)',
                   background: 'var(--paper)',
@@ -204,7 +230,7 @@ export function Game({ token }) {
                   e.currentTarget.style.background = 'var(--paper)'
                   e.currentTarget.style.color = 'var(--ink-soft)'
                 }}
-              >⚙ {t('room_rules_button')}</button>
+              >⚙</button>
             )}
             <button
               type="button"
@@ -239,11 +265,16 @@ export function Game({ token }) {
         </div>
 
         {/* Piste area — G14: piste grows to fill the column, dice anchored to bottom,
-            pool dead-center as the focal point, score-to-beat banner pinned at top. */}
+            pool dead-center as the focal point, score-to-beat banner pinned at top.
+            G62: the parent grid row carries the height; `minHeight: 0` lets this
+            container shrink instead of pushing the action bar off-screen. The
+            piste-stage sizes from its container (no more 85vh cap), so the
+            square stays inside the available space at any viewport height. */}
         <div style={{
-          flex: 1, padding: '1.2rem',
+          minHeight: 0, padding: '1.2rem',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           position: 'relative',
+          overflow: 'hidden',
         }}>
           {matchEnd && (
             <MatchEndBanner
@@ -255,7 +286,12 @@ export function Game({ token }) {
           )}
           <div
             className="piste-stage"
-            style={{ position: 'relative', width: 'min(820px, 85vh, 100%)', aspectRatio: '1/1' }}
+            style={{
+              position: 'relative',
+              width: 'min(820px, 100%)',
+              maxHeight: '100%',
+              aspectRatio: '1/1',
+            }}
           >
             <div className="piste" style={{ position: 'absolute', inset: 0 }} role="region" aria-label="Piste de jeu">
               <div style={{
@@ -444,6 +480,13 @@ export function Game({ token }) {
         @media (max-width: 1180px) {
           .gameroom-grid { grid-template-columns: 1fr 320px !important; }
           .side-ticker { display: none !important; }
+        }
+        /* G62: at narrow widths, the per-strip mini dice would overlap the
+           player name. Hide them — the active player's dice are visible
+           in the piste anyway, and inactive players' last-throw dice can
+           be read from the right-side journal. */
+        @media (max-width: 1280px) {
+          .player-strip-dice { display: none !important; }
         }
         @media (max-width: 980px) {
           .gameroom-grid { grid-template-columns: 1fr !important; }
@@ -710,7 +753,7 @@ function PlayerStrip({ p, active, isSelf, t, canKick, onKick }) {
       </div>
       <ScorePips matchLosses={p.match_losses ?? 0} roundPoints={p.round_points ?? 0} active={active} />
       {p.turn?.done && p.turn.dice && (
-        <div style={{ display: 'flex', gap: 2, marginLeft: 4 }}>
+        <div className="player-strip-dice" style={{ display: 'flex', gap: 2, marginLeft: 4 }}>
           {p.turn.dice.map((v, i) => <Die key={i} value={v} mini />)}
         </div>
       )}
