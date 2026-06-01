@@ -1060,27 +1060,27 @@ function PlayerStrip({ p, active, isSelf, t, canKick, onKick }) {
           }}>
             {p.name}{isSelf ? ' ★' : ''}
           </span>
-          {/* G64 follow-up: both status markers (🩹 manche, 💀 partie)
-              live inline with the tokens line as plain emoji glyphs.
-              Previously the manche pip was an absolute-positioned chip
-              at the bottom-right corner of the card, but the white-pill
-              styling made it look like a clickable button rather than
-              a marker — particularly distracting against the rouge
-              active-card background (red on red). Now both are simple
-              inline emoji + count, no chip styling, no border, no
-              background. */}
+          {/* G64 follow-up: stats line shows all three counters at once:
+              tokens · parties lost · manches lost this partie. Both
+              loss counters always render (alwaysShow), so you can
+              compare players at a glance ("0 / 1" vs "2 / 0") — the
+              user tracks this on their phone as "Sierra : 0, 1m". Zero
+              counters dim so non-zero values jump. Dropped the "fiches"
+              suffix here — the 🪙 glyph is unambiguous in this row
+              and gives room for both pips. */}
           <span className="mono" style={{
             fontSize: '0.72rem', marginTop: 2,
-            display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap',
+            display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
           }}>
-            <span style={{ opacity: 0.85 }}>
-              🪙 <span style={{ fontWeight: 700 }}>{p.tokens ?? 0}</span> <span style={{ opacity: 0.7 }}>fiches</span>
+            <span title={t ? t('chips_label') : ''}>
+              🪙 <span style={{ fontWeight: 700 }}>{p.tokens ?? 0}</span>
             </span>
             <ScorePips
               matchLosses={p.match_losses ?? 0}
               roundPoints={p.round_points ?? 0}
               active={active}
               t={t}
+              alwaysShow
             />
           </span>
         </div>
@@ -1089,28 +1089,31 @@ function PlayerStrip({ p, active, isSelf, t, canKick, onKick }) {
   )
 }
 
-function ScorePips({ matchLosses, roundPoints, active, t }) {
-  // G64 follow-up: pips read as inline status markers, not buttons.
+function ScorePips({ matchLosses, roundPoints, active, t, alwaysShow = false }) {
+  // G64 follow-up: two counters per player, both always numbered so you
+  // can compare players at a glance ("who's losing most / who's still
+  // clean?"). With `alwaysShow=true` (used in the rail card), both pips
+  // render even at 0; without it (used inline next to the piste-ring
+  // name pill where space is tight) only non-zero counts render.
   //   🩹 = manche perdue cette partie (wounded — single match lost in
-  //         the current partie; resets when the partie ends). Caps at 1
-  //         before triggering a partie loss, so no number is shown.
+  //         the current partie, caps at 1 before triggering a partie
+  //         loss).
   //   💀 = parties perdues (dead — cumulative full-game losses across
-  //         the session). Shows the count next to the skull.
-  // No border / no padding-pill: emoji + optional count, rendered inline
-  // so it can't be mistaken for a clickable button. The bandage colour
-  // works against both the rouge active-card background and the
-  // paper-deep inactive background since it relies on its own emoji
-  // colour rather than a paper-coloured chip.
-  if (!matchLosses && !roundPoints) return null
+  //         the session).
+  // Plain emoji + count, no chip styling, tooltips spell out the
+  // meaning in proper French/English on hover. Zero counts dim to
+  // opacity 0.45 so non-zero values jump visually.
+  const showManche = alwaysShow || matchLosses > 0
+  const showPartie = alwaysShow || roundPoints > 0
+  if (!showManche && !showPartie) return null
   const mancheTitle = t ? t('manche_loss_tooltip') : 'Manche perdue cette partie'
   const partieTitle = t ? t('partie_loss_tooltip') : 'Parties perdues'
   return (
     <span
       style={{
         display: 'inline-flex',
-        gap: 6,
+        gap: 8,
         alignItems: 'center',
-        marginLeft: 4,
         fontSize: '0.72rem',
         fontFamily: 'var(--mono)',
         fontWeight: 700,
@@ -1118,16 +1121,32 @@ function ScorePips({ matchLosses, roundPoints, active, t }) {
         userSelect: 'none',
         cursor: 'default',
       }}
-      aria-label={`${mancheTitle}: ${matchLosses} · ${partieTitle}: ${roundPoints}`}
+      aria-label={`${partieTitle}: ${roundPoints} · ${mancheTitle}: ${matchLosses}`}
     >
-      {matchLosses > 0 && (
-        <span title={mancheTitle} style={{ display: 'inline-flex', alignItems: 'center' }}>
-          🩹
+      {showPartie && (
+        <span
+          title={partieTitle}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 2,
+            opacity: roundPoints > 0 ? 1 : 0.45,
+          }}
+        >
+          💀 <span>{roundPoints ?? 0}</span>
         </span>
       )}
-      {roundPoints > 0 && (
-        <span title={partieTitle} style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
-          💀<span>{roundPoints}</span>
+      {showManche && (
+        <span
+          title={mancheTitle}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 2,
+            opacity: matchLosses > 0 ? 1 : 0.45,
+          }}
+        >
+          🩹 <span>{matchLosses ?? 0}</span>
         </span>
       )}
     </span>
