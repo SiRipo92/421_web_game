@@ -169,22 +169,28 @@ export function Game({ token }) {
           (top-bar · piste · action-bar). `overflow: hidden` prevents the
           page from gaining a scrollbar when the piste's intrinsic size
           would otherwise push the action bar below the fold. */}
-      <div style={{
-        display: 'grid',
-        gridTemplateRows: 'auto 1fr auto',
-        height: '100vh',
-        minWidth: 0,
-        overflow: 'hidden',
-      }}>
+      <div
+        className="gameroom-center gameroom-center-desktop"
+        style={{
+          display: 'grid',
+          gridTemplateRows: 'auto 1fr auto',
+          height: '100vh',
+          minWidth: 0,
+          overflow: 'hidden',
+        }}
+      >
 
         {/* Top panel */}
-        <div style={{
-          display: 'grid', gridTemplateColumns: 'auto minmax(0, 1fr) auto', gap: 24,
-          padding: '1.2rem 1.5rem',
-          borderBottom: '1px solid var(--rule)',
-          background: 'var(--paper-soft)',
-          alignItems: 'center',
-        }} className="top-panel">
+        <div
+          className="gameroom-header gameroom-header-desktop top-panel"
+          style={{
+            display: 'grid', gridTemplateColumns: 'auto minmax(0, 1fr) auto', gap: 24,
+            padding: '1.2rem 1.5rem',
+            borderBottom: '1px solid var(--rule)',
+            background: 'var(--paper-soft)',
+            alignItems: 'center',
+          }}
+        >
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
             <div style={{
               padding: '0.4rem 1rem',
@@ -306,18 +312,21 @@ export function Game({ token }) {
             the smaller of width/height, keeping the inner square truly square
             (and the `.piste` circle truly circular) regardless of which axis
             is the binding constraint. */}
-        <div style={{
-          minHeight: 0, padding: '1.2rem',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          position: 'relative',
-          // G62 follow-up: previously had `overflow: hidden` which clipped
-          // the player seats that hang above and below the piste perimeter.
-          // The parent middle column carries its own `overflow: hidden`, so
-          // page scroll is still prevented — content can extend into the
-          // padding without spilling further.
-          overflow: 'visible',
-          containerType: 'size',
-        }}>
+        <div
+          className="gameroom-main gameroom-piste-area"
+          style={{
+            minHeight: 0, padding: '1.2rem',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            position: 'relative',
+            // G62 follow-up: previously had `overflow: hidden` which clipped
+            // the player seats that hang above and below the piste perimeter.
+            // The parent middle column carries its own `overflow: hidden`, so
+            // page scroll is still prevented — content can extend into the
+            // padding without spilling further.
+            overflow: 'visible',
+            containerType: 'size',
+          }}
+        >
           {matchEnd && (
             <MatchEndBanner
               t={t}
@@ -327,7 +336,7 @@ export function Game({ token }) {
             />
           )}
           <div
-            className="piste-stage"
+            className="gameroom-piste-stage piste-stage"
             style={{
               position: 'relative',
               // G62 follow-up: reserve ~22 % of the available space (11 %
@@ -339,7 +348,7 @@ export function Game({ token }) {
               aspectRatio: '1/1',
             }}
           >
-            <div className="piste" style={{ position: 'absolute', inset: 0 }} role="region" aria-label="Piste de jeu">
+            <div className="gameroom-piste piste" style={{ position: 'absolute', inset: 0 }} role="region" aria-label="Piste de jeu">
               <div style={{
                 position: 'absolute', top: '5%', left: '50%', transform: 'translateX(-50%)',
                 fontFamily: 'var(--display)', fontStyle: 'italic',
@@ -353,13 +362,16 @@ export function Game({ token }) {
                   and the label bumps to 0.88rem so the pool count reads as
                   the centre of attention now that the piste itself is a bit
                   smaller. */}
-              <div style={{
-                position: 'absolute', top: '46%', left: '50%', transform: 'translate(-50%,-50%)',
-                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14,
-              }}>
+              <div
+                className="gameroom-pool"
+                style={{
+                  position: 'absolute', top: '46%', left: '50%', transform: 'translate(-50%,-50%)',
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14,
+                }}
+              >
                 {(state.pool ?? 0) > 0 && <ChipStack count={state.pool} size="large" />}
                 <span
-                  className="eyebrow"
+                  className="gameroom-pool-label eyebrow"
                   style={{
                     fontSize: '0.88rem',
                     color: 'var(--paper-deep)',
@@ -371,11 +383,14 @@ export function Game({ token }) {
               </div>
 
               {/* Dice cluster — anchored at the bottom of the felt */}
-              <div style={{
-                position: 'absolute', bottom: '6%', left: '50%', transform: 'translateX(-50%)',
-                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
-                maxWidth: '90%',
-              }}>
+              <div
+                className="gameroom-dice-cluster"
+                style={{
+                  position: 'absolute', bottom: '6%', left: '50%', transform: 'translateX(-50%)',
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
+                  maxWidth: '90%',
+                }}
+              >
                 {/* G5: badge legend — always visible while the player can choose
                     which dice to lock, so the on-die ✓/↺ icons read at a glance. */}
                 {isMyTurn && hasRolled && !myTurn?.done && (myTurn?.rolls_left ?? 0) > 0 && (
@@ -425,13 +440,18 @@ export function Game({ token }) {
         </div>
 
         {/* Action bar */}
-        <div style={{
-          padding: '1.2rem 1.5rem',
-          borderTop: '1px solid var(--rule)',
-          background: 'var(--paper-soft)',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          gap: 16, flexWrap: 'wrap',
-        }} role="region" aria-label="Contrôles">
+        <div
+          className="gameroom-dock gameroom-dock-desktop"
+          role="region"
+          aria-label="Contrôles"
+          style={{
+            padding: '1.2rem 1.5rem',
+            borderTop: '1px solid var(--rule)',
+            background: 'var(--paper-soft)',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            gap: 16, flexWrap: 'wrap',
+          }}
+        >
           <div>
             <div className="eyebrow" style={{ fontSize: '0.78rem' }}>
               {isMyTurn ? t('your_turn') : `${t('waiting_turn')} — ${state.players?.find(p => p.id === state.current_player_id)?.name || ''}`}

@@ -52,94 +52,123 @@ export function GameMobile({
   const rotated = [...players.slice(myIdx), ...players.slice(0, myIdx)]
 
   return (
-    <div style={{
-      height: '100vh',
-      display: 'grid',
-      gridTemplateRows: 'auto 1fr auto',
-      overflow: 'hidden',
-      background: 'var(--paper)',
-    }}>
-      {/* ─── Slim top header ─────────────────────────────────────────────── */}
-      <header style={{
+    <div
+      className="gameroom-shell gameroom-shell-mobile"
+      style={{
+        height: '100vh',
         display: 'grid',
-        gridTemplateColumns: 'auto minmax(0, 1fr) auto',
-        gap: 8,
-        alignItems: 'center',
-        padding: '0.5rem 0.8rem',
-        borderBottom: '1px solid var(--rule)',
-        background: 'var(--paper-soft)',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{
-            padding: '0.2rem 0.6rem',
-            background: state.phase === 'charge' ? 'var(--rouge)' : 'var(--felt)',
-            color: 'var(--paper)',
-            fontFamily: 'var(--display)',
-            fontWeight: 700,
-            fontSize: '0.72rem',
-            fontStyle: 'italic',
-            letterSpacing: '0.06em',
-            transform: 'rotate(-2deg)',
-          }}>
+        gridTemplateRows: 'auto 1fr auto',
+        overflow: 'hidden',
+        background: 'var(--paper)',
+      }}
+    >
+      {/* ─── Slim top header ─────────────────────────────────────────────── */}
+      <header
+        className="gameroom-header gameroom-header-mobile"
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'auto minmax(0, 1fr) auto',
+          gap: 8,
+          alignItems: 'center',
+          padding: '0.5rem 0.8rem',
+          borderBottom: '1px solid var(--rule)',
+          background: 'var(--paper-soft)',
+        }}
+      >
+        <div className="gameroom-header-phase" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span
+            className="gameroom-phase-chip"
+            style={{
+              padding: '0.2rem 0.6rem',
+              background: state.phase === 'charge' ? 'var(--rouge)' : 'var(--felt)',
+              color: 'var(--paper)',
+              fontFamily: 'var(--display)',
+              fontWeight: 700,
+              fontSize: '0.72rem',
+              fontStyle: 'italic',
+              letterSpacing: '0.06em',
+              transform: 'rotate(-2deg)',
+            }}
+          >
             {state.phase === 'charge' ? t('charge') : t('decharge')}
           </span>
-          <span className="mono" style={{ fontSize: '0.78rem', color: 'var(--ink-soft)' }}>
+          <span className="gameroom-round-number mono" style={{ fontSize: '0.78rem', color: 'var(--ink-soft)' }}>
             T{String(state.round || 0).padStart(2, '0')}
           </span>
         </div>
-        <div className="serif" style={{
-          fontSize: '0.85rem',
-          color: 'var(--ink)',
-          textAlign: 'center',
-          minWidth: 0,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-        }}>
+        <div
+          className="gameroom-turn-indicator serif"
+          style={{
+            fontSize: '0.85rem',
+            color: 'var(--ink)',
+            textAlign: 'center',
+            minWidth: 0,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
           {isMyTurn ? t('your_turn') : `${t('waiting_turn')} · ${currentName}`}
         </div>
-        <div style={{ display: 'flex', gap: 6 }}>
-          {isHost && (
-            <button
-              type="button"
-              onClick={() => setShowRoomSettings(true)}
-              aria-label={t('room_rules_button')}
-              title={t('room_rules_button')}
-              style={mobileIconBtn()}
-            >⚙</button>
-          )}
+        {/* Top-right Quit. Was previously the ⚙ settings button in this
+            slot; user feedback moved Quit here (mobile-app convention:
+            primary "exit this surface" lives top-right) and pushed
+            Settings into the dock (G62 follow-up). */}
+        <div className="gameroom-header-actions" style={{ display: 'flex', gap: 6 }}>
+          <button
+            type="button"
+            onClick={() => setShowLeaveConfirm(true)}
+            aria-label={t('leave')}
+            title={t('leave')}
+            className="gameroom-leave-btn"
+            style={{ ...mobileIconBtn(), borderColor: 'var(--rouge)', color: 'var(--rouge)' }}
+          >🚪</button>
         </div>
       </header>
 
       {/* ─── Full-bleed piste ────────────────────────────────────────────── */}
-      <main style={{
-        minHeight: 0,
-        position: 'relative',
-        padding: '0.6rem',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        overflow: 'visible',
-        containerType: 'size',
-      }}>
+      <main
+        className="gameroom-main gameroom-piste-area"
+        style={{
+          minHeight: 0,
+          position: 'relative',
+          // G64 follow-up: bigger padding so seats (which extend outside the
+          // piste perimeter) have visible breathing room above and below
+          // before the header / dock edges.
+          padding: '1.4rem 0.6rem',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          overflow: 'visible',
+          containerType: 'size',
+        }}
+      >
         <div
-          className="piste-stage"
+          className="gameroom-piste-stage piste-stage"
           style={{
             position: 'relative',
-            width: 'min(560px, 82cqi, 82cqb)',
+            // G64 follow-up: shrink to leave ~30 % of the available space
+            // as the seat ring (was 18 %). Player names + chip counters
+            // were overlapping the dice cluster at the piste bottom; pulling
+            // the piste inward gives the bottom seat room to live outside
+            // the felt without colliding with the dice.
+            width: 'min(440px, 70cqi, 70cqb)',
             aspectRatio: '1/1',
           }}
         >
-          <div className="piste" style={{ position: 'absolute', inset: 0 }} role="region" aria-label="Piste de jeu">
+          <div className="gameroom-piste piste" style={{ position: 'absolute', inset: 0 }} role="region" aria-label="Piste de jeu">
             <ScoreToBeatBanner plays={state.current_round_plays} t={t} />
 
             {/* Pool — focal centre */}
-            <div style={{
-              position: 'absolute', top: '46%', left: '50%', transform: 'translate(-50%,-50%)',
-              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
-            }}>
+            <div
+              className="gameroom-pool"
+              style={{
+                position: 'absolute', top: '46%', left: '50%', transform: 'translate(-50%,-50%)',
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
+              }}
+            >
               {(state.pool ?? 0) > 0 && <ChipStack count={state.pool} size="large" />}
-              <span className="eyebrow" style={{
+              <span className="gameroom-pool-label eyebrow" style={{
                 fontSize: '0.78rem', color: 'var(--paper-deep)', letterSpacing: '0.12em',
               }}>
                 {t('pool')} · <span className="mono" style={{ fontSize: '0.95rem', fontWeight: 700 }}>{state.pool ?? 0}</span>
@@ -148,12 +177,15 @@ export function GameMobile({
 
             {/* Dice cluster — anchored at the bottom of the felt. Dice are
                 sized via `--die-size` which media-queries down on mobile. */}
-            <div style={{
-              position: 'absolute', bottom: '6%', left: '50%', transform: 'translateX(-50%)',
-              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
-              maxWidth: '90%',
-            }}>
-              <div style={{ display: 'flex', gap: 10 }}>
+            <div
+              className="gameroom-dice-cluster"
+              style={{
+                position: 'absolute', bottom: '6%', left: '50%', transform: 'translateX(-50%)',
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
+                maxWidth: '90%',
+              }}
+            >
+              <div className="gameroom-dice-row" style={{ display: 'flex', gap: 10 }}>
                 {(myTurn?.dice || [0, 0, 0]).map((v, i) => (
                   <Die
                     key={i}
@@ -165,23 +197,31 @@ export function GameMobile({
                 ))}
               </div>
               {myTurn?.combo && (
-                <div style={{
-                  fontFamily: 'var(--display)', fontSize: '1rem',
-                  color: myTurn.combo === '421' ? 'var(--brass-soft)' : 'var(--paper)',
-                  textShadow: '0 2px 6px rgba(0,0,0,0.5)',
-                }}>
+                <div
+                  className="gameroom-combo-label"
+                  style={{
+                    fontFamily: 'var(--display)', fontSize: '1rem',
+                    color: myTurn.combo === '421' ? 'var(--brass-soft)' : 'var(--paper)',
+                    textShadow: '0 2px 6px rgba(0,0,0,0.5)',
+                  }}
+                >
                   {myTurn.combo} · <span className="mono">{myTurn.fiches}f</span>
                 </div>
               )}
             </div>
           </div>
 
-          {/* Player ring — viewer at the bottom (G47 rotation). */}
+          {/* Player ring — viewer at the bottom (G47 rotation).
+              G64 follow-up: seats anchor at r=58 so the bottom seat (viewer)
+              sits clearly outside the piste circle. With the previous r=50,
+              the seat's name pill + token line landed inside the piste at
+              the same y as the dice cluster (overlap). r=58 + smaller
+              piste-stage = clean separation. */}
           {rotated.map((p, i) => {
             const total = rotated.length
             const angle = 90 + (360 / total) * i
             const rad = (angle * Math.PI) / 180
-            const r = 50
+            const r = 58
             const x = 50 + r * Math.cos(rad)
             const y = 50 + r * Math.sin(rad)
             return (
@@ -197,33 +237,40 @@ export function GameMobile({
           })}
         </div>
         {showAfkBar && (
-          <div style={{
-            position: 'absolute', top: 6, left: '50%', transform: 'translateX(-50%)',
-            background: 'rgba(0,0,0,0.45)', color: 'var(--paper)',
-            padding: '0.2rem 0.6rem', borderRadius: 4, fontSize: '0.72rem',
-            fontFamily: 'var(--mono)',
-          }} aria-live="polite">
+          <div
+            className="gameroom-afk-banner"
+            style={{
+              position: 'absolute', top: 6, left: '50%', transform: 'translateX(-50%)',
+              background: 'rgba(0,0,0,0.45)', color: 'var(--paper)',
+              padding: '0.2rem 0.6rem', borderRadius: 4, fontSize: '0.72rem',
+              fontFamily: 'var(--mono)',
+            }}
+            aria-live="polite"
+          >
             ⏱ {t('afk_takeover')}
           </div>
         )}
       </main>
 
       {/* ─── Bottom dock — 2 rows ────────────────────────────────────────── */}
-      <footer style={{
-        borderTop: '1px solid var(--rule)',
-        background: 'var(--paper-soft)',
-        padding: '0.6rem 0.8rem',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 8,
-      }}>
+      <footer
+        className="gameroom-dock gameroom-dock-mobile"
+        style={{
+          borderTop: '1px solid var(--rule)',
+          background: 'var(--paper-soft)',
+          padding: '0.6rem 0.8rem',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
+        }}
+      >
         {/* Row 1: primary CTAs */}
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div className="gameroom-dock-primary" style={{ display: 'flex', gap: 8 }}>
           <button
             type="button"
             onClick={roll}
             disabled={!canRoll}
-            className="btn btn-rouge"
+            className="btn btn-rouge gameroom-roll-btn"
             style={{
               flex: 1, minHeight: 48, fontSize: '1rem',
               opacity: canRoll ? 1 : 0.4,
@@ -234,7 +281,7 @@ export function GameMobile({
             type="button"
             onClick={done}
             disabled={!canDone}
-            className="btn btn-primary"
+            className="btn btn-primary gameroom-validate-btn"
             style={{
               flex: 1, minHeight: 48, fontSize: '1rem',
               opacity: canDone ? 1 : 0.4,
@@ -242,27 +289,33 @@ export function GameMobile({
             aria-label={t('validate')}
           >✓ {t('validate')}</button>
         </div>
-        {/* Row 2: drawer toggles + leave */}
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        {/* Row 2: drawer toggles + settings.
+            User feedback: Settings (host-only) moved from header to dock,
+            replacing the previous bottom-right Quit which moved to the
+            header. */}
+        <div className="gameroom-dock-secondary" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           <button
             type="button"
             onClick={() => setOpenDrawer('journal')}
             style={mobileDockBtn()}
             aria-label={t('log_subtitle')}
+            className="gameroom-journal-btn"
           >📰</button>
           <button
             type="button"
             onClick={() => setOpenDrawer('live')}
             style={mobileDockBtn()}
             aria-label={t('ticker_title')}
+            className="gameroom-live-btn"
           >📣</button>
           <button
             type="button"
             onClick={() => setShowHierarchy(true)}
             style={mobileDockBtn()}
             aria-label={t('hierarchy_open')}
+            className="gameroom-hierarchy-btn"
           >📖</button>
-          <div className="serif" style={{
+          <div className="gameroom-turn-hint serif" style={{
             flex: 1, fontSize: '0.78rem', color: 'var(--ink-soft)', fontStyle: 'italic',
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           }}>
@@ -270,12 +323,16 @@ export function GameMobile({
               ? !hasRolled ? t('keep_hint') : `${myTurn?.rolls_left ?? 0} ${t('rolls_left')}.`
               : `${t('waiting_for')}`}
           </div>
-          <button
-            type="button"
-            onClick={() => setShowLeaveConfirm(true)}
-            style={{ ...mobileDockBtn(), borderColor: 'var(--rouge)', color: 'var(--rouge)' }}
-            aria-label={t('leave')}
-          >🚪</button>
+          {isHost && (
+            <button
+              type="button"
+              onClick={() => setShowRoomSettings(true)}
+              aria-label={t('room_rules_button')}
+              title={t('room_rules_button')}
+              style={mobileDockBtn()}
+              className="gameroom-settings-btn"
+            >⚙</button>
+          )}
         </div>
       </footer>
 
@@ -336,13 +393,16 @@ export function GameMobile({
    `piste-seat-active` class. */
 function MobilePisteSeat({ p, active, isSelf, x, y }) {
   return (
-    <div style={{
-      position: 'absolute', left: `${x}%`, top: `${y}%`,
-      transform: 'translate(-50%, -50%)',
-      pointerEvents: 'none',
-    }}>
+    <div
+      className="gameroom-piste-seat-anchor"
+      style={{
+        position: 'absolute', left: `${x}%`, top: `${y}%`,
+        transform: 'translate(-50%, -50%)',
+        pointerEvents: 'none',
+      }}
+    >
       <div
-        className={active ? 'piste-seat piste-seat-active' : 'piste-seat'}
+        className={`gameroom-piste-seat piste-seat${active ? ' piste-seat-active' : ''}`}
         style={{
           display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
         }}
@@ -355,26 +415,42 @@ function MobilePisteSeat({ p, active, isSelf, x, y }) {
           isSelf={isSelf}
           size={isSelf ? 2.6 : 2.1}
         />
-        <div style={{
-          background: active ? 'var(--ink)' : 'var(--paper-soft)',
-          color: active ? 'var(--paper)' : 'var(--ink)',
-          border: '1px solid var(--rule)',
-          padding: '0.15rem 0.5rem',
-          borderRadius: 2,
-          fontFamily: 'var(--display)', fontWeight: 700,
-          fontSize: isSelf ? '0.72rem' : '0.65rem',
-          whiteSpace: 'nowrap',
-          maxWidth: '85px',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          borderBottom: isSelf ? '2px solid var(--brass)' : undefined,
-        }}>
+        <div
+          className="gameroom-piste-seat-name"
+          style={{
+            background: active ? 'var(--ink)' : 'var(--paper-soft)',
+            color: active ? 'var(--paper)' : 'var(--ink)',
+            border: '1px solid var(--rule)',
+            padding: '0.15rem 0.5rem',
+            borderRadius: 2,
+            fontFamily: 'var(--display)', fontWeight: 700,
+            fontSize: isSelf ? '0.78rem' : '0.7rem',
+            whiteSpace: 'nowrap',
+            maxWidth: '90px',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            borderBottom: isSelf ? '2px solid var(--brass)' : undefined,
+          }}
+        >
           {p.name}{isSelf ? ' ★' : ''}
         </div>
-        <div style={{
-          fontFamily: 'var(--mono)', fontWeight: 700, fontSize: '0.62rem',
-          color: 'var(--ink-soft)',
-        }}>
+        {/* G64 follow-up: token counter font was 0.62rem (~10px) — far too
+            small to read on a mobile screen. Bumped to 0.85rem with bolder
+            weight and a pill background so it reads as a chip count, not
+            a footnote. */}
+        <div
+          className="gameroom-piste-seat-tokens mono"
+          style={{
+            fontWeight: 700,
+            fontSize: '0.85rem',
+            color: 'var(--ink)',
+            background: 'var(--paper-deep)',
+            border: '1px solid var(--rule)',
+            borderRadius: 999,
+            padding: '0.1rem 0.55rem',
+            lineHeight: 1.1,
+          }}
+        >
           {p.tokens ?? 0} 🪙
         </div>
       </div>
