@@ -165,6 +165,8 @@ const I18N = {
     final_score: "L'addition",
     round_points: "point(s) de partie",
     match_losses: "manche(s) perdue(s)",
+    manche_loss_tooltip: "Manche perdue cette partie",
+    partie_loss_tooltip: "Parties perdues",
     guest_label: "Invité",
 
     // Rankings
@@ -687,6 +689,8 @@ const I18N = {
     final_score: "Final score",
     round_points: "round point(s)",
     match_losses: "match(es) lost",
+    manche_loss_tooltip: "Match lost this round",
+    partie_loss_tooltip: "Rounds lost",
     guest_label: "Guest",
 
     // Rankings

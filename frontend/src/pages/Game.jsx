@@ -507,6 +507,7 @@ export function Game({ token }) {
                     active={p.id === state.current_player_id}
                     isSelf={p.id === playerId}
                     x={x} y={y}
+                    t={t}
                   />
                 )
               })
@@ -1047,6 +1048,32 @@ function PlayerStrip({ p, active, isSelf, t, canKick, onKick }) {
           }}
         >✕</button>
       )}
+      {/* G64 follow-up: manche pip (❌) lives at the bottom-right corner of
+          the card so it aligns visually with the kick × at the top-right.
+          Both right-edge corners host "concerning" indicators (you've lost
+          a manche; the host can kick you). The partie skull (💀 N) is
+          informational/cumulative — it sits inline with the tokens line. */}
+      {(p.match_losses ?? 0) > 0 && (
+        <span
+          className="gameroom-player-card-manche"
+          title={t ? t('manche_loss_tooltip') : 'Manche perdue cette partie'}
+          aria-label={t ? t('manche_loss_tooltip') : 'Manche perdue cette partie'}
+          style={{
+            position: 'absolute',
+            bottom: 4,
+            right: 4,
+            padding: '1px 6px',
+            borderRadius: 8,
+            background: active ? 'rgba(255,255,255,0.18)' : 'var(--paper)',
+            border: '1px solid var(--rule)',
+            fontSize: '0.78rem',
+            lineHeight: 1,
+            fontFamily: 'var(--mono)',
+            fontWeight: 700,
+            color: 'var(--rouge)',
+          }}
+        >❌</span>
+      )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
         <Avatar name={p.name} userId={p.user_id} hasAvatar={p.has_avatar ?? false} active={active} isSelf={isSelf} size={2} />
         <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.15, minWidth: 0, flex: 1, paddingRight: canKick ? 22 : 0 }}>
@@ -1059,25 +1086,44 @@ function PlayerStrip({ p, active, isSelf, t, canKick, onKick }) {
           }}>
             {p.name}{isSelf ? ' ★' : ''}
           </span>
-          <span className="mono" style={{ fontSize: '0.72rem', opacity: 0.78, marginTop: 2 }}>
-            🪙 <span style={{ fontWeight: 700 }}>{p.tokens ?? 0}</span> <span style={{ opacity: 0.7 }}>fiches</span>
+          <span className="mono" style={{
+            fontSize: '0.72rem', opacity: 0.78, marginTop: 2,
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+          }}>
+            <span>
+              🪙 <span style={{ fontWeight: 700 }}>{p.tokens ?? 0}</span> <span style={{ opacity: 0.7 }}>fiches</span>
+            </span>
+            {(p.round_points ?? 0) > 0 && (
+              <span
+                title={t ? t('partie_loss_tooltip') : 'Parties perdues'}
+                aria-label={t ? t('partie_loss_tooltip') : 'Parties perdues'}
+                style={{
+                  padding: '0 5px',
+                  borderRadius: 6,
+                  background: active ? 'rgba(255,255,255,0.18)' : 'var(--paper)',
+                  border: '1px solid var(--rule)',
+                  fontWeight: 700,
+                  color: 'var(--brass-deep)',
+                }}
+              >💀 {p.round_points}</span>
+            )}
           </span>
         </div>
       </div>
-      {(p.match_losses > 0 || p.round_points > 0) && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <ScorePips matchLosses={p.match_losses ?? 0} roundPoints={p.round_points ?? 0} active={active} />
-        </div>
-      )}
     </div>
   )
 }
 
-function ScorePips({ matchLosses, roundPoints, active }) {
-  // Compact loss markers shown next to the player name. We always render both
-  // counters (even at 0) so the player can see their position at a glance —
-  // 💀 = manche perdue ce round, 🏷 = points de partie cumulés.
+function ScorePips({ matchLosses, roundPoints, active, t }) {
+  // G64 follow-up: emoji swap per the user's vocab — the skull (💀) now
+  // represents *partie perdue* (a full game lost; cumulative across the
+  // session) while a red X (❌) marks *manche perdue cette partie* (a
+  // single match lost within the current partie; resets to 0 once a
+  // partie ends). matchLosses caps at 1 before triggering a partie loss,
+  // so the X shows no number. The skull pip keeps its numeric count.
   if (!matchLosses && !roundPoints) return null
+  const mancheTitle = t ? t('manche_loss_tooltip') : 'Manche perdue cette partie'
+  const partieTitle = t ? t('partie_loss_tooltip') : 'Parties perdues'
   return (
     <div
       style={{
@@ -1088,29 +1134,25 @@ function ScorePips({ matchLosses, roundPoints, active }) {
         fontFamily: 'var(--mono)',
         color: active ? 'var(--paper)' : 'var(--ink-soft)',
       }}
-      aria-label={`Manches perdues: ${matchLosses} · Points de partie: ${roundPoints}`}
+      aria-label={`${mancheTitle}: ${matchLosses} · ${partieTitle}: ${roundPoints}`}
     >
       {matchLosses > 0 && (
-        // G64 follow-up: drop the number. matchLosses caps at 1 in the
-        // current round (a player reaching 2 = round point + reset), so
-        // the count is always 1 when the pip shows. The skull alone is
-        // enough — and it frees a few pixels in the narrow rail card.
         <span style={{
           padding: '1px 5px', borderRadius: 8, background: active ? 'rgba(255,255,255,0.18)' : 'var(--paper)',
           border: '1px solid var(--rule)', fontWeight: 700, color: 'var(--rouge)',
-        }} title="Manche perdue ce round">💀</span>
+        }} title={mancheTitle}>❌</span>
       )}
       {roundPoints > 0 && (
         <span style={{
           padding: '1px 5px', borderRadius: 8, background: active ? 'rgba(255,255,255,0.18)' : 'var(--paper)',
           border: '1px solid var(--rule)', fontWeight: 700, color: 'var(--brass-deep)',
-        }} title="Points de partie">🏷 {roundPoints}</span>
+        }} title={partieTitle}>💀 {roundPoints}</span>
       )}
     </div>
   )
 }
 
-function PisteSeat({ p, active, isSelf, x, y }) {
+function PisteSeat({ p, active, isSelf, x, y, t }) {
   return (
     <div style={{
       position: 'absolute', left: `${x}%`, top: `${y}%`,
@@ -1130,7 +1172,7 @@ function PisteSeat({ p, active, isSelf, x, y }) {
         boxShadow: active ? '0 4px 0 rgba(0,0,0,0.3)' : '0 2px 0 rgba(0,0,0,0.1)',
       }}>
         <span>{p.name}{isSelf ? ' ★' : ''}</span>
-        <ScorePips matchLosses={p.match_losses ?? 0} roundPoints={p.round_points ?? 0} active={active} />
+        <ScorePips matchLosses={p.match_losses ?? 0} roundPoints={p.round_points ?? 0} active={active} t={t} />
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <div style={{
