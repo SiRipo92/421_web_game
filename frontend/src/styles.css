@@ -233,26 +233,8 @@ input, textarea, select { font-family: inherit; }
 .chip-stack > .chip + .chip { margin-left: -1.4rem; }
 
 /* ── Dice (two styles) ────────────────────────────────────────────────── */
-/* G65 / G62 follow-up: dice scale relative to the piste they're inside, not
-   to the viewport. The piste-stage is registered as a size container; dice
-   read `12cqi` of it (12 % of the piste's own width) and clamp into a sane
-   range. This means: large desktop piste → ~4 rem dice; cramped 960-1180 px
-   laptop-band piste → ~3.5 rem dice; tablet/mobile piste → smaller still.
-   The dice corners stop getting cut off by the piste's curved boundary at
-   narrow widths because they shrink with the felt.
-   Mini dice (.die-mini) keep their own fixed size. The `:root` fallback is
-   for any `.die-paper` rendered outside the piste-stage (none today). */
-:root {
-  --die-size: 4rem;
-  --die-pip-size: 0.62rem;
-}
-.gameroom-piste-stage {
-  container-type: size;
-  --die-size: clamp(2.4rem, 12cqi, 4.2rem);
-  --die-pip-size: clamp(0.38rem, 1.85cqi, 0.65rem);
-}
 .die-paper {
-  width: var(--die-size); height: var(--die-size);
+  width: 4.5rem; height: 4.5rem;
   background: var(--bone);
   border: 1px solid var(--ink);
   border-radius: 8px;
@@ -273,7 +255,7 @@ input, textarea, select { font-family: inherit; }
 .die-paper .pip {
   background: var(--ink);
   border-radius: 50%;
-  width: var(--die-pip-size); height: var(--die-pip-size);
+  width: 0.7rem; height: 0.7rem;
   align-self: center; justify-self: center;
 }
 .die-paper[data-keep="true"] {
@@ -779,13 +761,4 @@ input, textarea, select { font-family: inherit; }
     color: var(--rouge);
     cursor: pointer;
   }
-}
-
-/* G64 follow-up: under ~400 px the mobile dock's turn-hint string was the
-   widest non-button element. Even with minWidth: 0 + ellipsis it claimed
-   layout space that pushed the dock buttons toward the edges. Hide the
-   hint entirely below 400 px — the dock buttons (Roll/Validate primary
-   row) are the load-bearing affordance; the hint is supplementary. */
-@media (max-width: 399px) {
-  .gameroom-turn-hint { display: none !important; }
 }
