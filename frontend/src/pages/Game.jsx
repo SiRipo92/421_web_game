@@ -8,7 +8,9 @@ import { ConfirmModal } from '../components/shared/ConfirmModal.jsx'
 import { HierarchyModal } from '../components/shared/HierarchyModal.jsx'
 import { CommentaryTicker, ScoreToBeatBanner } from '../components/shared/CommentaryTicker.jsx'
 import { useGame } from '../hooks/useGame.js'
+import { useMediaQuery } from '../hooks/useMediaQuery.js'
 import { useLang } from '../context/useLang.js'
+import { GameMobile } from './GameMobile.jsx'
 
 export function Game({ token }) {
   const { t } = useLang()
@@ -18,6 +20,8 @@ export function Game({ token }) {
   const navigate = useNavigate()
   const { state, roll, keep, done, initialRoll, tiebreakRoll, leave, kick } = useGame(gameId, playerId, token)
   const logRef = useRef(null)
+  // G64: switch to the mobile-shell layout at ≤ 959 px viewports.
+  const isMobile = useMediaQuery('(max-width: 959px)')
 
   const [logOpen, setLogOpen] = useState(true)
   const [showHierarchy, setShowHierarchy] = useState(false)
@@ -111,6 +115,34 @@ export function Game({ token }) {
 
   if (state.phase === 'tiebreak') {
     return <TiebreakScreen state={state} playerId={playerId} t={t} onRoll={tiebreakRoll} />
+  }
+
+  // G64: mobile / tablet (≤ 959 px) gets a purpose-built shell — slim
+  // header, full-bleed piste, 2-row dock with drawer toggles instead of the
+  // desktop 3-column rail layout. Initial-roll / tiebreak / finished phases
+  // above fall through to their existing simpler full-screen renders.
+  if (isMobile) {
+    return (
+      <GameMobile
+        state={state}
+        t={t}
+        playerId={playerId}
+        me={me}
+        isHost={isHost}
+        isMyTurn={isMyTurn}
+        myTurn={myTurn}
+        hasRolled={hasRolled}
+        canRoll={canRoll}
+        canDone={canDone}
+        showAfkBar={showAfkBar}
+        roll={roll}
+        keep={keep}
+        done={done}
+        leave={leave}
+        navigate={navigate}
+        formatLogEntries={formatLogEntries}
+      />
+    )
   }
 
   return (

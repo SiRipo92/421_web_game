@@ -233,8 +233,22 @@ input, textarea, select { font-family: inherit; }
 .chip-stack > .chip + .chip { margin-left: -1.4rem; }
 
 /* ── Dice (two styles) ────────────────────────────────────────────────── */
+/* G65: dice sized via a CSS custom property so the same `.die-paper` rule
+   scales across viewports without per-breakpoint width overrides. Pip
+   diameter follows `--die-size` proportionally. Mobile = 2.8rem, tablet
+   = 3.5rem, desktop = 4.5rem. Mini dice (.die-mini) have their own size. */
+:root {
+  --die-size: 4.5rem;
+  --die-pip-size: 0.7rem;
+}
+@media (max-width: 959px) {
+  :root { --die-size: 3.5rem; --die-pip-size: 0.55rem; }
+}
+@media (max-width: 639px) {
+  :root { --die-size: 2.8rem; --die-pip-size: 0.45rem; }
+}
 .die-paper {
-  width: 4.5rem; height: 4.5rem;
+  width: var(--die-size); height: var(--die-size);
   background: var(--bone);
   border: 1px solid var(--ink);
   border-radius: 8px;
@@ -255,7 +269,7 @@ input, textarea, select { font-family: inherit; }
 .die-paper .pip {
   background: var(--ink);
   border-radius: 50%;
-  width: 0.7rem; height: 0.7rem;
+  width: var(--die-pip-size); height: var(--die-pip-size);
   align-self: center; justify-self: center;
 }
 .die-paper[data-keep="true"] {
