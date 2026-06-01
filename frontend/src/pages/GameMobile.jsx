@@ -175,12 +175,13 @@ export function GameMobile({
               </span>
             </div>
 
-            {/* Dice cluster — anchored at the bottom of the felt. Dice are
-                sized via `--die-size` which media-queries down on mobile. */}
+            {/* Dice cluster — lifted to bottom: 14 % to clear the bottom
+                seat's avatar. Dice sized via `--die-size` (clamp-based,
+                scoped to `.gameroom-piste-stage` so it adapts to the felt). */}
             <div
               className="gameroom-dice-cluster"
               style={{
-                position: 'absolute', bottom: '6%', left: '50%', transform: 'translateX(-50%)',
+                position: 'absolute', bottom: '14%', left: '50%', transform: 'translateX(-50%)',
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
                 maxWidth: '90%',
               }}

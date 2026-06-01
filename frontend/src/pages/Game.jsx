@@ -153,16 +153,34 @@ export function Game({ token }) {
       gap: 0,
     }} className="gameroom-grid">
 
+      {/* G64 follow-up: left rail now stacks a PlayerRail (always shown
+          while the rail itself is visible) above the existing
+          CommentaryTicker. With the top-bar PlayerStrips removed (they
+          squished badly at 3+ players), the rail is now the persistent
+          who's-at-the-table surface — avatars, names, tokens, manché
+          pips, and the host's kick affordance, all in one column. */}
       <aside
-        className="side-ticker"
+        className="gameroom-left-rail side-ticker"
         style={{
           borderRight: '1px solid var(--rule)',
           background: 'var(--paper-soft)',
           maxHeight: '100vh',
           overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column',
         }}
       >
-        <CommentaryTicker events={state.log_events} t={t} />
+        <PlayerRail
+          players={state.players}
+          currentPlayerId={state.current_player_id}
+          playerId={playerId}
+          t={t}
+          isHost={isHost}
+          onKick={(id, name) => setKickTarget({ id, name })}
+        />
+        <div className="gameroom-left-rail-ticker" style={{ borderTop: '1px solid var(--rule)', flex: 1, minHeight: 0 }}>
+          <CommentaryTicker events={state.log_events} t={t} />
+        </div>
       </aside>
 
       {/* G62: middle column locks to the viewport height via a 3-row grid
@@ -180,15 +198,20 @@ export function Game({ token }) {
         }}
       >
 
-        {/* Top panel */}
+        {/* Top panel — G64 follow-up: simplified to a 2-column flex
+            (justify-between) now that the player strips moved to the
+            left rail. Left: phase chip + round. Right: bank · settings
+            · quit. No middle column. */}
         <div
           className="gameroom-header gameroom-header-desktop top-panel"
           style={{
-            display: 'grid', gridTemplateColumns: 'auto minmax(0, 1fr) auto', gap: 24,
-            padding: '1.2rem 1.5rem',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: 16,
+            padding: '1rem 1.5rem',
             borderBottom: '1px solid var(--rule)',
             background: 'var(--paper-soft)',
-            alignItems: 'center',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
@@ -209,29 +232,9 @@ export function Game({ token }) {
             </div>
           </div>
 
-          {/* G62: PlayerStrips now scroll horizontally when they don't fit
-              the available middle column (instead of overflowing into the
-              host-controls column). The parent grid's `minmax(0, 1fr)`
-              constraint plus this `overflow-x: auto` contains them. */}
-          <div style={{
-            display: 'flex', gap: 10,
-            overflowX: 'auto', overflowY: 'visible',
-            minWidth: 0,
-            justifyContent: 'center',
-            scrollbarWidth: 'thin',
-          }}>
-            {state.players?.map(p => (
-              <PlayerStrip
-                key={p.id}
-                p={p}
-                active={p.id === state.current_player_id}
-                isSelf={p.id === playerId}
-                t={t}
-                canKick={isHost && p.id !== playerId}
-                onKick={() => setKickTarget({ id: p.id, name: p.name })}
-              />
-            ))}
-          </div>
+          {/* G64 follow-up: middle column removed — PlayerStrips moved
+              into the new vertical PlayerRail in the left aside, which
+              scales gracefully to any player count without squishing. */}
 
           <div
             className="gameroom-header-actions"
@@ -394,11 +397,16 @@ export function Game({ token }) {
                 </span>
               </div>
 
-              {/* Dice cluster — anchored at the bottom of the felt */}
+              {/* Dice cluster — anchored at the bottom of the felt.
+                  G64 follow-up: lifted from `bottom: 6%` → `14%`. With
+                  G62's bigger piste (700px / 78cqi/cqb) the dice were
+                  sitting too close to the local viewer's avatar at the
+                  ring bottom. Moving up creates clearance and balances
+                  the visual weight against the pool at top: 46%. */}
               <div
                 className="gameroom-dice-cluster"
                 style={{
-                  position: 'absolute', bottom: '6%', left: '50%', transform: 'translateX(-50%)',
+                  position: 'absolute', bottom: '14%', left: '50%', transform: 'translateX(-50%)',
                   display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
                   maxWidth: '90%',
                 }}
@@ -432,43 +440,62 @@ export function Game({ token }) {
               </div>
             </div>
 
-            {/* Players around piste */}
-            {state.players?.map((p, i) => {
-              const total = state.players.length
-              const angle = 90 + (360 / total) * i
-              const rad = (angle * Math.PI) / 180
-              const r = 50
-              const x = 50 + r * Math.cos(rad)
-              const y = 50 + r * Math.sin(rad)
-              return (
-                <PisteSeat key={p.id} p={p}
-                  active={p.id === state.current_player_id}
-                  isSelf={p.id === playerId}
-                  x={x} y={y}
-                />
-              )
-            })}
+            {/* Players around piste.
+                G64 follow-up: rotate so the local player anchors at the
+                bottom slot (G47 logic), and push the seat anchor outside
+                the piste edge (r=58 instead of 50). With r=50 the viewer's
+                seat content sat *inside* the piste, overlapping the now-
+                lifted dice cluster (bottom: 14 %). r=58 + smaller seat
+                heights = clean separation. */}
+            {(() => {
+              const players = state.players || []
+              const myIdx = Math.max(0, players.findIndex(p => p.id === playerId))
+              const rotated = [...players.slice(myIdx), ...players.slice(0, myIdx)]
+              return rotated.map((p, i) => {
+                const total = rotated.length
+                const angle = 90 + (360 / total) * i
+                const rad = (angle * Math.PI) / 180
+                const r = 58
+                const x = 50 + r * Math.cos(rad)
+                const y = 50 + r * Math.sin(rad)
+                return (
+                  <PisteSeat key={p.id} p={p}
+                    active={p.id === state.current_player_id}
+                    isSelf={p.id === playerId}
+                    x={x} y={y}
+                  />
+                )
+              })
+            })()}
           </div>
         </div>
 
-        {/* Action bar */}
+        {/* Action bar — G64 follow-up: 3-column grid (info · secondary
+            · primary) so the play buttons (Roll, Validate) always anchor
+            flush against the right edge, even when secondary controls
+            (RhythmIndicator, RollDots) wrap on narrow widths. Previous
+            `flex-wrap + justify-content: space-between` left the wrapped
+            row left-aligned, putting the play buttons in the middle of
+            the bar instead of the corner. */}
         <div
           className="gameroom-dock gameroom-dock-desktop"
           role="region"
           aria-label="Contrôles"
           style={{
-            padding: '1.2rem 1.5rem',
+            padding: '1rem 1.5rem',
             borderTop: '1px solid var(--rule)',
             background: 'var(--paper-soft)',
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            gap: 16, flexWrap: 'wrap',
+            display: 'grid',
+            gridTemplateColumns: 'minmax(0, 1fr) auto auto',
+            gap: 16,
+            alignItems: 'center',
           }}
         >
-          <div>
+          <div className="gameroom-dock-info" style={{ minWidth: 0 }}>
             <div className="eyebrow" style={{ fontSize: '0.78rem' }}>
               {isMyTurn ? t('your_turn') : `${t('waiting_turn')} — ${state.players?.find(p => p.id === state.current_player_id)?.name || ''}`}
             </div>
-            <div className="serif" style={{ fontStyle: 'italic', color: 'var(--ink-soft)', marginTop: 6, fontSize: '1.05rem' }}>
+            <div className="serif" style={{ fontStyle: 'italic', color: 'var(--ink-soft)', marginTop: 6, fontSize: '1rem' }}>
               {isMyTurn
                 ? !hasRolled ? t('keep_hint') : `${myTurn?.rolls_left ?? 0} ${t('rolls_left')}.`
                 : <span>{t('waiting_for')} <span className="mono pulse-soft">…</span></span>}
@@ -480,7 +507,7 @@ export function Game({ token }) {
               />
             )}
           </div>
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div className="gameroom-dock-secondary" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             <RhythmIndicator
               t={t}
               isMyTurn={isMyTurn}
@@ -497,13 +524,15 @@ export function Game({ token }) {
             {(state.max_throws > 1 || (isStarter && !hasRolled)) && (
               <RollDots rollsLeft={myTurn?.rolls_left ?? 3} />
             )}
+          </div>
+          <div className="gameroom-dock-primary" style={{ display: 'flex', gap: 10, alignItems: 'center', justifySelf: 'end' }}>
             {isMyTurn && (
               <>
                 <button
                   type="button"
                   onClick={roll}
                   disabled={!canRoll}
-                  className="btn btn-rouge"
+                  className="btn btn-rouge gameroom-roll-btn"
                   style={{ opacity: canRoll ? 1 : 0.4, minHeight: 44 }}
                   aria-label={!hasRolled ? t('roll') : t('reroll')}
                 >
@@ -513,7 +542,7 @@ export function Game({ token }) {
                   type="button"
                   onClick={done}
                   disabled={!canDone}
-                  className="btn btn-primary"
+                  className="btn btn-primary gameroom-validate-btn"
                   style={{ opacity: canDone ? 1 : 0.4, minHeight: 44 }}
                   aria-label={t('validate')}
                 >
@@ -602,10 +631,13 @@ export function Game({ token }) {
       </aside>
 
       <style>{`
-        /* Mid-width: hide the ticker rail, keep log + piste */
+        /* Mid-width: at ≤ 1180 px the left rail keeps the PlayerRail
+           (so the table roster stays visible — there's no top-bar
+           strip to fall back on after G64) but the CommentaryTicker
+           below it hides to claim vertical room. */
         @media (max-width: 1180px) {
-          .gameroom-grid { grid-template-columns: 1fr 320px !important; }
-          .side-ticker { display: none !important; }
+          .gameroom-grid { grid-template-columns: 220px 1fr 320px !important; }
+          .gameroom-left-rail-ticker { display: none !important; }
         }
         /* G62: at narrow widths, the per-strip mini dice would overlap the
            player name. Hide them — the active player's dice are visible
@@ -617,8 +649,7 @@ export function Game({ token }) {
         @media (max-width: 980px) {
           .gameroom-grid { grid-template-columns: 1fr !important; }
           .side-log { max-height: 300px !important; border-left: none !important; border-top: 1px solid var(--rule); }
-          .side-ticker { display: none !important; }
-          .top-panel { grid-template-columns: 1fr !important; gap: 12px !important; }
+          .gameroom-left-rail { display: none !important; }
         }
         @media (prefers-reduced-motion: reduce) {
           .die-tumble, .pulse-soft, .glow-421 { animation: none !important; }
@@ -865,6 +896,46 @@ function CounterChip({ label, value, accent }) {
           {value} <span className="serif" style={{ fontSize: '0.7rem', fontStyle: 'italic', color: 'var(--ink-mute)' }}>fiches</span>
         </div>
       </div>
+    </div>
+  )
+}
+
+/**
+ * G64 follow-up: vertical list of all players in the room, shown in the left
+ * rail above the CommentaryTicker. Replaces the squished top-bar PlayerStrip
+ * row — strips were fine at 2 players but overlapped badly at 3+. The rail
+ * version stacks one strip per row and grows comfortably to 5 players.
+ *
+ * Reuses the existing `PlayerStrip` component so name/avatar/tokens/score-pip
+ * rendering stays consistent with how strips looked horizontally.
+ */
+function PlayerRail({ players, currentPlayerId, playerId, t, isHost, onKick }) {
+  if (!players?.length) return null
+  return (
+    <div
+      className="gameroom-player-rail"
+      style={{
+        padding: '1rem 0.85rem',
+        borderBottom: '1px solid var(--rule)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+      }}
+    >
+      <div className="eyebrow" style={{ fontSize: '0.62rem', marginBottom: 4 }}>
+        {t('players_at_table')}
+      </div>
+      {players.map(p => (
+        <PlayerStrip
+          key={p.id}
+          p={p}
+          active={p.id === currentPlayerId}
+          isSelf={p.id === playerId}
+          t={t}
+          canKick={isHost && p.id !== playerId}
+          onKick={() => onKick(p.id, p.name)}
+        />
+      ))}
     </div>
   )
 }
