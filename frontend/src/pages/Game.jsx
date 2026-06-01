@@ -278,7 +278,12 @@ export function Game({ token }) {
           minHeight: 0, padding: '1.2rem',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           position: 'relative',
-          overflow: 'hidden',
+          // G62 follow-up: previously had `overflow: hidden` which clipped
+          // the player seats that hang above and below the piste perimeter.
+          // The parent middle column carries its own `overflow: hidden`, so
+          // page scroll is still prevented — content can extend into the
+          // padding without spilling further.
+          overflow: 'visible',
           containerType: 'size',
         }}>
           {matchEnd && (
@@ -293,7 +298,12 @@ export function Game({ token }) {
             className="piste-stage"
             style={{
               position: 'relative',
-              width: 'min(820px, 100cqi, 100cqb)',
+              // G62 follow-up: reserve ~22 % of the available space (11 %
+              // on each side) for the player seats hanging off the piste
+              // perimeter. Without this the seats clipped at the rail edges;
+              // with it the circle reads as a focal point and the seats
+              // have visible breathing room above/below/around it.
+              width: 'min(700px, 78cqi, 78cqb)',
               aspectRatio: '1/1',
             }}
           >
@@ -306,14 +316,25 @@ export function Game({ token }) {
 
               <ScoreToBeatBanner plays={state.current_round_plays} t={t} />
 
-              {/* Pool chips — focal point dead-center */}
+              {/* Pool chips — focal point dead-center.
+                  G62 follow-up: chip stack uses `size="large"` (1.45× scale)
+                  and the label bumps to 0.88rem so the pool count reads as
+                  the centre of attention now that the piste itself is a bit
+                  smaller. */}
               <div style={{
                 position: 'absolute', top: '46%', left: '50%', transform: 'translate(-50%,-50%)',
-                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14,
               }}>
-                {(state.pool ?? 0) > 0 && <ChipStack count={state.pool} />}
-                <span className="eyebrow" style={{ fontSize: '0.6rem', color: 'var(--paper-deep)' }}>
-                  {t('pool')} · <span className="mono">{state.pool ?? 0}</span>
+                {(state.pool ?? 0) > 0 && <ChipStack count={state.pool} size="large" />}
+                <span
+                  className="eyebrow"
+                  style={{
+                    fontSize: '0.88rem',
+                    color: 'var(--paper-deep)',
+                    letterSpacing: '0.14em',
+                  }}
+                >
+                  {t('pool')} · <span className="mono" style={{ fontSize: '1rem', fontWeight: 700 }}>{state.pool ?? 0}</span>
                 </span>
               </div>
 
