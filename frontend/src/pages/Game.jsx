@@ -24,6 +24,7 @@ export function Game({ token }) {
   const isMobile = useMediaQuery('(max-width: 959px)')
 
   const [logOpen, setLogOpen] = useState(true)
+  const [tickerOpen, setTickerOpen] = useState(true)
   const [showHierarchy, setShowHierarchy] = useState(false)
   const [showRoomSettings, setShowRoomSettings] = useState(false)
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false)
@@ -178,8 +179,51 @@ export function Game({ token }) {
           isHost={isHost}
           onKick={(id, name) => setKickTarget({ id, name })}
         />
-        <div className="gameroom-left-rail-ticker" style={{ borderTop: '1px solid var(--rule)', flex: 1, minHeight: 0 }}>
-          <CommentaryTicker events={state.log_events} t={t} />
+        {/* G64 follow-up: ticker now has a header + collapse button so the
+            user can hide it (it's secondary to the PlayerRail in this rail
+            now). When closed it shrinks to just the header strip — the
+            PlayerRail above gets the freed vertical space. */}
+        <div
+          className="gameroom-left-rail-ticker"
+          style={{
+            borderTop: '1px solid var(--rule)',
+            flex: tickerOpen ? 1 : '0 0 auto',
+            minHeight: 0,
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setTickerOpen(o => !o)}
+            aria-expanded={tickerOpen}
+            aria-label={tickerOpen ? t('ticker_collapse_aria') : t('ticker_expand_aria')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              width: '100%',
+              padding: '0.6rem 1rem',
+              background: 'transparent',
+              border: 'none',
+              borderBottom: tickerOpen ? '1px solid var(--rule)' : 'none',
+              color: 'var(--ink-soft)',
+              fontFamily: 'var(--body)',
+              fontSize: '0.7rem',
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            <span>{t('ticker_eyebrow')}</span>
+            <span aria-hidden="true">{tickerOpen ? '▲' : '▼'}</span>
+          </button>
+          {tickerOpen && (
+            <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+              <CommentaryTicker events={state.log_events} t={t} />
+            </div>
+          )}
         </div>
       </aside>
 
@@ -941,54 +985,89 @@ function PlayerRail({ players, currentPlayerId, playerId, t, isHost, onKick }) {
 }
 
 function PlayerStrip({ p, active, isSelf, t, canKick, onKick }) {
+  // G64 follow-up: card-shaped vertical layout for the left rail. The old
+  // horizontal layout (Avatar · Name/Tokens · Pips · Kick all in one row)
+  // didn't fit the narrow 220 px rail column at 3+ players. Now structured
+  // as two stacked rows:
+  //   Row 1: Avatar + (Name + token line) + Kick (absolute top-right)
+  //   Row 2: Score pips (skull, round-points)
+  // Each card is ~70 px tall — fits everything cleanly without overlap.
   return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 8,
-      padding: '0.4rem 0.8rem', borderRadius: 3,
-      background: active ? 'var(--rouge)' : 'var(--paper-deep)',
-      color: active ? 'var(--paper)' : 'var(--ink)',
-      border: '1px solid var(--rule)', minWidth: 0, whiteSpace: 'nowrap',
-    }}>
-      <Avatar name={p.name} userId={p.user_id} hasAvatar={p.has_avatar ?? false} size={1.6} />
-      <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.1, minWidth: 0 }}>
-        <span className="serif" style={{ fontWeight: 600, fontSize: '0.85rem' }}>{p.name}{isSelf ? ' ★' : ''}</span>
-        <span className="mono" style={{ fontSize: '0.65rem', opacity: 0.7 }}>{p.tokens ?? 0} fiches</span>
-      </div>
-      <ScorePips matchLosses={p.match_losses ?? 0} roundPoints={p.round_points ?? 0} active={active} />
-      {p.turn?.done && p.turn.dice && (
-        <div className="player-strip-dice" style={{ display: 'flex', gap: 2, marginLeft: 4 }}>
-          {p.turn.dice.map((v, i) => <Die key={i} value={v} mini />)}
-        </div>
-      )}
+    <div
+      className="gameroom-player-card"
+      style={{
+        position: 'relative',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+        padding: '0.55rem 0.7rem',
+        borderRadius: 4,
+        background: active ? 'var(--rouge)' : 'var(--paper-deep)',
+        color: active ? 'var(--paper)' : 'var(--ink)',
+        border: '1px solid var(--rule)',
+      }}
+    >
       {canKick && (
         <button
           type="button"
           onClick={onKick}
           aria-label={t ? `${t('kick_button')} ${p.name}` : 'Kick'}
           title={t ? t('kick_button') : 'Kick'}
+          className="gameroom-player-card-kick"
           style={{
-            marginLeft: 4,
-            padding: '2px 6px',
+            position: 'absolute',
+            top: 4,
+            right: 4,
+            width: 22,
+            height: 22,
+            padding: 0,
             background: 'transparent',
             border: '1px solid var(--rule)',
             borderRadius: 999,
             color: active ? 'var(--paper)' : 'var(--ink-mute)',
             cursor: 'pointer',
-            fontSize: '0.72rem',
+            fontSize: '0.7rem',
             lineHeight: 1,
-            opacity: 0.7,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            opacity: 0.75,
           }}
           onMouseEnter={(e) => {
             e.currentTarget.style.opacity = '1'
             e.currentTarget.style.color = 'var(--rouge)'
             e.currentTarget.style.borderColor = 'var(--rouge)'
+            e.currentTarget.style.background = 'var(--paper)'
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.opacity = '0.7'
+            e.currentTarget.style.opacity = '0.75'
             e.currentTarget.style.color = active ? 'var(--paper)' : 'var(--ink-mute)'
             e.currentTarget.style.borderColor = 'var(--rule)'
+            e.currentTarget.style.background = 'transparent'
           }}
         >✕</button>
+      )}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+        <Avatar name={p.name} userId={p.user_id} hasAvatar={p.has_avatar ?? false} active={active} isSelf={isSelf} size={2} />
+        <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.15, minWidth: 0, flex: 1, paddingRight: canKick ? 22 : 0 }}>
+          <span className="serif" style={{
+            fontWeight: 600,
+            fontSize: '0.88rem',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}>
+            {p.name}{isSelf ? ' ★' : ''}
+          </span>
+          <span className="mono" style={{ fontSize: '0.72rem', opacity: 0.78, marginTop: 2 }}>
+            🪙 <span style={{ fontWeight: 700 }}>{p.tokens ?? 0}</span> <span style={{ opacity: 0.7 }}>fiches</span>
+          </span>
+        </div>
+      </div>
+      {(p.match_losses > 0 || p.round_points > 0) && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <ScorePips matchLosses={p.match_losses ?? 0} roundPoints={p.round_points ?? 0} active={active} />
+        </div>
       )}
     </div>
   )
@@ -1012,10 +1091,14 @@ function ScorePips({ matchLosses, roundPoints, active }) {
       aria-label={`Manches perdues: ${matchLosses} · Points de partie: ${roundPoints}`}
     >
       {matchLosses > 0 && (
+        // G64 follow-up: drop the number. matchLosses caps at 1 in the
+        // current round (a player reaching 2 = round point + reset), so
+        // the count is always 1 when the pip shows. The skull alone is
+        // enough — and it frees a few pixels in the narrow rail card.
         <span style={{
           padding: '1px 5px', borderRadius: 8, background: active ? 'rgba(255,255,255,0.18)' : 'var(--paper)',
           border: '1px solid var(--rule)', fontWeight: 700, color: 'var(--rouge)',
-        }} title="Manches perdues ce round">💀 {matchLosses}</span>
+        }} title="Manche perdue ce round">💀</span>
       )}
       {roundPoints > 0 && (
         <span style={{
