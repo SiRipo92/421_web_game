@@ -1048,32 +1048,6 @@ function PlayerStrip({ p, active, isSelf, t, canKick, onKick }) {
           }}
         >✕</button>
       )}
-      {/* G64 follow-up: manche pip (❌) lives at the bottom-right corner of
-          the card so it aligns visually with the kick × at the top-right.
-          Both right-edge corners host "concerning" indicators (you've lost
-          a manche; the host can kick you). The partie skull (💀 N) is
-          informational/cumulative — it sits inline with the tokens line. */}
-      {(p.match_losses ?? 0) > 0 && (
-        <span
-          className="gameroom-player-card-manche"
-          title={t ? t('manche_loss_tooltip') : 'Manche perdue cette partie'}
-          aria-label={t ? t('manche_loss_tooltip') : 'Manche perdue cette partie'}
-          style={{
-            position: 'absolute',
-            bottom: 4,
-            right: 4,
-            padding: '1px 6px',
-            borderRadius: 8,
-            background: active ? 'rgba(255,255,255,0.18)' : 'var(--paper)',
-            border: '1px solid var(--rule)',
-            fontSize: '0.78rem',
-            lineHeight: 1,
-            fontFamily: 'var(--mono)',
-            fontWeight: 700,
-            color: 'var(--rouge)',
-          }}
-        >❌</span>
-      )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
         <Avatar name={p.name} userId={p.user_id} hasAvatar={p.has_avatar ?? false} active={active} isSelf={isSelf} size={2} />
         <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.15, minWidth: 0, flex: 1, paddingRight: canKick ? 22 : 0 }}>
@@ -1086,27 +1060,28 @@ function PlayerStrip({ p, active, isSelf, t, canKick, onKick }) {
           }}>
             {p.name}{isSelf ? ' ★' : ''}
           </span>
+          {/* G64 follow-up: both status markers (🩹 manche, 💀 partie)
+              live inline with the tokens line as plain emoji glyphs.
+              Previously the manche pip was an absolute-positioned chip
+              at the bottom-right corner of the card, but the white-pill
+              styling made it look like a clickable button rather than
+              a marker — particularly distracting against the rouge
+              active-card background (red on red). Now both are simple
+              inline emoji + count, no chip styling, no border, no
+              background. */}
           <span className="mono" style={{
-            fontSize: '0.72rem', opacity: 0.78, marginTop: 2,
-            display: 'inline-flex', alignItems: 'center', gap: 6,
+            fontSize: '0.72rem', marginTop: 2,
+            display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap',
           }}>
-            <span>
+            <span style={{ opacity: 0.85 }}>
               🪙 <span style={{ fontWeight: 700 }}>{p.tokens ?? 0}</span> <span style={{ opacity: 0.7 }}>fiches</span>
             </span>
-            {(p.round_points ?? 0) > 0 && (
-              <span
-                title={t ? t('partie_loss_tooltip') : 'Parties perdues'}
-                aria-label={t ? t('partie_loss_tooltip') : 'Parties perdues'}
-                style={{
-                  padding: '0 5px',
-                  borderRadius: 6,
-                  background: active ? 'rgba(255,255,255,0.18)' : 'var(--paper)',
-                  border: '1px solid var(--rule)',
-                  fontWeight: 700,
-                  color: 'var(--brass-deep)',
-                }}
-              >💀 {p.round_points}</span>
-            )}
+            <ScorePips
+              matchLosses={p.match_losses ?? 0}
+              roundPoints={p.round_points ?? 0}
+              active={active}
+              t={t}
+            />
           </span>
         </div>
       </div>
@@ -1115,40 +1090,47 @@ function PlayerStrip({ p, active, isSelf, t, canKick, onKick }) {
 }
 
 function ScorePips({ matchLosses, roundPoints, active, t }) {
-  // G64 follow-up: emoji swap per the user's vocab — the skull (💀) now
-  // represents *partie perdue* (a full game lost; cumulative across the
-  // session) while a red X (❌) marks *manche perdue cette partie* (a
-  // single match lost within the current partie; resets to 0 once a
-  // partie ends). matchLosses caps at 1 before triggering a partie loss,
-  // so the X shows no number. The skull pip keeps its numeric count.
+  // G64 follow-up: pips read as inline status markers, not buttons.
+  //   🩹 = manche perdue cette partie (wounded — single match lost in
+  //         the current partie; resets when the partie ends). Caps at 1
+  //         before triggering a partie loss, so no number is shown.
+  //   💀 = parties perdues (dead — cumulative full-game losses across
+  //         the session). Shows the count next to the skull.
+  // No border / no padding-pill: emoji + optional count, rendered inline
+  // so it can't be mistaken for a clickable button. The bandage colour
+  // works against both the rouge active-card background and the
+  // paper-deep inactive background since it relies on its own emoji
+  // colour rather than a paper-coloured chip.
   if (!matchLosses && !roundPoints) return null
   const mancheTitle = t ? t('manche_loss_tooltip') : 'Manche perdue cette partie'
   const partieTitle = t ? t('partie_loss_tooltip') : 'Parties perdues'
   return (
-    <div
+    <span
       style={{
         display: 'inline-flex',
-        gap: 4,
+        gap: 6,
+        alignItems: 'center',
         marginLeft: 4,
-        fontSize: '0.7rem',
+        fontSize: '0.72rem',
         fontFamily: 'var(--mono)',
+        fontWeight: 700,
         color: active ? 'var(--paper)' : 'var(--ink-soft)',
+        userSelect: 'none',
+        cursor: 'default',
       }}
       aria-label={`${mancheTitle}: ${matchLosses} · ${partieTitle}: ${roundPoints}`}
     >
       {matchLosses > 0 && (
-        <span style={{
-          padding: '1px 5px', borderRadius: 8, background: active ? 'rgba(255,255,255,0.18)' : 'var(--paper)',
-          border: '1px solid var(--rule)', fontWeight: 700, color: 'var(--rouge)',
-        }} title={mancheTitle}>❌</span>
+        <span title={mancheTitle} style={{ display: 'inline-flex', alignItems: 'center' }}>
+          🩹
+        </span>
       )}
       {roundPoints > 0 && (
-        <span style={{
-          padding: '1px 5px', borderRadius: 8, background: active ? 'rgba(255,255,255,0.18)' : 'var(--paper)',
-          border: '1px solid var(--rule)', fontWeight: 700, color: 'var(--brass-deep)',
-        }} title={partieTitle}>💀 {roundPoints}</span>
+        <span title={partieTitle} style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+          💀<span>{roundPoints}</span>
+        </span>
       )}
-    </div>
+    </span>
   )
 }
 
