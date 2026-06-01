@@ -233,7 +233,18 @@ export function Game({ token }) {
             ))}
           </div>
 
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div
+            className="gameroom-header-actions"
+            style={{
+              display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap',
+              // G62 follow-up: pin the bank · settings · quit cluster flush
+              // against the right edge of the top bar. Without this, when
+              // `flex-wrap` triggered a second row (at very narrow widths),
+              // wrapped items packed left and Quit ended up visually
+              // centre-of-the-column rather than top-right corner.
+              justifyContent: 'flex-end',
+            }}
+          >
             <CounterChip label={t('pool')} value={state.pool ?? 0} accent="var(--rouge)" />
             {isHost && (
               <button
@@ -349,11 +360,12 @@ export function Game({ token }) {
             }}
           >
             <div className="gameroom-piste piste" style={{ position: 'absolute', inset: 0 }} role="region" aria-label="Piste de jeu">
-              <div style={{
-                position: 'absolute', top: '5%', left: '50%', transform: 'translateX(-50%)',
-                fontFamily: 'var(--display)', fontStyle: 'italic',
-                color: 'var(--paper-deep)', fontSize: '1rem', letterSpacing: '0.16em', whiteSpace: 'nowrap',
-              }} aria-hidden="true">❦  L A   P I S T E  ❦</div>
+              {/* G47 follow-up: the « ❦ LA PISTE ❦ » decorative label used
+                  to sit at top: 5 % of the piste. With G47 rotation putting
+                  an opponent at the top of the ring, the label was directly
+                  underneath their avatar/name pill — overlap. Removed; the
+                  piste's brass rim + felt gradient already carry the visual
+                  identity without it. */}
 
               <ScoreToBeatBanner plays={state.current_round_plays} t={t} />
 

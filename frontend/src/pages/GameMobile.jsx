@@ -315,8 +315,17 @@ export function GameMobile({
             aria-label={t('hierarchy_open')}
             className="gameroom-hierarchy-btn"
           >📖</button>
+          {/* G64 follow-up: the long « Cliquez sur un dé pour le changer,
+              puis relancez. » string was pushing the ⚙ / 🚪 dock buttons
+              off-screen under ~450 px because flex items default to
+              `min-width: auto` (= content width). Adding `minWidth: 0`
+              lets the item shrink so the ellipsis actually kicks in.
+              Under 400 px we also hide the hint entirely — the dock
+              buttons matter more than the prose. */}
           <div className="gameroom-turn-hint serif" style={{
-            flex: 1, fontSize: '0.78rem', color: 'var(--ink-soft)', fontStyle: 'italic',
+            flex: 1,
+            minWidth: 0,
+            fontSize: '0.78rem', color: 'var(--ink-soft)', fontStyle: 'italic',
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           }}>
             {isMyTurn
