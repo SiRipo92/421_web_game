@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 
 const HEADLINE_KEYS = new Set([
   'log_match_lost',
@@ -7,13 +7,15 @@ const HEADLINE_KEYS = new Set([
   'log_player_left',
   'log_player_kicked',
   'log_afk_takeover',
+  'log_bot_handback',
+  'log_afk_return',
   'log_round_all_tie',
   'log_player_sits_out',
   'log_pool_empty',
   'log_new_set',
 ])
 
-const MAX_CARDS = 5
+const MAX_CARDS = 10
 
 function eventFingerprint(ev, idx) {
   if (!ev) return `idx-${idx}`
@@ -23,16 +25,62 @@ function eventFingerprint(ev, idx) {
   return parts || `idx-${idx}`
 }
 
+// G50: collapse-key for run-of-same-event dedup. Two consecutive events
+// sharing `(key, name)` (or `(key, names)` for plural events) collapse into
+// one card with a (×N) counter. Including the name keeps « TheWitch AFK ·
+// Julien AFK · TheWitch AFK » as three distinct cards instead of two.
+function dedupKey(ev) {
+  if (!ev) return ''
+  const subject = ev.name ?? (Array.isArray(ev.names) ? ev.names.join(',') : ev.names) ?? ''
+  return `${ev.key}|${subject}`
+}
+
 export function CommentaryTicker({ events, t }) {
-  // Pure derivation of the last MAX_CARDS headline events. No internal timer:
-  // older cards naturally cycle out as newer headlines push them off the slice,
-  // and the CSS slideIn animation gives each fresh card a visual "arrival".
+  const scrollRef = useRef(null)
+  const topCardIdRef = useRef(null)
+
+  // AFK takeover events fire once per bot turn. In a 2-player game where both
+  // players go idle, the ticker would otherwise be a wall of alternating
+  // takeover cards. We bound AFK to *one card per session per player*:
+  // oldest-first pre-pass tracks open sessions (takeover without handback);
+  // any subsequent takeover for a player whose session is already open gets
+  // flagged as a duplicate and dropped from the visible cards.
   const cards = useMemo(() => {
     if (!events?.length) return []
+
+    const skipIdx = new Set()
+    const openAfk = new Map() // playerName → true while session is open
+    for (let i = 0; i < events.length; i++) {
+      const ev = events[i]
+      if (!ev) continue
+      const name = ev.name
+      if ((ev.key === 'log_bot_handback' || ev.key === 'log_afk_return') && name) {
+        openAfk.delete(name)
+        continue
+      }
+      if (ev.key === 'log_afk_takeover' && name) {
+        if (openAfk.has(name)) {
+          skipIdx.add(i)
+        } else {
+          openAfk.set(name, true)
+        }
+      }
+    }
+
+    // Walk events newest-first. Push a card per *unique* (key, name) run; when
+    // the next-older event shares the run-key with the card we just pushed,
+    // bump that card's repeat counter instead of adding a new entry.
     const out = []
+    let lastRunKey = null
     for (let i = events.length - 1; i >= 0 && out.length < MAX_CARDS; i--) {
+      if (skipIdx.has(i)) continue
       const ev = events[i]
       if (!HEADLINE_KEYS.has(ev?.key)) continue
+      const runKey = dedupKey(ev)
+      if (out.length && runKey === lastRunKey && runKey !== '') {
+        out[out.length - 1].repeat += 1
+        continue
+      }
       const params = { ...ev }
       delete params.key
       if (Array.isArray(params.dice)) params.dice = `[${params.dice.join('-')}]`
@@ -40,10 +88,25 @@ export function CommentaryTicker({ events, t }) {
         id: eventFingerprint(ev, i),
         key: ev.key,
         text: t(ev.key, params),
+        repeat: 1,
       })
+      lastRunKey = runKey
     }
     return out
   }, [events, t])
+
+  // Snap the scroll list back to the top whenever a new top card lands —
+  // don't strand the reader mid-scroll on stale cards. We compare the top
+  // card's id rather than length so an in-place (×N) bump on the existing
+  // top card doesn't trigger a scroll.
+  useEffect(() => {
+    const topId = cards[0]?.id ?? null
+    if (topId !== topCardIdRef.current) {
+      topCardIdRef.current = topId
+      const node = scrollRef.current
+      if (node) node.scrollTop = 0
+    }
+  }, [cards])
 
   return (
     <div
@@ -64,7 +127,19 @@ export function CommentaryTicker({ events, t }) {
           {t('ticker_title')}
         </div>
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, overflow: 'hidden' }}>
+      <div
+        ref={scrollRef}
+        className="ticker-scroll"
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
+          flex: 1,
+          minHeight: 0,
+          overflowY: 'auto',
+          paddingRight: 4,
+        }}
+      >
         {cards.length === 0 && (
           <p className="note" style={{ fontStyle: 'italic', fontSize: '0.82rem', margin: 0 }}>
             {t('ticker_empty')}
@@ -74,6 +149,18 @@ export function CommentaryTicker({ events, t }) {
           <TickerCard key={c.id} card={c} t={t} />
         ))}
       </div>
+      <style>{`
+        .ticker-scroll::-webkit-scrollbar { width: 6px; }
+        .ticker-scroll::-webkit-scrollbar-track { background: transparent; }
+        .ticker-scroll::-webkit-scrollbar-thumb {
+          background: var(--brass-soft, rgba(180, 144, 88, 0.35));
+          border-radius: 3px;
+        }
+        .ticker-scroll::-webkit-scrollbar-thumb:hover {
+          background: var(--brass, rgba(180, 144, 88, 0.6));
+        }
+        .ticker-scroll { scrollbar-width: thin; scrollbar-color: var(--brass-soft, rgba(180,144,88,0.35)) transparent; }
+      `}</style>
     </div>
   )
 }
@@ -110,9 +197,21 @@ function TickerCard({ card, t }) {
     >
       <div
         className="eyebrow"
-        style={{ fontSize: '0.58rem', color: tone.accent, marginBottom: 2 }}
+        style={{
+          fontSize: '0.58rem',
+          color: tone.accent,
+          marginBottom: 2,
+          display: 'flex',
+          justifyContent: 'space-between',
+          gap: 8,
+        }}
       >
-        {t(tone.labelKey)}
+        <span>{t(tone.labelKey)}</span>
+        {card.repeat > 1 && (
+          <span className="mono" style={{ color: tone.accent, fontWeight: 700 }}>
+            ×{card.repeat}
+          </span>
+        )}
       </div>
       <div className="serif" style={{ fontSize: '0.88rem', color: 'var(--ink)', lineHeight: 1.35 }}>
         {card.text}
