@@ -318,25 +318,33 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 **Acceptance:** Two-player game; player A reaches 11 (manché) while player B reaches 0 in the same cycle. The journal shows the manché entry and a fresh-match start, but no "sits out" line for player B.
 **Dependencies:** None. Pure bug fix.
 
-### G45. Host: edit room rules mid-game (apply after current match)
-**Why:** The room owner today only has a « View room rules » affordance during play — the rules panel is read-only. Reported as a gap: the host should be able to *adjust* the room rules (e.g. bank rule, max throws, AFK timeout, spectators on/off) while a match is in progress, with the change taking effect after the current match/round finishes so live play isn't disrupted mid-cycle.
+### G45. Host: edit room rules mid-game (apply after current partie)
+**Why:** The room owner today only has a « View room rules » affordance during play — the rules panel is read-only. Reported as a gap: the host should be able to *adjust* the room rules (e.g. bank rule, max throws, AFK timeout, spectators on/off) while a partie is in progress, with the change taking effect after the current partie finishes so live play isn't disrupted mid-cycle. Reported again as critical for tables with 5+ players: at that size everyone rolling 3 throws per cycle slows the bank distribution dramatically — the host should be able to switch to `sec` mid-partie to speed things up for the next partie.
 **Scope:**
 - Backend: new WS action `update_room_rules {bank_rule?, max_throws?, afk_seconds?, afk_bot?, spectators?}` — host-only. Validates the partial payload against the room-config schema, stores the diff in a `Game.pending_room_rules` dict, broadcasts the pending changes so the UI can preview them.
-- Apply on match-end: in `_finalize_cycle` (or wherever a new match is bootstrapped after a manché → round-point reset), if `pending_room_rules` is non-empty, merge it into the live `Game.room` and clear the pending dict. Emit a `log_room_rules_updated` event so players see what changed.
-- Frontend: in `RoomSettingsPanel`, when the viewer is the host AND the game is in-progress, switch the read-only fields to editable; a « Sauvegarder pour la prochaine manche » CTA fires the new WS action. Visual badge on the panel — « En attente : prendra effet à la prochaine manche » — when `pending_room_rules` is set.
-- i18n keys: `room_rules_edit_cta`, `room_rules_pending_banner`, `log_room_rules_updated`.
-- Tests: host can update; non-host rejected; changes don't take effect until match-end; multiple consecutive edits stack into the same pending diff (last write wins per field).
-**Acceptance:** Host opens room settings mid-match, flips libre → sec, saves. A banner shows « Prendra effet à la prochaine manche ». When the current manché resolves and a new match starts, the rhythm cap moves to 1 and the log entry confirms the change.
+- Apply on partie-end: in `_finalize_cycle` (or wherever a new partie is bootstrapped after a manché → round-point reset), if `pending_room_rules` is non-empty, merge it into the live `Game.room` and clear the pending dict. Emit a `log_room_rules_updated` event so players see what changed.
+- **Journal (Ardoise) announcement, per-field:** the `log_room_rules_updated` event payload includes the diff (e.g. `{bank_rule: "free" → "sec"}`) and the journal renders a human-readable line per change: « L'hôte a changé la distribution : Libre → Sec » / « Inactivité : 45s → 20s ». This is critical so other players see *what* was changed and *when* the change took effect.
+- Frontend: in `RoomSettingsPanel`, when the viewer is the host AND the game is in-progress, switch the read-only fields to editable; a « Sauvegarder pour la prochaine partie » CTA fires the new WS action. Visual badge on the panel — « En attente : prendra effet à la prochaine partie » — when `pending_room_rules` is set.
+- i18n keys: `room_rules_edit_cta`, `room_rules_pending_banner`, `log_room_rules_updated_*` (one per changed field for the journal entries).
+- Tests: host can update; non-host rejected; changes don't take effect until partie-end; multiple consecutive edits stack into the same pending diff (last write wins per field); journal logs each changed field separately.
+**Acceptance:** Host opens room settings mid-partie, flips libre → sec, saves. A banner shows « Prendra effet à la prochaine partie ». When the current partie resolves and a new partie starts, the rhythm cap moves to 1 and the Ardoise shows a journal line confirming the change. Other players see the same Ardoise entry.
 **Dependencies:** None. Builds on the existing `RoomSettingsPanel`. Pairs naturally with [[G15]].
 
-### G46. In-game language toggle (FR ↔ EN inside the game room)
-**Why:** Reported during playtest. The TopBar carries the FR/EN switcher on every other page, but the game room hides the TopBar (intentional — the action bar takes precedence), and there's no in-room equivalent. A player who landed on the wrong language can't switch mid-game without leaving the room.
+### G46. In-game presentation settings (FR/EN + light/dark + room defaults)
+**Why:** Reported during playtest. The TopBar carries the FR/EN switcher and theme toggle on every other page, but the game room hides the TopBar (intentional — the action bar takes precedence), and there's no in-room equivalent. A player who landed on the wrong language or finds the contrast unreadable can't switch mid-game without leaving the room. Compounded by the user's separate observation: as host they want to set *room defaults* for these presentation choices (so the table opens consistently), with each player able to override locally if they want.
 **Scope:**
-- Add a compact `LangSwitch` to the game-room action bar (or the room settings panel header) — a 2-state toggle showing « FR » / « EN ». Reuses `useLang().setLang` and the existing localStorage persistence.
-- Placement: prefer the bottom action bar so it's adjacent to the player's other controls (Quitter, ⚙ Room rules). Keep it small so it doesn't compete with primary CTAs.
-- If the user is logged in, mirror the existing `updateMe({lang_pref})` background write that the TopBar toggle does — so the per-account preference stays in sync. See [[G26]] for the broader login-time sync.
-**Acceptance:** A player in any game room can flip FR ↔ EN; all UI strings + log events re-render in the chosen language; the choice persists across reloads. Logged-in users see their account's `lang_pref` update.
-**Dependencies:** None. Light-touch UI change.
+- **Per-player overrides (always available):** a compact « ⚙ Affichage » popover accessible from the game-room action bar (or the room settings panel header) exposes:
+    * Language: FR ↔ EN toggle. Reuses `useLang().setLang` + the existing localStorage persistence.
+    * Theme: light ↔ dark toggle. Reuses `useTheme().setTheme` + localStorage. (Existing dark theme already defined in `styles.css:42-61`.)
+    * Sound toggle (placeholder for [[G31]] — keep the popover slot here so future audio prefs slot in cleanly).
+  Available to every player at every viewport, including mobile (drawer-accessible there).
+- **Room defaults (host only, set during room creation):** extend `CreateRoom.jsx` with two new fields:
+    * Default language for the room (FR / EN)
+    * Default theme for the room (light / dark)
+  Persist on `Game.room_defaults` (or as part of the existing `Game.room` config). New players entering the room adopt these defaults UNLESS they have a per-player override saved in localStorage from a previous session, in which case the override wins.
+- **Logged-in sync (FR/EN only):** mirror the existing `updateMe({lang_pref})` background write the TopBar toggle does — so a user's account `lang_pref` syncs across rooms. See [[G26]]. Theme pref similarly hooked to `User.theme_pref` (new column or extend an existing JSON field).
+**Acceptance:** A player in any game room can flip FR ↔ EN and light ↔ dark via the in-room settings popover; choices persist across reloads. Host creating a room can set defaults that new joiners adopt unless they have a personal override saved. Logged-in users see their account's `lang_pref` and `theme_pref` stay in sync across rooms.
+**Dependencies:** None for the per-player overrides (light-touch UI change). The host-default + account-sync paths need a small backend schema bump (`Game.room.default_lang`, `Game.room.default_theme`, plus `User.theme_pref` migration).
 
 ### G47. (DONE — pending PR merge) Local player anchored at the bottom of the piste — and visually emphasized
 **Why:** Reported during playtest. The piste shows all players' seats arranged around the table, but the *viewer's* seat isn't anchored — it can land anywhere on the ring depending on turn order. The user wants the local player to always sit at the bottom (closest to the action bar) so they can identify themselves at a glance, like every poker / card-game UI does. Compounding it: today every seat renders at the same size, so even once anchored, the viewer's seat can be hard to spot at first glance — the user wants their own avatar *larger* than the competitors'.
@@ -546,6 +554,26 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
   - Frontend (manual): refresh during CHARGE → land back in the same game; refresh after `leave` → no rehydration banner; refresh after the room is dissolved → stale-session toast.
 **Acceptance:** A player in an active game refreshes their browser tab and returns to the same game state — same seat, same dice in front of them, same turn order. If the room ended/dissolved during their absence, they see a one-time explanatory toast and a clean home page.
 **Dependencies:** None for the v1 flow. Pairs with [[G11]] (single-player searching modal) — both target session continuity. Could later be extended to "reconnect across devices" but that needs proper auth-token-as-session-key.
+
+### G66. Default bank rule should be « Libre » (au choix du donneur)
+**Why:** Reported during playtest. The room-creation form currently defaults the bank rule to « Sec jusqu'à banque vide » (single throw for everyone during charge). The user expects « Au choix du donneur » (libre / free) as the default — it's the standard 421 experience where the round starter sets the rhythm and others match. Sec is a special-case shortcut for fast play with many players, not the canonical rule.
+**Scope:**
+- Backend: `Game.bank_rule` default is already `"free"` (`app/game/logic.py:131`), so the backend is correct.
+- Frontend: `CreateRoom.jsx` — wherever the form initializes `bankRule` state (look for `useState('sec')` or similar; needs verification), flip the default to `'free'`. The two-option toggle still presents both choices; just the *pre-selected* default changes.
+- Verify: opening the create-room page → « Au choix du donneur » is the radio that's checked by default.
+**Acceptance:** Creating a new room without changing the distribution option produces a libre room (`bank_rule === 'free'`).
+**Dependencies:** None. One-line fix.
+
+### G67. Numeric inputs accept keyboard entry (not just up/down arrows)
+**Why:** Reported during playtest. The AFK timeout `<Stepper>` (and likely the max-players stepper too) requires tapping the up/down arrows to change the value. The user wants to type a value directly via keyboard — much faster than clicking from 15 to 60 in 5-second increments.
+**Scope:**
+- Find the shared `Stepper` component (or wherever AFK timeout + max-players are rendered as numeric inputs).
+- Replace the arrow-only stepper with an `<input type="number" min={...} max={...} step={...}>` that also accepts typed values. Keep the visual increment buttons for tap users (good mobile UX) but make the central field editable.
+- Validate on blur: clamp to `[min, max]` (AFK: 15 ↔ 60s; max-players: 2 ↔ 5). If the typed value is out of range, snap to the nearest bound and flash a brief tooltip.
+- Keep keyboard arrow keys working when the input is focused (up/down adjusts by `step`).
+- Apply to: AFK timeout, max-players, anywhere else a stepper appears (search for the component / pattern).
+**Acceptance:** On the create-room and (future [[G45]]) edit-room-rules forms, the user can either tap up/down OR click the number and type a value. Out-of-range typed values clamp on blur with a visual cue.
+**Dependencies:** None. Light-touch frontend change.
 
 ---
 
