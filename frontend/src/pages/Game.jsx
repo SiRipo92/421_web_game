@@ -3,9 +3,9 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Die } from '../components/shared/Die.jsx'
 import { Avatar } from '../components/shared/Avatar.jsx'
 import { ChipStack } from '../components/shared/ChipStack.jsx'
-import { ComboTable } from '../components/shared/ComboTable.jsx'
 import { RoomSettingsPanel } from '../components/shared/RoomSettingsPanel.jsx'
 import { ConfirmModal } from '../components/shared/ConfirmModal.jsx'
+import { HierarchyModal } from '../components/shared/HierarchyModal.jsx'
 import { CommentaryTicker, ScoreToBeatBanner } from '../components/shared/CommentaryTicker.jsx'
 import { useGame } from '../hooks/useGame.js'
 import { useLang } from '../context/useLang.js'
@@ -20,6 +20,7 @@ export function Game({ token }) {
   const logRef = useRef(null)
 
   const [logOpen, setLogOpen] = useState(true)
+  const [showHierarchy, setShowHierarchy] = useState(false)
   const [showRoomSettings, setShowRoomSettings] = useState(false)
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false)
   const [kickTarget, setKickTarget] = useState(null) // {id, name} the host is about to kick
@@ -267,14 +268,18 @@ export function Game({ token }) {
         {/* Piste area — G14: piste grows to fill the column, dice anchored to bottom,
             pool dead-center as the focal point, score-to-beat banner pinned at top.
             G62: the parent grid row carries the height; `minHeight: 0` lets this
-            container shrink instead of pushing the action bar off-screen. The
-            piste-stage sizes from its container (no more 85vh cap), so the
-            square stays inside the available space at any viewport height. */}
+            container shrink instead of pushing the action bar off-screen.
+            G62 follow-up: `containerType: size` registers this as a container
+            so the piste-stage can size from BOTH axes — `min(cqi, cqb)` returns
+            the smaller of width/height, keeping the inner square truly square
+            (and the `.piste` circle truly circular) regardless of which axis
+            is the binding constraint. */}
         <div style={{
           minHeight: 0, padding: '1.2rem',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           position: 'relative',
           overflow: 'hidden',
+          containerType: 'size',
         }}>
           {matchEnd && (
             <MatchEndBanner
@@ -288,8 +293,7 @@ export function Game({ token }) {
             className="piste-stage"
             style={{
               position: 'relative',
-              width: 'min(820px, 100%)',
-              maxHeight: '100%',
+              width: 'min(820px, 100cqi, 100cqb)',
               aspectRatio: '1/1',
             }}
           >
@@ -469,9 +473,46 @@ export function Game({ token }) {
             ))}
           </div>
         )}
-        <div style={{ padding: '1rem 1.4rem', borderTop: '1px solid var(--rule)' }}>
-          <div className="eyebrow" style={{ marginBottom: 8 }}>{t('combo_hier')}</div>
-          <ComboTable compact />
+        {/* G62 follow-up: the combo hierarchy table used to live here as a
+            permanent footer of the right aside, eating real estate every
+            game even for players who already know the rules. Now it's a
+            button that pops a lightbox with the full hierarchy on demand —
+            free space for the journal, one click away when needed. */}
+        <div style={{ padding: '0.9rem 1.4rem', borderTop: '1px solid var(--rule)' }}>
+          <button
+            type="button"
+            onClick={() => setShowHierarchy(true)}
+            aria-label={t('hierarchy_open')}
+            style={{
+              width: '100%',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 8,
+              padding: '0.55rem 0.9rem',
+              fontSize: '0.85rem',
+              fontFamily: 'var(--body)',
+              color: 'var(--ink-soft)',
+              background: 'var(--paper)',
+              border: '1px solid var(--rule)',
+              borderRadius: 4,
+              cursor: 'pointer',
+              transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'var(--paper-deep)'
+              e.currentTarget.style.color = 'var(--ink)'
+              e.currentTarget.style.borderColor = 'var(--brass)'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'var(--paper)'
+              e.currentTarget.style.color = 'var(--ink-soft)'
+              e.currentTarget.style.borderColor = 'var(--rule)'
+            }}
+          >
+            <span>📖 {t('hierarchy_open')}</span>
+            <span style={{ color: 'var(--ink-mute)', fontSize: '0.9rem' }}>›</span>
+          </button>
         </div>
       </aside>
 
@@ -506,6 +547,12 @@ export function Game({ token }) {
           onClose={() => setShowRoomSettings(false)}
         />
       )}
+
+      <HierarchyModal
+        open={showHierarchy}
+        onClose={() => setShowHierarchy(false)}
+        t={t}
+      />
 
       {showLeaveConfirm && (
         <ConfirmModal
