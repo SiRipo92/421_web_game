@@ -10,7 +10,12 @@ export function CreateRoom({ token }) {
   const navigate = useNavigate()
   const [isPublic, setIsPublic] = useState(false)
   const [maxPlayers, setMaxPlayers] = useState(4)
-  const [bankRule, setBankRule] = useState('sec')
+  // G66: default to « Au choix du donneur » (free / libre) — the canonical
+  // 421 experience where the round starter sets the rhythm. Sec is a
+  // special-case shortcut for fast play with many players, not the default.
+  // Backend already defaults `bank_rule` to "free" (app/game/logic.py:131);
+  // the frontend pre-selection just needed to match.
+  const [bankRule, setBankRule] = useState('free')
   const [afkSec, setAfkSec] = useState(45)
   const [afkBot, setAfkBot] = useState(true)
   const [allowSpectators, setAllowSpectators] = useState(true)
