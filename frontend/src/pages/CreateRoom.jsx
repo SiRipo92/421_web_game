@@ -22,7 +22,16 @@ export function CreateRoom({ token }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
+  // G67: gate creation until the Stepper values are in their allowed ranges.
+  // The Stepper itself clamps on blur, but the user could (a) submit without
+  // ever blurring the field or (b) currently be mid-typing an out-of-range
+  // intermediate (e.g., "1" on the way to "15"). Disable + visual cue here.
+  const isAfkValid = Number.isInteger(afkSec) && afkSec >= 15 && afkSec <= 120
+  const isMaxPlayersValid = Number.isInteger(maxPlayers) && maxPlayers >= 2 && maxPlayers <= 5
+  const canCreate = isAfkValid && isMaxPlayersValid
+
   const handleCreate = async () => {
+    if (!canCreate) return
     const name = sessionStorage.getItem('playerName') || 'Joueur'
     setLoading(true)
     setError('')
@@ -117,8 +126,18 @@ export function CreateRoom({ token }) {
       {error && <p style={{ color: 'var(--rouge)', marginTop: 16 }}>{error}</p>}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '1.5rem', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-        <div className="note">Vous pouvez modifier ces réglages dans la salle d'attente.</div>
-        <button type="button" disabled={loading} className="btn btn-rouge" onClick={handleCreate}>
+        <div className="note">
+          {canCreate
+            ? "Vous pouvez modifier ces réglages dans la salle d'attente."
+            : <span style={{ color: 'var(--rouge)' }}>Vérifiez vos réglages : timer d'inactivité (15–120 s), joueurs max (2–5).</span>}
+        </div>
+        <button
+          type="button"
+          disabled={loading || !canCreate}
+          className="btn btn-rouge"
+          onClick={handleCreate}
+          style={{ opacity: !canCreate ? 0.45 : 1, cursor: !canCreate ? 'not-allowed' : 'pointer' }}
+        >
           {loading ? '…' : `❦ ${t('open_table')}`}
         </button>
       </div>
