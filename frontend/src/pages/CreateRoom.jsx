@@ -8,7 +8,10 @@ import { createGame, joinGame } from '../api/game.js'
 export function CreateRoom({ token }) {
   const { t } = useLang()
   const navigate = useNavigate()
-  const [isPublic, setIsPublic] = useState(false)
+  // Default to public — the lobby benefits from open tables being the
+  // standard choice. Hosts wanting a private friends-only table can flip
+  // the toggle.
+  const [isPublic, setIsPublic] = useState(true)
   const [maxPlayers, setMaxPlayers] = useState(4)
   // G66: default to « Au choix du donneur » (free / libre) — the canonical
   // 421 experience where the round starter sets the rhythm. Sec is a
