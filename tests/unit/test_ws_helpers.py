@@ -67,9 +67,39 @@ class TestBotPickKeepers:
         """[3, 3, 5] → keep the pair of 3s, reroll the 5 (chase triple)."""
         assert _bot_pick_keepers([3, 3, 5]) == [False, False, True]
 
-    def test_pair_with_lone_ace_keeps_ace_too(self):
-        """[5, 5, 1] → keep both 5s AND the 1 (free shot at 11x/421 upgrade)."""
-        assert _bot_pick_keepers([5, 5, 1]) == [False, False, False]
+    def test_pair_with_lone_ace_chases_11x(self):
+        """G55 follow-up: [5, 5, 1] → keep 1 + ONE 5, reroll the other 5.
+
+        The previous heuristic kept all three (`[False, False, False]`),
+        committing the bot to a basic 551 (rank 551 < starter floor 1000).
+        Reported in playtest: bot was stopping at 4-4-1, 6-6-1, nénette
+        (2-2-1) with throws remaining. Chasing 11x (~1/6 chance per
+        reroll, rank 7200+) is strictly higher EV than locking in the
+        basic.
+        """
+        # First 5 is kept, second 5 is rerolled, lone 1 is kept.
+        assert _bot_pick_keepers([5, 5, 1]) == [False, True, False]
+
+    def test_pair_22_with_lone_ace_chases_11x(self):
+        """[2, 2, 1] (nénette) → keep 1 + ONE 2, reroll the other 2.
+
+        The user's specific complaint: bot committed to nénette as starter.
+        After the fix it tries to escape via the 11x path.
+        """
+        assert _bot_pick_keepers([2, 2, 1]) == [False, True, False]
+
+    def test_pair_66_with_lone_ace_chases_11x(self):
+        """[6, 6, 1] → keep 1 + ONE 6, reroll the other 6.
+
+        Same pair-plus-lone-1 pattern at the top of the range.
+        """
+        assert _bot_pick_keepers([6, 6, 1]) == [False, True, False]
+
+    def test_pair_44_with_lone_ace_chases_11x(self):
+        """[4, 4, 1] → keep 1 + ONE 4, reroll the other 4. (4-4-1 doesn't
+        trigger Rule 2's 4+2 chase since there's no 2.)
+        """
+        assert _bot_pick_keepers([4, 4, 1]) == [False, True, False]
 
     def test_lone_ace_keeps_ace_and_highest(self):
         """[1, 3, 6] → keep the 1 (path to 11x/421) and the 6 (highest), reroll the 3."""
@@ -272,6 +302,27 @@ class TestBotStarterFloor:
         assert not (used == 1 and committed_basic), (
             f"Bot committed on a basic after 1 throw: combo={bot.turn.combo}, rank={bot.turn.rank}"
         )
+
+    def test_starter_with_pair_and_lone_ace_doesnt_commit(self, monkeypatch):
+        """G55 follow-up regression: the user's playtest showed the bot
+        accepting nénette (2-2-1) / 4-4-1 / 6-6-1 as starter — pair plus
+        lone 1 → keepers used to say hold → bot committed below the
+        starter floor. After the Rule 3 fix it should use ≥ 2 throws.
+
+        Sequence below: first throw lands on 4-4-1 (basic 441). The
+        fixed Rule 3 picks `[False, True, False]` (keep 1 + first 4,
+        reroll second 4). The next random value (2) gives us 4-2-1 =
+        421, ceiling, bot stops at 2 throws.
+        """
+        values = iter([4, 4, 1, 2])  # throw 1: 4-4-1; reroll position 1: 2 → 421
+        monkeypatch.setattr("app.game.ws.random.randint", lambda a, b: next(values))
+
+        game, bot = self._make_starter_only_game()
+        _bot_take_turn(bot, game)
+
+        used = 3 - bot.turn.rolls_left
+        assert used == 2, f"Expected 2 throws, got {used}"
+        assert bot.turn.combo == "421"
 
 
 class TestBotDecisionLog:
