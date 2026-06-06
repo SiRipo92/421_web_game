@@ -575,6 +575,53 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 **Acceptance:** On the create-room and (future [[G45]]) edit-room-rules forms, the user can either tap up/down OR click the number and type a value. Out-of-range typed values clamp on blur with a visual cue.
 **Dependencies:** None. Light-touch frontend change.
 
+### G61. Right-rail panels become collapsible "tabs"
+**Why:** Reported during playtest. The right `<aside>` today is a fixed layout: collapsible **Journal** on top, *always-visible* **Combo hierarchy** at the bottom. The user wants the hierarchy to collapse the same way the journal does — and more broadly, they want the right rail to behave like a small set of *stackable tabs* (Journal · Hierarchy · later: Chat) that each open/close independently. This sets up the eventual chat slot ([[G59]]) without ripping out the existing panels.
+**Scope:**
+- **Component:** new `CollapsiblePanel.jsx` in `frontend/src/components/shared/` taking `{ title, subtitle?, defaultOpen, children, onToggle }`. Renders a sticky header with the panel title + collapse button (▲ / ▼), then the children when open. Mirrors the existing journal header treatment so the visual language stays consistent.
+- **Refactor `Game.jsx`'s right `<aside>`:**
+  - Wrap the journal content in a `<CollapsiblePanel title={t('log')} subtitle={t('log_subtitle')} defaultOpen>`. Lift the existing `logOpen` state in or move it into the new component (lift up if other components need to know).
+  - Wrap the hierarchy in a second `<CollapsiblePanel title={t('combo_hier')} defaultOpen={false}>`. Default-closed so it doesn't compete with the journal for vertical space.
+  - When [[G59]] / chat ships, add a third `<CollapsiblePanel title={t('chat')} />` panel in the same rail.
+- **Vertical layout:** the rail uses `display: flex; flex-direction: column`. Each panel collapses to just its header when closed; the open panel claims the remaining `flex: 1` so users can read it comfortably. Two open panels share the space proportionally.
+- **State persistence:** localStorage `panel_state: { log: bool, hierarchy: bool, chat: bool }` so a user's open/closed choices stick across refreshes / G60 rehydration.
+- **A11y:** each header acts as a button with `aria-expanded` reflecting state; `aria-controls` pointing to the body region; keyboard Enter / Space toggles.
+- **Tests:** none required for this MVP (pure UI state). Manual playtest validates the visual flow.
+**Acceptance:** The hierarchy section now has its own collapse button identical to the journal's. Closing both panels collapses the rail to just two headers + a thin spacer. Reopening either expands smoothly. The toggle states persist across page reloads.
+**Dependencies:** Pairs cleanly with [[G59]] (chat-prep) and [[G60]] (session persistence — the panel_state localStorage key is part of the same persistence layer).
+
+### G62. (DONE) Game-room layout overflow / overlap fix at 100% browser zoom
+**Why:** Reported during playtest. The user was running at 80 % browser zoom, which masked layout issues. At 100 % zoom the room breaks: the piste is too large for the viewport, text feels oversized, the bottom action bar gets pushed off-screen and forces a page scroll, and the top bar elements overlap (the last-throw dice on a `PlayerStrip` collide with the player's name pill). The host's « ⚙ Room rules » pill in the top-right adds a chunk of width that compounds the overlap.
+**Scope:** Viewport-fit piste via CSS grid `auto 1fr auto` rows in the middle column + container queries on the piste-stage. Action bar 3-column grid (info · secondary · primary) so play buttons stay flush right when wrapping. Per-strip dice hidden ≤ 1280 px. Host « ⚙ Room rules » button icon-only at all widths. Top-bar moved from PlayerStrips to a vertical PlayerRail in the left aside (was squishing badly at 3+ players). Pool stack `1.45×` scaled in the centre. Bandage/skull pip system with always-on counters in the rail card. « ❦ LA PISTE ❦ » decorative label removed (overlapped G47 top seat).
+**Acceptance:** At 100 % zoom on any laptop-or-larger viewport, the game room fits without a page scroll. Top-bar elements never overlap. The host's room-rules button doesn't push other controls off-screen. The action bar (Lancer / Valider / Quitter) is always visible at the bottom without the user having to scroll.
+**Dependencies:** Bundled with [[G14]] and [[G52]] in spirit. Shipped via the same PR as [[G64]] and [[G47]] rotation.
+
+### G63. (DONE) Cross-page responsive UX audit + breakpoint discipline
+**Why:** The user wanted assurance that *every* page (home, lobby, waiting room, game room, profile, rankings, login/register, reset, contact, how-to-play, terms, privacy) renders cleanly across **mobile (375 px) / tablet (768 px) / laptop (1280 px) / desktop (1920 px)**. [[G19]] hit the TopBar's 641–835 px band, [[G62]] fixed the game room, but no end-to-end pass had run.
+**Scope:** Code-level audit of every page in `frontend/src/pages/` plus shared layout components. Documented findings in `docs/RESPONSIVE_AUDIT.md` (4-breakpoint contract; per-page punch list). Top 10 follow-up fixes prioritised; each becomes its own roadmap entry (G68+) when picked up.
+**Acceptance:** Audit doc committed. Future fix work has a clear punch list.
+**Dependencies:** None. Investigation work; shipped via PR #40 (chore/g63-responsive-audit).
+
+### G64. (DONE) Mobile / tablet gameplay layout — rewrite from scratch
+**Why:** Reported during playtest. The desktop layout (3-column grid + top-bar PlayerStrip row + bottom action bar) was unusable on < 1024 px viewports. Existing breakpoints only stripped components down — the underlying structure still tried to assert itself.
+**Scope shipped:**
+- `useMediaQuery('(max-width: 959px)')` switches `Game.jsx` to render `<GameMobile />` below 960 px. Desktop branch untouched.
+- New `GameMobile.jsx` shell: slim top header (phase · round · turn · top-right 🚪 Quit), full-bleed piste, 2-row bottom dock (Roll/Validate primary; Journal/Live/Hierarchy/Settings secondary).
+- New `BottomSheet.jsx` drawer component — slide-up panel, backdrop, drag-handle, `prefers-reduced-motion` aware. Journal + Live live in drawers; Hierarchy reuses the existing lightbox.
+- `MobilePisteSeat` trimmed variant with G47 rotation reused (viewer at the bottom).
+- Manche/partie pip system (🩹/💀) with always-on counters per player card.
+**Acceptance:** A player can play a complete match on a 375 px phone using only thumb gestures. Mobile/tablet/laptop verified across the matrix.
+**Dependencies:** Built on [[G47]] (viewer at bottom) + [[G62]] (piste sizing) + [[G60]] (drawer state). Shipped together via PR #46.
+
+### G65. (DONE) Dice scale responsive to viewport
+**Why:** Dice were CSS-fixed at 4.5 rem regardless of viewport. On phones that's a third of screen width per die; the cluster overflowed the piste's bottom slot. On 960–1180 px laptop band the corners clipped against the curved piste boundary.
+**Scope shipped:**
+- `--die-size` CSS custom property scoped to `.gameroom-piste-stage` via container queries: `clamp(2.4rem, 12cqi, 4.2rem)`. Dice now scale relative to the piste container, not the viewport.
+- `--die-pip-size: clamp(0.38rem, 1.85cqi, 0.65rem)` follows proportionally.
+- Mini dice (`.die-mini`) unchanged.
+**Acceptance:** Dice fit comfortably in the piste at every viewport width.
+**Dependencies:** None. Shipped alongside [[G64]] via PR #46.
+
 ---
 
 ## Next
