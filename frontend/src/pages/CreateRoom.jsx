@@ -8,16 +8,33 @@ import { createGame, joinGame } from '../api/game.js'
 export function CreateRoom({ token }) {
   const { t } = useLang()
   const navigate = useNavigate()
-  const [isPublic, setIsPublic] = useState(false)
+  // Default to public — the lobby benefits from open tables being the
+  // standard choice. Hosts wanting a private friends-only table can flip
+  // the toggle.
+  const [isPublic, setIsPublic] = useState(true)
   const [maxPlayers, setMaxPlayers] = useState(4)
-  const [bankRule, setBankRule] = useState('sec')
+  // G66: default to « Au choix du donneur » (free / libre) — the canonical
+  // 421 experience where the round starter sets the rhythm. Sec is a
+  // special-case shortcut for fast play with many players, not the default.
+  // Backend already defaults `bank_rule` to "free" (app/game/logic.py:131);
+  // the frontend pre-selection just needed to match.
+  const [bankRule, setBankRule] = useState('free')
   const [afkSec, setAfkSec] = useState(45)
   const [afkBot, setAfkBot] = useState(true)
   const [allowSpectators, setAllowSpectators] = useState(true)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
+  // G67: gate creation until the Stepper values are in their allowed ranges.
+  // The Stepper itself clamps on blur, but the user could (a) submit without
+  // ever blurring the field or (b) currently be mid-typing an out-of-range
+  // intermediate (e.g., "1" on the way to "15"). Disable + visual cue here.
+  const isAfkValid = Number.isInteger(afkSec) && afkSec >= 15 && afkSec <= 120
+  const isMaxPlayersValid = Number.isInteger(maxPlayers) && maxPlayers >= 2 && maxPlayers <= 5
+  const canCreate = isAfkValid && isMaxPlayersValid
+
   const handleCreate = async () => {
+    if (!canCreate) return
     const name = sessionStorage.getItem('playerName') || 'Joueur'
     setLoading(true)
     setError('')
@@ -112,8 +129,18 @@ export function CreateRoom({ token }) {
       {error && <p style={{ color: 'var(--rouge)', marginTop: 16 }}>{error}</p>}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '1.5rem', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-        <div className="note">Vous pouvez modifier ces réglages dans la salle d'attente.</div>
-        <button type="button" disabled={loading} className="btn btn-rouge" onClick={handleCreate}>
+        <div className="note">
+          {canCreate
+            ? "Vous pouvez modifier ces réglages dans la salle d'attente."
+            : <span style={{ color: 'var(--rouge)' }}>Vérifiez vos réglages : timer d'inactivité (15–120 s), joueurs max (2–5).</span>}
+        </div>
+        <button
+          type="button"
+          disabled={loading || !canCreate}
+          className="btn btn-rouge"
+          onClick={handleCreate}
+          style={{ opacity: !canCreate ? 0.45 : 1, cursor: !canCreate ? 'not-allowed' : 'pointer' }}
+        >
           {loading ? '…' : `❦ ${t('open_table')}`}
         </button>
       </div>

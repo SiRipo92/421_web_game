@@ -555,7 +555,7 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 **Acceptance:** A player in an active game refreshes their browser tab and returns to the same game state — same seat, same dice in front of them, same turn order. If the room ended/dissolved during their absence, they see a one-time explanatory toast and a clean home page.
 **Dependencies:** None for the v1 flow. Pairs with [[G11]] (single-player searching modal) — both target session continuity. Could later be extended to "reconnect across devices" but that needs proper auth-token-as-session-key.
 
-### G66. Default bank rule should be « Libre » (au choix du donneur)
+### G66. (DONE — pending PR merge) Default bank rule should be « Libre » (au choix du donneur)
 **Why:** Reported during playtest. The room-creation form currently defaults the bank rule to « Sec jusqu'à banque vide » (single throw for everyone during charge). The user expects « Au choix du donneur » (libre / free) as the default — it's the standard 421 experience where the round starter sets the rhythm and others match. Sec is a special-case shortcut for fast play with many players, not the canonical rule.
 **Scope:**
 - Backend: `Game.bank_rule` default is already `"free"` (`app/game/logic.py:131`), so the backend is correct.
@@ -564,7 +564,7 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 **Acceptance:** Creating a new room without changing the distribution option produces a libre room (`bank_rule === 'free'`).
 **Dependencies:** None. One-line fix.
 
-### G67. Numeric inputs accept keyboard entry (not just up/down arrows)
+### G67. (DONE — pending PR merge) Numeric inputs accept keyboard entry (not just up/down arrows)
 **Why:** Reported during playtest. The AFK timeout `<Stepper>` (and likely the max-players stepper too) requires tapping the up/down arrows to change the value. The user wants to type a value directly via keyboard — much faster than clicking from 15 to 60 in 5-second increments.
 **Scope:**
 - Find the shared `Stepper` component (or wherever AFK timeout + max-players are rendered as numeric inputs).
