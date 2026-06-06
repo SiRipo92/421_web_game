@@ -1122,6 +1122,41 @@ async def _dispatch(
         await manager.broadcast(game_id, game_state(game))
         return None
 
+    if action == "update_room_rules":
+        # G45: host queues rule changes for the *next partie*. We validate
+        # each field independently and stack into `game.pending_room_rules`;
+        # nothing applies live. `_finalize_cycle` picks up the dict and
+        # applies + clears it when a partie boundary is reached.
+        if player_id != game.host_player_id:
+            return None
+        payload = msg.get("rules") or {}
+        if not isinstance(payload, dict):
+            return None
+
+        validators = {
+            "bank_rule": lambda v: v if v in ("sec", "free") else None,
+            "max_players": lambda v: int(v) if isinstance(v, int) and 2 <= v <= 5 else None,
+            "afk_seconds": lambda v: int(v) if isinstance(v, int) and 15 <= v <= 120 else None,
+            "afk_bot": lambda v: v if isinstance(v, bool) else None,
+            "allow_spectators": lambda v: v if isinstance(v, bool) else None,
+        }
+        for rule_field, validator in validators.items():
+            if rule_field not in payload:
+                continue
+            valid = validator(payload[rule_field])
+            if valid is None:
+                continue
+            current = getattr(game, rule_field, None)
+            if current == valid:
+                # Edited back to the current value → drop the pending entry
+                # rather than leave a noop sitting around.
+                game.pending_room_rules.pop(rule_field, None)
+            else:
+                game.pending_room_rules[rule_field] = valid
+
+        await manager.broadcast(game_id, game_state(game))
+        return None
+
     return None
 
 

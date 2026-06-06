@@ -38,6 +38,7 @@ export function GameMobile({
   leave,
   navigate,
   formatLogEntries,
+  updateRoomRules,
 }) {
   const [openDrawer, setOpenDrawer] = useState(null) // 'journal' | 'live' | null
   const [showHierarchy, setShowHierarchy] = useState(false)
@@ -379,6 +380,9 @@ export function GameMobile({
         <RoomSettingsPanel
           room={state.room}
           hostName={state.players?.find(p => p.id === state.room?.host_player_id)?.name}
+          isHost={isHost}
+          gamePhase={state.phase}
+          onUpdateRules={updateRoomRules}
           onClose={() => setShowRoomSettings(false)}
         />
       )}

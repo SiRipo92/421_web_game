@@ -688,3 +688,68 @@ async def test_resolve_round_single_player_auto_ends_game():
     assert game.phase == GamePhase.FINISHED
     # last log_events entry names the survivor as winner
     assert any(e.get("key") == "log_game_over" for e in game.log_events)
+
+
+# ── G45: host-edited room rules apply at the partie boundary ─────────────
+
+
+@pytest.mark.asyncio
+async def test_pending_room_rules_apply_when_round_point_taken():
+    """G45: pending rule changes apply at the partie boundary (when a
+    player takes a 2nd manche → round-point increments → new partie).
+    Each changed field emits its own `log_rule_change_*` event; the
+    pending dict is cleared after apply.
+    """
+    game = _make_game(2)
+    game.phase = GamePhase.DECHARGE
+    game.bank_rule = "free"
+    game.afk_seconds = 45
+    # p0 already lost one manche this partie; this cycle pushes them to 2.
+    game.match_losses["p0"] = 1
+    game.pending_room_rules = {"bank_rule": "sec", "afk_seconds": 30}
+    # Force p0 to manché this cycle by setting their tokens to 11 directly.
+    game.players[0].tokens = 11
+    game.players[1].tokens = 0
+    game.players[0].turn = _done_turn(100, 1)  # loser
+    game.players[1].turn = _done_turn(9000, 8)  # winner
+
+    await _resolve_round(game)
+
+    # Live config now reflects the pending edits.
+    assert game.bank_rule == "sec"
+    assert game.afk_seconds == 30
+    # Pending dict cleared.
+    assert game.pending_room_rules == {}
+    # One journal event per changed field.
+    keys = [e.get("key") for e in game.log_events]
+    assert "log_rule_change_bank_rule" in keys
+    assert "log_rule_change_afk_seconds" in keys
+
+
+@pytest.mark.asyncio
+async def test_pending_room_rules_dont_apply_mid_partie():
+    """G45: a manche loss that doesn't end the partie (ml_count goes to 1,
+    not 2) must NOT consume the pending dict — the host wants the rules
+    to land at the *partie* boundary, not at every manche reset.
+    """
+    game = _make_game(2)
+    game.phase = GamePhase.DECHARGE
+    game.bank_rule = "free"
+    game.afk_seconds = 45
+    # No prior manche losses for p0 → this cycle takes them to 1, not 2.
+    game.match_losses["p0"] = 0
+    game.pending_room_rules = {"bank_rule": "sec"}
+    game.players[0].tokens = 11
+    game.players[1].tokens = 0
+    game.players[0].turn = _done_turn(100, 1)
+    game.players[1].turn = _done_turn(9000, 8)
+
+    await _resolve_round(game)
+
+    # Live config untouched.
+    assert game.bank_rule == "free"
+    # Pending still queued for the next partie boundary.
+    assert game.pending_room_rules == {"bank_rule": "sec"}
+    # No rule-change journal event yet.
+    keys = [e.get("key") for e in game.log_events]
+    assert "log_rule_change_bank_rule" not in keys
