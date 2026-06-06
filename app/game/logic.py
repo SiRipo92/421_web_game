@@ -153,6 +153,14 @@ class Game:
     # grace window, we emit `log_afk_return` so the table sees them come back.
     # The in-grace return path uses `bot_handback_tasks` + `log_bot_handback`.
     afk_session: set = field(default_factory=set, compare=False, repr=False)
+    # G45: host-edited rule changes queued for the *next partie*. Live play
+    # isn't disrupted mid-cycle; the dict applies when `_finalize_cycle`
+    # detects a partie boundary (a player reaches 2 manche losses → takes a
+    # round point → match_losses reset → new partie starts). Keys map to the
+    # room config fields they replace (bank_rule, max_players, afk_seconds,
+    # afk_bot, allow_spectators); is_public and host_player_id can't be
+    # edited mid-game.
+    pending_room_rules: dict = field(default_factory=dict)
 
     def current_player(self) -> Optional[Player]:
         """Return the player whose turn it is, skipping sat-out players.
@@ -204,6 +212,9 @@ def game_state(game: Game) -> dict:
             "afk_seconds": game.afk_seconds,
             "afk_bot": game.afk_bot,
             "allow_spectators": game.allow_spectators,
+            # G45: pending host-edited rule changes (apply at the next
+            # partie boundary). Empty dict when no edits are pending.
+            "pending_room_rules": dict(game.pending_room_rules),
             "host_player_id": game.host_player_id,
         },
         "players": [
@@ -513,6 +524,25 @@ async def _finalize_cycle(game: Game, next_starter_id: Optional[str]) -> None:
                 name=manche.name,
                 count=rp_count,
             )
+            # G45: this is the partie boundary — apply any host-queued rule
+            # changes before the new partie starts. One journal event per
+            # changed field so the table sees what was updated. Pending dict
+            # cleared after apply.
+            if game.pending_room_rules:
+                for rule_field, new_value in list(game.pending_room_rules.items()):
+                    old_value = getattr(game, rule_field, None)
+                    if old_value == new_value:
+                        continue
+                    setattr(game, rule_field, new_value)
+                    _log(
+                        game,
+                        f"log_rule_change_{rule_field}",
+                        f"Règle mise à jour · {rule_field}: {old_value} → {new_value}",
+                        field=rule_field,
+                        old=old_value,
+                        new=new_value,
+                    )
+                game.pending_room_rules.clear()
         _start_new_set(game, ml_id)
         return
 

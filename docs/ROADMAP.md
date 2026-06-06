@@ -318,7 +318,7 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 **Acceptance:** Two-player game; player A reaches 11 (manché) while player B reaches 0 in the same cycle. The journal shows the manché entry and a fresh-match start, but no "sits out" line for player B.
 **Dependencies:** None. Pure bug fix.
 
-### G45. Host: edit room rules mid-game (apply after current partie)
+### G45. (DONE — pending PR merge) Host: edit room rules mid-game (apply after current partie)
 **Why:** The room owner today only has a « View room rules » affordance during play — the rules panel is read-only. Reported as a gap: the host should be able to *adjust* the room rules (e.g. bank rule, max throws, AFK timeout, spectators on/off) while a partie is in progress, with the change taking effect after the current partie finishes so live play isn't disrupted mid-cycle. Reported again as critical for tables with 5+ players: at that size everyone rolling 3 throws per cycle slows the bank distribution dramatically — the host should be able to switch to `sec` mid-partie to speed things up for the next partie.
 **Scope:**
 - Backend: new WS action `update_room_rules {bank_rule?, max_throws?, afk_seconds?, afk_bot?, spectators?}` — host-only. Validates the partial payload against the room-config schema, stores the diff in a `Game.pending_room_rules` dict, broadcasts the pending changes so the UI can preview them.

@@ -18,7 +18,7 @@ export function Game({ token }) {
   const [params] = useSearchParams()
   const playerId = params.get('pid')
   const navigate = useNavigate()
-  const { state, roll, keep, done, initialRoll, tiebreakRoll, leave, kick } = useGame(gameId, playerId, token)
+  const { state, roll, keep, done, initialRoll, tiebreakRoll, leave, kick, updateRoomRules } = useGame(gameId, playerId, token)
   const logRef = useRef(null)
   // G64: switch to the mobile-shell layout at ≤ 959 px viewports.
   const isMobile = useMediaQuery('(max-width: 959px)')
@@ -142,6 +142,7 @@ export function Game({ token }) {
         leave={leave}
         navigate={navigate}
         formatLogEntries={formatLogEntries}
+        updateRoomRules={updateRoomRules}
       />
     )
   }
@@ -705,6 +706,9 @@ export function Game({ token }) {
         <RoomSettingsPanel
           room={state.room}
           hostName={state.players?.find(p => p.id === state.room?.host_player_id)?.name}
+          isHost={isHost}
+          gamePhase={state.phase}
+          onUpdateRules={updateRoomRules}
           onClose={() => setShowRoomSettings(false)}
         />
       )}
