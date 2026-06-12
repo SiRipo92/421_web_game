@@ -4,16 +4,22 @@ import { Die } from '../components/shared/Die.jsx'
 import { Avatar } from '../components/shared/Avatar.jsx'
 import { ChipStack } from '../components/shared/ChipStack.jsx'
 import { RoomSettingsPanel } from '../components/shared/RoomSettingsPanel.jsx'
+import { PresentationPopover } from '../components/shared/PresentationPopover.jsx'
 import { ConfirmModal } from '../components/shared/ConfirmModal.jsx'
 import { HierarchyModal } from '../components/shared/HierarchyModal.jsx'
 import { CommentaryTicker, ScoreToBeatBanner } from '../components/shared/CommentaryTicker.jsx'
 import { useGame } from '../hooks/useGame.js'
 import { useMediaQuery } from '../hooks/useMediaQuery.js'
 import { useLang } from '../context/useLang.js'
+import { useTheme } from '../context/useTheme.js'
+import { useAuth } from '../hooks/useAuth.js'
+import { updateMe } from '../api/auth.js'
 import { GameMobile } from './GameMobile.jsx'
 
 export function Game({ token }) {
-  const { t } = useLang()
+  const { t, lang, setLang } = useLang()
+  const { theme, setTheme } = useTheme()
+  const auth = useAuth()
   const { gameId } = useParams()
   const [params] = useSearchParams()
   const playerId = params.get('pid')
@@ -27,6 +33,40 @@ export function Game({ token }) {
   const [tickerOpen, setTickerOpen] = useState(true)
   const [showHierarchy, setShowHierarchy] = useState(false)
   const [showRoomSettings, setShowRoomSettings] = useState(false)
+  const [showPresentation, setShowPresentation] = useState(false)
+  // G46: on first entry, adopt the room's presentation defaults UNLESS the
+  // user has a per-player override saved in localStorage. The override is
+  // anything the user set explicitly outside this room. Tracked via a ref
+  // so we only adopt once per room — flipping the popover after shouldn't
+  // re-apply room defaults.
+  const adoptedRoomDefaultsRef = useRef(false)
+  useEffect(() => {
+    if (adoptedRoomDefaultsRef.current) return
+    const room = state.room
+    if (!room) return
+    const userLang = localStorage.getItem('lang')
+    const userTheme = localStorage.getItem('theme')
+    if (!userLang && room.default_lang && room.default_lang !== lang) {
+      setLang(room.default_lang)
+    }
+    if (!userTheme && room.default_theme && room.default_theme !== theme) {
+      setTheme(room.default_theme)
+    }
+    adoptedRoomDefaultsRef.current = true
+    // We want this to fire on the *first* render with a room payload; deps
+    // intentionally minimal.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.room?.default_lang, state.room?.default_theme])
+
+  // G46: when a logged-in user flips lang/theme in the popover, mirror the
+  // change to /auth/me so the next session opens in their chosen preset.
+  // Failures are silent — the local change still applies; the account
+  // just won't have the new value until the next successful sync.
+  const handlePrefChange = ({ lang_pref, theme_pref }) => {
+    if (!auth.token) return
+    updateMe(auth.token, { ...(lang_pref ? { lang_pref } : {}), ...(theme_pref ? { theme_pref } : {}) })
+      .catch(() => {})
+  }
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false)
   const [kickTarget, setKickTarget] = useState(null) // {id, name} the host is about to kick
   const [matchEnd, setMatchEnd] = useState(null) // {name, count} for the G13 banner
@@ -143,6 +183,11 @@ export function Game({ token }) {
         navigate={navigate}
         formatLogEntries={formatLogEntries}
         updateRoomRules={updateRoomRules}
+        lang={lang}
+        setLang={setLang}
+        theme={theme}
+        setTheme={setTheme}
+        onPrefChange={handlePrefChange}
       />
     )
   }
@@ -330,6 +375,36 @@ export function Game({ token }) {
                 }}
               >⚙</button>
             )}
+            <button
+              type="button"
+              onClick={() => setShowPresentation(true)}
+              aria-label={t('presentation_title')}
+              title={t('presentation_title')}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: 36,
+                height: 36,
+                fontSize: '1.05rem',
+                fontFamily: 'var(--body)',
+                color: 'var(--ink-soft)',
+                background: 'var(--paper)',
+                border: '1px solid var(--rule)',
+                borderRadius: 999,
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+                transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'var(--paper-deep)'
+                e.currentTarget.style.color = 'var(--ink)'
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'var(--paper)'
+                e.currentTarget.style.color = 'var(--ink-soft)'
+              }}
+            >🎨</button>
             <button
               type="button"
               onClick={() => setShowLeaveConfirm(true)}
@@ -717,6 +792,17 @@ export function Game({ token }) {
         open={showHierarchy}
         onClose={() => setShowHierarchy(false)}
         t={t}
+      />
+
+      <PresentationPopover
+        open={showPresentation}
+        onClose={() => setShowPresentation(false)}
+        t={t}
+        lang={lang}
+        setLang={setLang}
+        theme={theme}
+        setTheme={setTheme}
+        onPrefChange={handlePrefChange}
       />
 
       {showLeaveConfirm && (

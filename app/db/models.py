@@ -40,6 +40,9 @@ class User(Base):
     avatar_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     avatar_content_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
     lang_pref: Mapped[str] = mapped_column(String(2), nullable=False, server_default="fr")
+    # G46: per-account theme preference (light/dark). Synced with the
+    # in-game presentation popover toggle when the user is logged in.
+    theme_pref: Mapped[str] = mapped_column(String(8), nullable=False, server_default="light")
     email_opt_in: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     # Moderation foundation (G38). Role is a plain string column rather than a
     # Postgres ENUM so promoting/demoting in tests + migrations stays a single

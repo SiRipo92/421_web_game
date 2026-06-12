@@ -330,7 +330,7 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 **Acceptance:** Host opens room settings mid-partie, flips libre → sec, saves. A banner shows « Prendra effet à la prochaine partie ». When the current partie resolves and a new partie starts, the rhythm cap moves to 1 and the Ardoise shows a journal line confirming the change. Other players see the same Ardoise entry.
 **Dependencies:** None. Builds on the existing `RoomSettingsPanel`. Pairs naturally with [[G15]].
 
-### G46. In-game presentation settings (FR/EN + light/dark + room defaults)
+### G46. (DONE — pending PR merge) In-game presentation settings (FR/EN + light/dark + room defaults)
 **Why:** Reported during playtest. The TopBar carries the FR/EN switcher and theme toggle on every other page, but the game room hides the TopBar (intentional — the action bar takes precedence), and there's no in-room equivalent. A player who landed on the wrong language or finds the contrast unreadable can't switch mid-game without leaving the room. Compounded by the user's separate observation: as host they want to set *room defaults* for these presentation choices (so the table opens consistently), with each player able to override locally if they want.
 **Scope:**
 - **Per-player overrides (always available):** a compact « ⚙ Affichage » popover accessible from the game-room action bar (or the room settings panel header) exposes:

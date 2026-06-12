@@ -103,6 +103,7 @@ def _me_response(user: User) -> MeResponse:
         username=user.username,
         email=user.email,
         lang_pref=user.lang_pref,
+        theme_pref=user.theme_pref,
         email_opt_in=user.email_opt_in,
         profile_complete=user.birthdate is not None,
         has_avatar=user.avatar_data is not None,
@@ -277,6 +278,8 @@ async def update_me(
         current_user.username = body.username
     if body.lang_pref is not None:
         current_user.lang_pref = body.lang_pref
+    if body.theme_pref is not None:
+        current_user.theme_pref = body.theme_pref
     await db.commit()
     await db.refresh(current_user)
     return _me_response(current_user)
@@ -314,6 +317,7 @@ async def export_data(
             "username": current_user.username,
             "email": current_user.email,
             "lang_pref": current_user.lang_pref,
+            "theme_pref": current_user.theme_pref,
             "email_opt_in": current_user.email_opt_in,
             "created_at": current_user.created_at.isoformat(),
         },

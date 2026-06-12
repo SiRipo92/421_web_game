@@ -107,6 +107,7 @@ class MeResponse(BaseModel):
     username: str
     email: str
     lang_pref: str
+    theme_pref: str = "light"
     email_opt_in: bool
     profile_complete: bool = True
     has_avatar: bool = False
@@ -150,6 +151,7 @@ class UpdateMeRequest(BaseModel):
 
     username: str | None = None
     lang_pref: str | None = None
+    theme_pref: str | None = None
 
     @field_validator("username")
     @classmethod
@@ -168,6 +170,15 @@ class UpdateMeRequest(BaseModel):
             return v
         if v not in ("fr", "en"):
             raise ValueError("lang_pref must be 'fr' or 'en'")
+        return v
+
+    @field_validator("theme_pref")
+    @classmethod
+    def theme_valid(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if v not in ("light", "dark"):
+            raise ValueError("theme_pref must be 'light' or 'dark'")
         return v
 
 

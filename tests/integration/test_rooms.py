@@ -96,6 +96,42 @@ async def test_create_clamps_invalid_afk_seconds(client):
     assert games[game_id].afk_seconds == 45
 
 
+async def test_create_accepts_presentation_defaults(client):
+    """G46: /api/create accepts default_lang + default_theme and surfaces
+    them on the Game + in `game_state.room`."""
+    from app.game.logic import game_state
+    from app.game.state import games
+
+    r = await client.post(
+        "/api/create",
+        params={"default_lang": "en", "default_theme": "dark"},
+    )
+    assert r.status_code == 200
+    game_id = r.json()["game_id"]
+    game = games[game_id]
+    assert game.default_lang == "en"
+    assert game.default_theme == "dark"
+    # And the WS payload includes them.
+    state = game_state(game)
+    assert state["room"]["default_lang"] == "en"
+    assert state["room"]["default_theme"] == "dark"
+
+
+async def test_create_clamps_invalid_presentation_defaults(client):
+    """G46: unrecognised values fall back to fr / light without 500ing."""
+    from app.game.state import games
+
+    r = await client.post(
+        "/api/create",
+        params={"default_lang": "klingon", "default_theme": "neon"},
+    )
+    assert r.status_code == 200
+    game_id = r.json()["game_id"]
+    game = games[game_id]
+    assert game.default_lang == "fr"
+    assert game.default_theme == "light"
+
+
 async def test_join_late_returns_waiting(client):
     """Joining a game already past WAITING returns status=waiting."""
     from app.game.logic import GamePhase
