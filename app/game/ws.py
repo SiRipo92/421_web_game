@@ -179,20 +179,34 @@ def _bot_pick_keepers(dice: list[int]) -> list[bool]:
                 kept[d] += 1
         return reroll
 
-    # Rule 3: any pair. Keep the pair + any lone 1.
+    # Rule 3: any pair. Two paths depending on the third die:
+    #   (a) Pair X-X + lone 1 (X != 1): keep 1 + ONE pair member, reroll the
+    #       other. Chases 11x (rank 7200+) — much higher EV than committing
+    #       to the basic X-X-1 (max rank 661). User playtest showed the
+    #       previous "keep all three" was the bot's biggest weakness: it
+    #       stopped at nénette / 4-4-1 / 6-6-1 even with throws remaining.
+    #   (b) Pair X-X + non-1 third: keep both pair members, reroll the
+    #       third. Chases triple X (rank 2200-2600).
     for v in (6, 5, 4, 3, 2):
         if counts[v] >= 2:
-            kept_count = 0
-            reroll = [True, True, True]
-            for i, d in enumerate(dice):
-                if d == v and kept_count < 2:
-                    reroll[i] = False
-                    kept_count += 1
             if counts[1] >= 1:
+                # Path (a): chase 11x.
+                reroll = [True, True, True]
+                kept_v = 0
                 for i, d in enumerate(dice):
-                    if d == 1 and reroll[i]:
+                    if d == 1:
                         reroll[i] = False
-                        break
+                    elif d == v and kept_v < 1:
+                        reroll[i] = False
+                        kept_v = 1
+                return reroll
+            # Path (b): chase triple X.
+            reroll = [True, True, True]
+            kept_v = 0
+            for i, d in enumerate(dice):
+                if d == v and kept_v < 2:
+                    reroll[i] = False
+                    kept_v += 1
             return reroll
 
     # Rule 4: lone 1. Keep it + the highest other die.
@@ -330,8 +344,28 @@ def _bot_take_turn(player: Player, game: Optional[Game] = None) -> None:
 
         reroll = _bot_pick_keepers(turn.dice)
         if not any(reroll):
-            stop_reason = "keepers_say_hold"
-            break
+            # G55 follow-up: defensive safeguard for the case the heuristic
+            # says "hold" with a worse-than-our-goal hand and throws still
+            # available. The original logic would commit at a basic rank
+            # below the starter floor (or below the non-starter target) —
+            # the user's playtest flagged this for pair-plus-lone-1 hands
+            # (4-4-1, 6-6-1, 2-2-1). The fix to Rule 3 above resolves those
+            # specific dice patterns; this block catches any future
+            # heuristic regression that produces the same bad pattern by
+            # forcing the lowest die to re-roll.
+            below_starter_floor = (
+                is_starter
+                and target_rank == 0
+                and turn.rank > 0
+                and turn.rank < _BOT_STARTER_FLOOR_RANK
+            )
+            below_target = target_rank > 0 and turn.rank <= target_rank
+            if turn.rolls_left > 0 and (below_starter_floor or below_target):
+                lowest_i = min(range(3), key=lambda i: turn.dice[i])
+                reroll = [j == lowest_i for j in range(3)]
+            else:
+                stop_reason = "keepers_say_hold"
+                break
         for i, do_reroll in enumerate(reroll):
             if do_reroll:
                 turn.dice[i] = random.randint(1, 6)
