@@ -106,3 +106,32 @@ async def update_user_role(
     )
     await db.commit()
     return {"user_id": str(target.id), "role": target.role, "previous": previous}
+
+
+@router.get("/games/{game_id}/bot-decisions")
+async def get_bot_decisions(
+    game_id: str,
+    _: User = Depends(require_moderator),
+):
+    """G55 follow-up: return the per-throw AFK bot decision trace for a
+    live game. Each entry captures the dice rolled, kept/rerolled mask,
+    target rank, post-throw combo + rank, and (on the last throw of a
+    turn) the stop reason. Suboptimal sequences can be reviewed offline
+    to tune the heuristic.
+
+    Returns 404 if the game id isn't an active room. Buffer is capped at
+    `_BOT_DECISIONS_BUFFER_CAP` entries (rolling) so a long-lived room
+    doesn't grow unbounded — for a full history of a finished game,
+    pair this with a future persistence path.
+    """
+    # Late import to avoid circular dep (routers → game → ws → routers).
+    from app.game.state import games
+
+    game = games.get(game_id.upper())
+    if game is None:
+        raise HTTPException(status_code=404, detail="Game not found")
+    return {
+        "game_id": game.id,
+        "decisions": list(game.bot_decisions),
+        "count": len(game.bot_decisions),
+    }

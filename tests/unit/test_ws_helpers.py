@@ -368,6 +368,113 @@ class TestBotDecisionLog:
         assert bot.turn.done is True
 
 
+class TestBotPerThrowDecisionBuffer:
+    """G55 follow-up: every bot throw appends a structured entry to
+    `game.bot_decisions` so the heuristic can be reviewed offline via the
+    admin endpoint.
+    """
+
+    def _make_game(self):
+        bot = Player(id="s1", name="BotStarter")
+        bot.turn = PlayerTurn()
+        game = Game(
+            id="DECTRACE",
+            players=[bot],
+            phase=GamePhase.CHARGE,
+            round_starter_id="s1",
+            current_index=0,
+            max_throws_this_round=3,
+            afk_bot=False,
+            bank_rule="free",
+        )
+        return game, bot
+
+    def test_single_throw_records_one_entry(self, monkeypatch):
+        """Starter rolls a suite (4-3-2 → rank 1200 ≥ floor) — stops at
+        throw 1, one buffer entry with the stop_reason set."""
+        values = iter([4, 3, 2])
+        monkeypatch.setattr("app.game.ws.random.randint", lambda a, b: next(values))
+
+        game, bot = self._make_game()
+        _bot_take_turn(bot, game)
+
+        assert len(game.bot_decisions) == 1
+        e = game.bot_decisions[0]
+        assert e["throw"] == 1
+        assert e["dice_after"] == [4, 3, 2]
+        # First throw — bot kept nothing, rerolled all three from zero state.
+        assert e["kept_mask"] == [False, False, False]
+        assert e["dice_before"] == [0, 0, 0]
+        assert e["combo"] == "234"
+        assert e["target_rank"] == 0
+        assert e["is_starter"] is True
+        assert e["stop_reason"] == "starter_floor_met"
+        assert e["player_name"] == "BotStarter"
+        assert e["player_id"] == "s1"
+        assert e["game_id"] == "DECTRACE"
+
+    def test_multi_throw_records_per_throw_entries(self, monkeypatch):
+        """First throw 4-4-1 (basic, below floor), Rule 3(a) rerolls one 4,
+        next roll gives 2 → 421 (ceiling). Buffer has 2 entries; only the
+        last carries the stop_reason."""
+        values = iter([4, 4, 1, 2])
+        monkeypatch.setattr("app.game.ws.random.randint", lambda a, b: next(values))
+
+        game, bot = self._make_game()
+        _bot_take_turn(bot, game)
+
+        assert len(game.bot_decisions) == 2
+        first, second = game.bot_decisions
+        # First throw — no kept context (started from blank).
+        assert first["throw"] == 1
+        assert first["dice_after"] == [4, 4, 1]
+        assert first["combo"] == "441"
+        # Rule 3 doesn't end the turn → no stop_reason yet.
+        assert first["stop_reason"] is None
+        # Second throw is the reroll triggered by Rule 3(a). 421 trips the
+        # starter-floor break (rank 9000 ≥ 1000 + target=0) BEFORE the
+        # ceiling check, so the stop_reason is `starter_floor_met` — the
+        # bot would still also accept 421 via the ceiling check, but the
+        # floor check fires earlier in the loop.
+        assert second["throw"] == 2
+        assert second["combo"] == "421"
+        assert second["stop_reason"] == "starter_floor_met"
+        # The kept_mask records what the bot HELD on this throw — Rule 3(a)
+        # kept the lone 1 and one of the 4s, so two positions kept + one
+        # rerolled. Both possible arrangements (`[T,F,T]` or `[F,T,T]`)
+        # depending on which 4 the rule picked first are acceptable.
+        assert sum(second["kept_mask"]) == 2
+
+    def test_buffer_cap_enforced(self):
+        """Buffer rolls past `_BOT_DECISIONS_BUFFER_CAP` (200). Confirm the
+        cap by stuffing entries directly via `_record_bot_throw`."""
+        from app.game.ws import _BOT_DECISIONS_BUFFER_CAP, _record_bot_throw
+
+        game, bot = self._make_game()
+        # Push cap + 10 dummy entries.
+        for n in range(_BOT_DECISIONS_BUFFER_CAP + 10):
+            _record_bot_throw(
+                game=game,
+                player=bot,
+                throw_num=n,
+                dice_before=[0, 0, 0],
+                kept_mask=[False, False, False],
+                dice_after=[1, 1, 1],
+                combo="111",
+                rank=8000,
+                fiches=7,
+                target_rank=0,
+                is_starter=True,
+                max_throws_allowed=3,
+                stop_reason=None,
+            )
+
+        assert len(game.bot_decisions) == _BOT_DECISIONS_BUFFER_CAP
+        # Oldest dropped — first entry's throw_num is now 10, not 0.
+        assert game.bot_decisions[0]["throw"] == 10
+        assert game.bot_decisions[-1]["throw"] == _BOT_DECISIONS_BUFFER_CAP + 9
+
+
 class TestBotHandback:
     """G2: cancelling a pending bot turn restores the human's snapshot."""
 

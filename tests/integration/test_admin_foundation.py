@@ -194,6 +194,78 @@ async def test_login_works_after_ban_expires(client, make_user):
     assert "access_token" in r.json()
 
 
+async def test_bot_decisions_endpoint_requires_moderator(client, make_user):
+    """G55 follow-up: a regular player hitting the bot-decisions endpoint
+    gets 403; a moderator gets 200 with the buffer payload."""
+    from app.game.logic import Game
+    from app.game.state import games
+
+    # Seed a synthetic game with one bot-decision entry.
+    game = Game(id="MODBOT01")
+    game.bot_decisions.append(
+        {
+            "game_id": "MODBOT01",
+            "player_id": "b1",
+            "player_name": "BotPlayer",
+            "is_starter": True,
+            "throw": 1,
+            "dice_before": [0, 0, 0],
+            "kept_mask": [False, False, False],
+            "dice_after": [4, 2, 1],
+            "combo": "421",
+            "rank": 9000,
+            "fiches": 8,
+            "target_rank": 0,
+            "max_throws_allowed": 3,
+            "stop_reason": "ceiling_421",
+        }
+    )
+    games["MODBOT01"] = game
+
+    try:
+        # Non-mod gets 403.
+        player_data = make_user("nonmod")
+        reg = await client.post("/auth/register", json=player_data)
+        token = reg.json()["access_token"]
+        r = await client.get(
+            "/api/admin/games/MODBOT01/bot-decisions",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert r.status_code == 403
+
+        # Mod gets 200 with the payload.
+        mod_data = make_user("mod")
+        mod_reg = await client.post("/auth/register", json=mod_data)
+        mod_token = mod_reg.json()["access_token"]
+        me = await client.get("/auth/me", headers={"Authorization": f"Bearer {mod_token}"})
+        await _promote(me.json()["id"], "moderator")
+        r2 = await client.get(
+            "/api/admin/games/MODBOT01/bot-decisions",
+            headers={"Authorization": f"Bearer {mod_token}"},
+        )
+        assert r2.status_code == 200
+        body = r2.json()
+        assert body["game_id"] == "MODBOT01"
+        assert body["count"] == 1
+        assert body["decisions"][0]["combo"] == "421"
+    finally:
+        games.pop("MODBOT01", None)
+
+
+async def test_bot_decisions_endpoint_404_unknown_game(client, make_user):
+    """G55 follow-up: unknown game id → 404."""
+    mod_data = make_user("modmissing")
+    reg = await client.post("/auth/register", json=mod_data)
+    token = reg.json()["access_token"]
+    me = await client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
+    await _promote(me.json()["id"], "moderator")
+    r = await client.get(
+        "/api/admin/games/NOPENOPE/bot-decisions",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r.status_code == 404
+
+
 async def test_chat_ban_does_not_block_login(client, make_user):
     """chat_banned_until is surfaced via /auth/me but doesn't gate login."""
     data = make_user("chatban")
