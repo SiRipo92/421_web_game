@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useLang } from '../context/useLang.js'
 
 export function Contact() {
@@ -7,6 +8,11 @@ export function Contact() {
   const [email, setEmail] = useState('')
   const [subject, setSubject] = useState('other')
   const [message, setMessage] = useState('')
+  // G68: explicit consent for processing the contact data is required
+  // before sending. `required` on the checkbox blocks submit at the
+  // browser level; the JS check is a belt-and-suspenders for screen
+  // readers / form auto-fillers that might bypass the required flag.
+  const [acceptConsent, setAcceptConsent] = useState(false)
   const [loading, setLoading] = useState(false)
   const [sent, setSent] = useState(false)
   const [error, setError] = useState('')
@@ -14,6 +20,10 @@ export function Contact() {
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
+    if (!acceptConsent) {
+      setError(t('err_accept_consent'))
+      return
+    }
     setLoading(true)
     try {
       const res = await fetch('/api/contact', {
@@ -81,8 +91,30 @@ export function Contact() {
                 value={message} onChange={e => setMessage(e.target.value)}
                 style={{ resize: 'vertical', fontFamily: 'var(--body)' }} />
             </div>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+              <input
+                id="c-consent"
+                type="checkbox"
+                required
+                checked={acceptConsent}
+                onChange={e => setAcceptConsent(e.target.checked)}
+                style={{ marginTop: 3, flexShrink: 0 }}
+              />
+              <label htmlFor="c-consent" className="serif" style={{ fontSize: '0.9rem', cursor: 'pointer', lineHeight: 1.4 }}>
+                {t('contact_consent_pre')}{' '}
+                <Link to="/privacy" target="_blank" style={{ color: 'var(--rouge)' }}>
+                  {t('contact_consent_privacy_link')}
+                </Link>
+                {' '}{t('contact_consent_and')}{' '}
+                <Link to="/terms" target="_blank" style={{ color: 'var(--rouge)' }}>
+                  {t('contact_consent_terms_link')}
+                </Link>
+                {'. '}
+                <span style={{ color: 'var(--rouge)' }}>*</span>
+              </label>
+            </div>
             {error && <p style={{ color: 'var(--rouge)', fontSize: '0.9rem', margin: 0 }}>{error}</p>}
-            <button type="submit" disabled={loading} className="btn btn-primary" style={{ justifyContent: 'center' }}>
+            <button type="submit" disabled={loading || !acceptConsent} className="btn btn-primary" style={{ justifyContent: 'center', opacity: acceptConsent ? 1 : 0.45 }}>
               {loading ? '…' : t('contact_send')}
             </button>
           </form>

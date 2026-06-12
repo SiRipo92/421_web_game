@@ -575,6 +575,23 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 **Acceptance:** On the create-room and (future [[G45]]) edit-room-rules forms, the user can either tap up/down OR click the number and type a value. Out-of-range typed values clamp on blur with a visual cue.
 **Dependencies:** None. Light-touch frontend change.
 
+### G68. (DONE — pending PR merge) RGPD consent — Contact form checkbox + Register links Privacy too
+**Why:** The Privacy.jsx page already covers all 7 RGPD-required sections (data controller, collected data, purposes, retention, your rights, cookies/storage, DPO contact). Two gaps remained: (1) the Contact form had no consent checkbox, so users were submitting personal data (name, email, free-text message) without an explicit data-processing opt-in; (2) the Register form's consent checkbox only linked to `/terms`, so users weren't being told they were also agreeing to the Privacy/RGPD policy.
+**Scope shipped:**
+- `Contact.jsx`: new required consent checkbox linking to both `/privacy` and `/terms`. Submit button gated until checked + JS belt-and-suspenders check before POST. Error message in FR/EN if the user manages to bypass the `required` flag.
+- `Login.jsx` (RegisterForm): existing `accept-cgu` checkbox text expanded to link to both `/terms` AND `/privacy` via new `accept_terms_and` + `accept_privacy_link` i18n keys.
+- New FR/EN i18n keys: `contact_consent_pre`, `contact_consent_privacy_link`, `contact_consent_and`, `contact_consent_terms_link`, `err_accept_consent`, `accept_terms_and`, `accept_privacy_link`.
+**Acceptance:** Sending a contact message without checking the consent box → error + no POST fires. Registering → checkbox text mentions both Terms AND Privacy with both links working.
+**Dependencies:** None.
+
+### G69. Privacy / Terms content audit (future, when needed)
+**Why:** Captured for future. Privacy.jsx is comprehensive today but its content is hard-coded in French only — no i18n. TermsAndConditions.jsx is i18n'd but each section is a single short paragraph. If we ship to a wider audience (or get a legal review), both pages will need a content pass + EN translation of Privacy.jsx.
+**Scope (sketch):**
+- Convert Privacy.jsx hard-coded French to i18n keys + add EN translations.
+- Expand TermsAndConditions section bodies if a legal review flags gaps.
+- Consider versioning consent (record the policy version the user accepted) — relevant if policies change materially after registration.
+**Dependencies:** Out of scope for now — pages are functional. Open when a real legal review happens or when EN audience grows.
+
 ### G61. Right-rail panels become collapsible "tabs"
 **Why:** Reported during playtest. The right `<aside>` today is a fixed layout: collapsible **Journal** on top, *always-visible* **Combo hierarchy** at the bottom. The user wants the hierarchy to collapse the same way the journal does — and more broadly, they want the right rail to behave like a small set of *stackable tabs* (Journal · Hierarchy · later: Chat) that each open/close independently. This sets up the eventual chat slot ([[G59]]) without ripping out the existing panels.
 **Scope:**
