@@ -7,6 +7,7 @@ import { BottomSheet } from '../components/shared/BottomSheet.jsx'
 import { HierarchyModal } from '../components/shared/HierarchyModal.jsx'
 import { RoomSettingsPanel } from '../components/shared/RoomSettingsPanel.jsx'
 import { ConfirmModal } from '../components/shared/ConfirmModal.jsx'
+import { PresentationPopover } from '../components/shared/PresentationPopover.jsx'
 
 /**
  * G64: mobile / tablet gameplay shell (active ≤ 959 px). Rebuilds the room
@@ -39,10 +40,16 @@ export function GameMobile({
   navigate,
   formatLogEntries,
   updateRoomRules,
+  lang,
+  setLang,
+  theme,
+  setTheme,
+  onPrefChange,
 }) {
   const [openDrawer, setOpenDrawer] = useState(null) // 'journal' | 'live' | null
   const [showHierarchy, setShowHierarchy] = useState(false)
   const [showRoomSettings, setShowRoomSettings] = useState(false)
+  const [showPresentation, setShowPresentation] = useState(false)
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false)
 
   const currentName = state.players?.find(p => p.id === state.current_player_id)?.name || ''
@@ -334,6 +341,14 @@ export function GameMobile({
               ? !hasRolled ? t('keep_hint') : `${myTurn?.rolls_left ?? 0} ${t('rolls_left')}.`
               : `${t('waiting_for')}`}
           </div>
+          <button
+            type="button"
+            onClick={() => setShowPresentation(true)}
+            aria-label={t('presentation_title')}
+            title={t('presentation_title')}
+            style={mobileDockBtn()}
+            className="gameroom-presentation-btn"
+          >🎨</button>
           {isHost && (
             <button
               type="button"
@@ -375,6 +390,17 @@ export function GameMobile({
         open={showHierarchy}
         onClose={() => setShowHierarchy(false)}
         t={t}
+      />
+
+      <PresentationPopover
+        open={showPresentation}
+        onClose={() => setShowPresentation(false)}
+        t={t}
+        lang={lang}
+        setLang={setLang}
+        theme={theme}
+        setTheme={setTheme}
+        onPrefChange={onPrefChange}
       />
       {showRoomSettings && (
         <RoomSettingsPanel

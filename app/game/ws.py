@@ -789,6 +789,8 @@ async def create_game(
     afk_seconds: int = 45,
     afk_bot: bool = True,
     allow_spectators: bool = True,
+    default_lang: str = "fr",
+    default_theme: str = "light",
     token: Optional[str] = Query(default=None),
 ):
     """Create a new game room and return its short ID."""
@@ -798,6 +800,12 @@ async def create_game(
         bank_rule = "free"
     if afk_seconds < 10 or afk_seconds > 300:
         afk_seconds = 45
+    # G46: room-presentation defaults validated at the boundary so the
+    # Game dataclass + game_state both stay clean.
+    if default_lang not in ("fr", "en"):
+        default_lang = "fr"
+    if default_theme not in ("light", "dark"):
+        default_theme = "light"
 
     gid = str(uuid.uuid4())[:8].upper()
     games[gid] = Game(
@@ -808,6 +816,8 @@ async def create_game(
         afk_seconds=afk_seconds,
         afk_bot=afk_bot,
         allow_spectators=allow_spectators,
+        default_lang=default_lang,
+        default_theme=default_theme,
     )
     return {"game_id": gid}
 

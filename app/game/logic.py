@@ -133,6 +133,13 @@ class Game:
     afk_bot: bool = True
     allow_spectators: bool = True
     host_player_id: str = ""
+    # G46: presentation defaults the host picks at room creation. New
+    # joiners adopt these unless they have a per-player override saved
+    # in localStorage from a previous session. Validated to "fr"/"en"
+    # and "light"/"dark" at the API boundary; the game state just
+    # surfaces them for the client.
+    default_lang: str = "fr"
+    default_theme: str = "light"
     # Runtime state — not serialized
     afk_tasks: dict = field(default_factory=dict, compare=False, repr=False)
     # G1: epoch-ms timestamp of the current player's active AFK timer. Stamped by
@@ -221,6 +228,10 @@ def game_state(game: Game) -> dict:
             "afk_seconds": game.afk_seconds,
             "afk_bot": game.afk_bot,
             "allow_spectators": game.allow_spectators,
+            # G46: host's presentation defaults — new joiners adopt these
+            # unless they have a per-player override saved.
+            "default_lang": game.default_lang,
+            "default_theme": game.default_theme,
             # G45: pending host-edited rule changes (apply at the next
             # partie boundary). Empty dict when no edits are pending.
             "pending_room_rules": dict(game.pending_room_rules),
