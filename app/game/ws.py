@@ -254,6 +254,63 @@ def _bot_pick_keepers(dice: list[int]) -> list[bool]:
 # trivially held — handing the cycle's rhythm to opponents at a basic rank.
 _BOT_STARTER_FLOOR_RANK = 1000
 
+# G55 follow-up: cap on the per-game `bot_decisions` buffer so a long-running
+# room doesn't grow unbounded. Rolling — newest entries push old ones out.
+_BOT_DECISIONS_BUFFER_CAP = 200
+
+
+def _record_bot_throw(
+    game: "Game",
+    player: Player,
+    throw_num: int,
+    dice_before: list[int],
+    kept_mask: list[bool],
+    dice_after: list[int],
+    combo: str,
+    rank: int,
+    fiches: int,
+    target_rank: int,
+    is_starter: bool,
+    max_throws_allowed: int,
+    stop_reason: Optional[str],
+) -> None:
+    """G55 follow-up: append one per-throw entry to `game.bot_decisions`.
+
+    Captures the full reasoning context for a single bot throw — what dice
+    came up, which the heuristic kept, what target was on the table, what
+    the post-throw rank/combo became, and (if this throw ends the turn)
+    why the bot stopped. Suboptimal sequences can be replayed offline by
+    inspecting the buffer via the admin endpoint.
+
+    Also emits a structured `bot_decision` log line (key=value) so server
+    operators can grep production logs without touching the admin API.
+    """
+    entry = {
+        "game_id": game.id,
+        "player_id": player.id,
+        "player_name": player.name,
+        "is_starter": is_starter,
+        "throw": throw_num,
+        "dice_before": list(dice_before),
+        "kept_mask": list(kept_mask),
+        "dice_after": list(dice_after),
+        "combo": combo,
+        "rank": rank,
+        "fiches": fiches,
+        "target_rank": target_rank,
+        "max_throws_allowed": max_throws_allowed,
+        "stop_reason": stop_reason,
+    }
+    game.bot_decisions.append(entry)
+    if len(game.bot_decisions) > _BOT_DECISIONS_BUFFER_CAP:
+        # Drop oldest until back at the cap.
+        del game.bot_decisions[: len(game.bot_decisions) - _BOT_DECISIONS_BUFFER_CAP]
+    # Structured server log for grep/jq.
+    logger.info(
+        "bot_decision",
+        extra={"bot_decision": entry},
+    )
+
 
 def _bot_take_turn(player: Player, game: Optional[Game] = None) -> None:
     """Bot plays the player's turn.
@@ -284,6 +341,11 @@ def _bot_take_turn(player: Player, game: Optional[Game] = None) -> None:
     rhythm lock.
     """
     turn = player.turn
+    # G55 follow-up: stash the pre-throw dice so the per-throw decision log
+    # can show "what came up" vs "what we kept". For the very first throw
+    # the bot rolls all three from a zeroed turn, so dice_before is [0,0,0].
+    pre_throw_dice = list(turn.dice)
+    first_throw_kept_mask = [False, False, False]
 
     # Fresh turn → take the first roll.
     if turn.rolls_left == 3:
@@ -316,6 +378,28 @@ def _bot_take_turn(player: Player, game: Optional[Game] = None) -> None:
         max_throws_for_me = game.max_throws_this_round
     else:
         max_throws_for_me = 3
+
+    # G55 follow-up: collect per-throw snapshots here as the bot iterates.
+    # We don't write each one to `game.bot_decisions` until the turn ends
+    # so the `stop_reason` field can be filled in on the last entry. The
+    # buffer holds (throw_num, dice_before, kept_mask, dice_after, combo,
+    # rank, fiches) tuples.
+    throw_log: list[dict] = []
+    # Pre-throw dice for the very first iteration is whatever was on `turn`
+    # before this function ran (typically [0,0,0]). The first roll above
+    # already happened; treat it as throw #1 with kept_mask = all-True
+    # (the bot kept nothing — it rolled everything fresh).
+    throw_log.append(
+        {
+            "throw": 1,
+            "dice_before": pre_throw_dice,
+            "kept_mask": first_throw_kept_mask,
+            "dice_after": list(turn.dice),
+            "combo": turn.combo,
+            "rank": turn.rank,
+            "fiches": turn.fiches,
+        }
+    )
 
     # Track why we stopped so the decision event can be inspected.
     stop_reason = "unknown"
@@ -366,14 +450,51 @@ def _bot_take_turn(player: Player, game: Optional[Game] = None) -> None:
             else:
                 stop_reason = "keepers_say_hold"
                 break
+        pre_reroll_dice = list(turn.dice)
+        # `reroll[i] == True` means re-roll position i; kept_mask is the
+        # inverse so the log reads "what we KEPT" directly.
+        kept_mask = [not r for r in reroll]
         for i, do_reroll in enumerate(reroll):
             if do_reroll:
                 turn.dice[i] = random.randint(1, 6)
         turn.rolls_left -= 1
         turn.combo, turn.rank, turn.fiches = classify(turn.dice)
+        throw_log.append(
+            {
+                "throw": 3 - turn.rolls_left,
+                "dice_before": pre_reroll_dice,
+                "kept_mask": kept_mask,
+                "dice_after": list(turn.dice),
+                "combo": turn.combo,
+                "rank": turn.rank,
+                "fiches": turn.fiches,
+            }
+        )
 
     turn.reroll = [False, False, False]
     turn.done = True
+
+    # G55 follow-up: flush the per-throw log to `game.bot_decisions`. The
+    # last entry carries the `stop_reason`; earlier entries get None for
+    # that field (they didn't end the turn). Each entry also picks up the
+    # static-per-turn context (target_rank, is_starter, max_throws cap).
+    for idx, snap in enumerate(throw_log):
+        is_last = idx == len(throw_log) - 1
+        _record_bot_throw(
+            game=game,
+            player=player,
+            throw_num=snap["throw"],
+            dice_before=snap["dice_before"],
+            kept_mask=snap["kept_mask"],
+            dice_after=snap["dice_after"],
+            combo=snap["combo"],
+            rank=snap["rank"],
+            fiches=snap["fiches"],
+            target_rank=target_rank,
+            is_starter=is_starter,
+            max_throws_allowed=max_throws_for_me,
+            stop_reason=stop_reason if is_last else None,
+        )
 
     # G55: surface the bot's reasoning so the journal shows what it did
     # and why. One event per turn — not in HEADLINE_KEYS, so the ticker

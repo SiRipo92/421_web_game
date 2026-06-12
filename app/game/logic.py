@@ -161,6 +161,15 @@ class Game:
     # afk_bot, allow_spectators); is_public and host_player_id can't be
     # edited mid-game.
     pending_room_rules: dict = field(default_factory=dict)
+    # G55 follow-up: structured per-throw decision trace for the AFK bot.
+    # Each entry is the snapshot of one throw the bot took (dice rolled,
+    # what it kept, target rank, stop reason). Surfaced via the admin
+    # endpoint at /api/admin/games/{id}/bot-decisions for offline review +
+    # tuning. NOT shown to players in the in-game journal; the existing
+    # `log_bot_decision` summary event is the only player-visible bot log.
+    # Capped at 200 entries (rolling; older entries drop) so a long-running
+    # game doesn't grow unbounded in memory.
+    bot_decisions: list = field(default_factory=list, compare=False, repr=False)
 
     def current_player(self) -> Optional[Player]:
         """Return the player whose turn it is, skipping sat-out players.
