@@ -575,7 +575,7 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 **Acceptance:** On the create-room and (future [[G45]]) edit-room-rules forms, the user can either tap up/down OR click the number and type a value. Out-of-range typed values clamp on blur with a visual cue.
 **Dependencies:** None. Light-touch frontend change.
 
-### G68. (DONE — pending PR merge) RGPD consent — Contact form checkbox + Register links Privacy too
+### G68. (DONE) RGPD consent — Contact form checkbox + Register links Privacy too
 **Why:** The Privacy.jsx page already covers all 7 RGPD-required sections (data controller, collected data, purposes, retention, your rights, cookies/storage, DPO contact). Two gaps remained: (1) the Contact form had no consent checkbox, so users were submitting personal data (name, email, free-text message) without an explicit data-processing opt-in; (2) the Register form's consent checkbox only linked to `/terms`, so users weren't being told they were also agreeing to the Privacy/RGPD policy.
 **Scope shipped:**
 - `Contact.jsx`: new required consent checkbox linking to both `/privacy` and `/terms`. Submit button gated until checked + JS belt-and-suspenders check before POST. Error message in FR/EN if the user manages to bypass the `required` flag.
@@ -584,7 +584,7 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 **Acceptance:** Sending a contact message without checking the consent box → error + no POST fires. Registering → checkbox text mentions both Terms AND Privacy with both links working.
 **Dependencies:** None.
 
-### G69. (DONE — pending PR merge) Privacy & Terms content expansion + EN translation
+### G69. (DONE) Privacy & Terms content expansion + EN translation
 **Why:** Reported during the G68 verification. Privacy.jsx was hard-coded French and never switched to English — the visible page stayed in French even when the user's language was set to EN. Terms covered the basics but had no explicit conduct rule list, no mention of host moderation discretion (G24 kick), and no description of the strike-escalation flow (G38 schema). The user wanted the legal pages to actually reflect what's implemented.
 **Scope shipped:**
 - `Privacy.jsx` rewritten with i18n keys; new full EN translation. New section 7 « Modération et journalisation » documenting the audit log (host kicks, warnings, suspensions, bans, IP retention).
@@ -688,6 +688,58 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 - Trade-off acknowledged: the small latency hurts conversation flow but eliminates the "harm window". Default ON; future flag to disable per-room if a friends-only private room wants raw chat.
 **Acceptance:** A clean message round-trips in <1.5s with a brief pending state; a slur is held, dropped, and never relayed to other clients.
 **Dependencies:** [[G34]] is the parent; this entry is the delayed-send variant the user asked for specifically.
+
+### G75. Buy + verify the production domain (Cloudflare Registrar, ~€8/yr)
+**Why:** Email sending through Resend (and the upcoming Brevo migration in [[G76]]) requires a verified sender domain — DNS records (SPF, DKIM, DMARC) must be set before any transactional email reliably lands in inboxes. Same domain becomes the canonical site URL once deployment lands. Currently `noreply@421bistro.fr` is hard-coded in the email-sender default but the domain isn't owned, so every contact-form submission currently 502s with `email_sender_not_configured`.
+**Scope:**
+- Pick a domain name. Shortlist worth considering:
+    * `421bistro.fr` — matches the existing branding, French TLD makes legal/GDPR positioning obvious.
+    * `421bistro.com` — international fallback; slightly pricier per year.
+    * `aubistro421.fr` / `le421.fr` — alternatives if the primary is taken.
+- Register via **Cloudflare Registrar**: at-cost pricing (no markup, no upsells), 1-year minimum, free WHOIS privacy. ~€8/year for `.fr`, ~€10 for `.com`. No multi-year lock-in.
+- Once registered, point DNS at Cloudflare (free tier) — built-in DDoS protection, CDN, and Workers slot becomes available for future edge work.
+- Add SPF, DKIM, DMARC records (Brevo / Resend provides them during sender verification).
+- Update `SENDER_EMAIL` in `.env` + production env: `noreply@<domain>`.
+**Acceptance:** Domain owned, DNS at Cloudflare, sender verified in the chosen email service, `/api/contact` POST succeeds end-to-end with a real email landing in `CONTACT_EMAIL`'s inbox.
+**Dependencies:** None — pure ops decision. Unblocks [[G76]] (Brevo migration) and is a prerequisite for [[G77]] (production deployment).
+
+### G76. Migrate transactional email from Resend to Brevo
+**Why:** Brevo (formerly Sendinblue) has a free tier of 300 emails/day forever vs. Resend's 100/day free tier capped at 3000/month. Brevo's template editor is also nicer for the password-reset / inactive-account-warning / breach-notification templates that G70 + G71 will need. EU-based (Paris HQ) which simplifies GDPR processing-agreement paperwork.
+**Scope:**
+- Sign up at Brevo, verify the domain from [[G75]] (DKIM + SPF records).
+- Replace the `resend` package with Brevo's Python SDK (`sib-api-v3-sdk`) or just `httpx` against their REST API — REST is cleaner and avoids the heavy SDK.
+- Update `app/services/email.py`: rename `_send` to point at Brevo's `POST /v3/smtp/email`. Keep the same `(to, subject, html)` signature so callers don't change.
+- Migrate the existing password-reset template + add stubs for the 3 templates G70/G71 will need (`inactive_warning`, `account_deletion_confirmed`, `data_breach_notice`).
+- New env vars: `BREVO_API_KEY`, `BREVO_TEMPLATE_*` for each transactional. Drop `RESEND_API_KEY`.
+- Tests: mock the HTTP call (no live Brevo dependency in CI).
+**Acceptance:** Password-reset email + contact-form forwarding work via Brevo. Old Resend code removed.
+**Dependencies:** [[G75]] (domain ownership).
+
+### G77. Production deployment — Fly.io + Neon Postgres + monitoring
+**Why:** All the policy work and config plumbing assumes a real deployed surface. Picking a host with WebSocket support (the game's lifeblood), EU region availability (RGPD comfort), and pay-as-you-go pricing keeps the early-stage bill low while leaving room to scale.
+**Scope:**
+- **Hosting**: **Fly.io** (`cdg`/`fra` regions = Paris/Frankfurt). Free tier covers 3 small VMs + 3 GB persistent volumes — enough for dev + staging + early prod. Native WebSocket support, no proxy quirks. `fly launch` reads the existing Dockerfile.
+- **Database**: **Neon** (serverless Postgres). Free tier: 3 GB storage + 191.9 compute-hours/mo (more than enough for low-traffic early prod). EU region available. Branching (DB-per-PR) is a nice future-G63-audit follow-up. Alternative: Fly.io's managed Postgres ($15/mo for the smallest instance) if we want everything in one provider.
+- **CDN / WAF**: **Cloudflare** (free tier already in [[G75]]) — DDoS protection, edge caching for the frontend bundle, rate limiting that complements G71b's app-layer brute-force protection.
+- **Monitoring stack**:
+    * **Sentry** (already wired) — errors + performance traces.
+    * **Logfire** (Pydantic team's observability product) — structured Python logs, free tier covers our volume.
+    * **UptimeRobot** or **BetterStack** — uptime monitoring, free tier covers 1 monitor at 5-minute interval.
+    * **Plausible** or **Umami** — privacy-friendly analytics, both have free tiers. Plausible is paid-hosted (~€9/mo); Umami self-hosts free.
+- **Deploy workflow**: extend the existing GitHub Actions CI to a `deploy` job that runs on push to `main` (already partially wired — the Docker build step exists). Add `flyctl deploy` on success.
+- **Secrets management**: Fly.io's `fly secrets set` for production env vars; never check `.env` files into git (already gitignored).
+- **Cost estimate** for the early-stage stack:
+    * Fly.io: $0–15/mo depending on traffic
+    * Neon: $0 (free tier)
+    * Cloudflare: $0 (free tier)
+    * Sentry: $0 (developer plan, 5K errors/mo)
+    * Logfire: $0 (free tier)
+    * UptimeRobot: $0 (free tier)
+    * Domain: ~€8/yr
+    * **Total: ~€0.70/mo + €8/yr = ~€1.40/mo** at the very early stage. Scales linearly past the free tiers.
+- **Stretch goal**: write a `docs/RUNBOOK.md` covering deploy, rollback, scale-up, common incidents.
+**Acceptance:** `git push` to `main` triggers a build + deploy; the deployed app is reachable at `https://<domain>`; monitoring dashboards show errors/uptime/latency in real time.
+**Dependencies:** [[G75]] (domain), [[G76]] (Brevo for email-sending from the deployed surface). [[G71b]] (security hardening) is logical to land before opening the URL to the public.
 
 ### G61. Right-rail panels become collapsible "tabs"
 **Why:** Reported during playtest. The right `<aside>` today is a fixed layout: collapsible **Journal** on top, *always-visible* **Combo hierarchy** at the bottom. The user wants the hierarchy to collapse the same way the journal does — and more broadly, they want the right rail to behave like a small set of *stackable tabs* (Journal · Hierarchy · later: Chat) that each open/close independently. This sets up the eventual chat slot ([[G59]]) without ripping out the existing panels.
