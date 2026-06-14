@@ -77,9 +77,25 @@ export function Privacy() {
         </Section>
 
         <Section title={t('privacy_s8_title')}>
+          <p>{t('privacy_s8_intro')}</p>
+          <p style={{ marginTop: '0.5rem' }}>{t('privacy_s8_detail')}</p>
+        </Section>
+
+        <Section title={t('privacy_s9_title')}>
+          <p>{t('privacy_s9_intro')}</p>
+          <ul>
+            <li>{t('privacy_s9_item_who')}</li>
+            <li>{t('privacy_s9_item_what')}</li>
+            <li>{t('privacy_s9_item_when')}</li>
+            <li>{t('privacy_s9_item_actions')}</li>
+          </ul>
+          <p style={{ marginTop: '0.5rem' }}>{t('privacy_s9_authority')}</p>
+        </Section>
+
+        <Section title={t('privacy_s10_title')}>
           <p>
-            {t('privacy_s8_intro')}{' '}
-            <Link to="/contact" style={{ color: 'var(--rouge)' }}>{t('privacy_s8_contact_link')}</Link>.
+            {t('privacy_s10_intro')}{' '}
+            <Link to="/contact" style={{ color: 'var(--rouge)' }}>{t('privacy_s10_contact_link')}</Link>.
           </p>
         </Section>
       </div>
