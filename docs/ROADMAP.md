@@ -575,7 +575,7 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 **Acceptance:** On the create-room and (future [[G45]]) edit-room-rules forms, the user can either tap up/down OR click the number and type a value. Out-of-range typed values clamp on blur with a visual cue.
 **Dependencies:** None. Light-touch frontend change.
 
-### G68. (DONE — pending PR merge) RGPD consent — Contact form checkbox + Register links Privacy too
+### G68. (DONE) RGPD consent — Contact form checkbox + Register links Privacy too
 **Why:** The Privacy.jsx page already covers all 7 RGPD-required sections (data controller, collected data, purposes, retention, your rights, cookies/storage, DPO contact). Two gaps remained: (1) the Contact form had no consent checkbox, so users were submitting personal data (name, email, free-text message) without an explicit data-processing opt-in; (2) the Register form's consent checkbox only linked to `/terms`, so users weren't being told they were also agreeing to the Privacy/RGPD policy.
 **Scope shipped:**
 - `Contact.jsx`: new required consent checkbox linking to both `/privacy` and `/terms`. Submit button gated until checked + JS belt-and-suspenders check before POST. Error message in FR/EN if the user manages to bypass the `required` flag.
@@ -584,7 +584,7 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 **Acceptance:** Sending a contact message without checking the consent box → error + no POST fires. Registering → checkbox text mentions both Terms AND Privacy with both links working.
 **Dependencies:** None.
 
-### G69. (DONE — pending PR merge) Privacy & Terms content expansion + EN translation
+### G69. (DONE) Privacy & Terms content expansion + EN translation
 **Why:** Reported during the G68 verification. Privacy.jsx was hard-coded French and never switched to English — the visible page stayed in French even when the user's language was set to EN. Terms covered the basics but had no explicit conduct rule list, no mention of host moderation discretion (G24 kick), and no description of the strike-escalation flow (G38 schema). The user wanted the legal pages to actually reflect what's implemented.
 **Scope shipped:**
 - `Privacy.jsx` rewritten with i18n keys; new full EN translation. New section 7 « Modération et journalisation » documenting the audit log (host kicks, warnings, suspensions, bans, IP retention).
@@ -688,6 +688,169 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 - Trade-off acknowledged: the small latency hurts conversation flow but eliminates the "harm window". Default ON; future flag to disable per-room if a friends-only private room wants raw chat.
 **Acceptance:** A clean message round-trips in <1.5s with a brief pending state; a slur is held, dropped, and never relayed to other clients.
 **Dependencies:** [[G34]] is the parent; this entry is the delayed-send variant the user asked for specifically.
+
+### G75. Buy + verify the production domain (Cloudflare Registrar, ~€8/yr)
+**Why:** Email sending through Resend (and the upcoming Brevo migration in [[G76]]) requires a verified sender domain — DNS records (SPF, DKIM, DMARC) must be set before any transactional email reliably lands in inboxes. Same domain becomes the canonical site URL once deployment lands. Currently `noreply@421bistro.fr` is hard-coded in the email-sender default but the domain isn't owned, so every contact-form submission currently 502s with `email_sender_not_configured`.
+**Scope:**
+- Pick a domain name. Shortlist worth considering:
+    * `421bistro.fr` — matches the existing branding, French TLD makes legal/GDPR positioning obvious.
+    * `421bistro.com` — international fallback; slightly pricier per year.
+    * `aubistro421.fr` / `le421.fr` — alternatives if the primary is taken.
+- Register via **Cloudflare Registrar**: at-cost pricing (no markup, no upsells), 1-year minimum, free WHOIS privacy. ~€8/year for `.fr`, ~€10 for `.com`. No multi-year lock-in.
+- Once registered, point DNS at Cloudflare (free tier) — built-in DDoS protection, CDN, and Workers slot becomes available for future edge work.
+- Add SPF, DKIM, DMARC records (Brevo / Resend provides them during sender verification).
+- Update `SENDER_EMAIL` in `.env` + production env: `noreply@<domain>`.
+**Acceptance:** Domain owned, DNS at Cloudflare, sender verified in the chosen email service, `/api/contact` POST succeeds end-to-end with a real email landing in `CONTACT_EMAIL`'s inbox.
+**Dependencies:** None — pure ops decision. Unblocks [[G76]] (Brevo migration) and is a prerequisite for [[G77]] (production deployment).
+
+### G76. Migrate transactional email from Resend to Brevo
+**Why:** Brevo (formerly Sendinblue) has a free tier of 300 emails/day forever vs. Resend's 100/day free tier capped at 3000/month. Brevo's template editor is also nicer for the password-reset / inactive-account-warning / breach-notification templates that G70 + G71 will need. EU-based (Paris HQ) which simplifies GDPR processing-agreement paperwork.
+**Scope:**
+- Sign up at Brevo, verify the domain from [[G75]] (DKIM + SPF records).
+- Replace the `resend` package with Brevo's Python SDK (`sib-api-v3-sdk`) or just `httpx` against their REST API — REST is cleaner and avoids the heavy SDK.
+- Update `app/services/email.py`: rename `_send` to point at Brevo's `POST /v3/smtp/email`. Keep the same `(to, subject, html)` signature so callers don't change.
+- Migrate the existing password-reset template + add stubs for the 3 templates G70/G71 will need (`inactive_warning`, `account_deletion_confirmed`, `data_breach_notice`).
+- New env vars: `BREVO_API_KEY`, `BREVO_TEMPLATE_*` for each transactional. Drop `RESEND_API_KEY`.
+- Tests: mock the HTTP call (no live Brevo dependency in CI).
+**Acceptance:** Password-reset email + contact-form forwarding work via Brevo. Old Resend code removed.
+**Dependencies:** [[G75]] (domain ownership).
+
+### G77. Production deployment — Fly.io + Neon Postgres + monitoring
+**Why:** All the policy work and config plumbing assumes a real deployed surface. Picking a host with WebSocket support (the game's lifeblood), EU region availability (RGPD comfort), and pay-as-you-go pricing keeps the early-stage bill low while leaving room to scale.
+**Scope:**
+- **Hosting**: **Fly.io** (`cdg`/`fra` regions = Paris/Frankfurt). Free tier covers 3 small VMs + 3 GB persistent volumes — enough for dev + staging + early prod. Native WebSocket support, no proxy quirks. `fly launch` reads the existing Dockerfile.
+- **Database**: **Neon** (serverless Postgres). Free tier: 3 GB storage + 191.9 compute-hours/mo (more than enough for low-traffic early prod). EU region available. Branching (DB-per-PR) is a nice future-G63-audit follow-up. Alternative: Fly.io's managed Postgres ($15/mo for the smallest instance) if we want everything in one provider.
+- **CDN / WAF**: **Cloudflare** (free tier already in [[G75]]) — DDoS protection, edge caching for the frontend bundle, rate limiting that complements G71b's app-layer brute-force protection.
+- **Monitoring stack**:
+    * **Sentry** (already wired) — errors + performance traces.
+    * **Logfire** (Pydantic team's observability product) — structured Python logs, free tier covers our volume.
+    * **UptimeRobot** or **BetterStack** — uptime monitoring, free tier covers 1 monitor at 5-minute interval.
+    * **Plausible** or **Umami** — privacy-friendly analytics, both have free tiers. Plausible is paid-hosted (~€9/mo); Umami self-hosts free.
+- **Deploy workflow**: extend the existing GitHub Actions CI to a `deploy` job that runs on push to `main` (already partially wired — the Docker build step exists). Add `flyctl deploy` on success.
+- **Secrets management**: Fly.io's `fly secrets set` for production env vars; never check `.env` files into git (already gitignored).
+- **Cost estimate** for the early-stage stack:
+    * Fly.io: $0–15/mo depending on traffic
+    * Neon: $0 (free tier)
+    * Cloudflare: $0 (free tier)
+    * Sentry: $0 (developer plan, 5K errors/mo)
+    * Logfire: $0 (free tier)
+    * UptimeRobot: $0 (free tier)
+    * Domain: ~€8/yr
+    * **Total: ~€0.70/mo + €8/yr = ~€1.40/mo** at the very early stage. Scales linearly past the free tiers.
+- **Stretch goal**: write a `docs/RUNBOOK.md` covering deploy, rollback, scale-up, common incidents.
+**Acceptance:** `git push` to `main` triggers a build + deploy; the deployed app is reachable at `https://<domain>`; monitoring dashboards show errors/uptime/latency in real time.
+**Dependencies:** [[G75]] (domain), [[G76]] (Brevo for email-sending from the deployed surface). [[G71b]] (security hardening) is logical to land before opening the URL to the public.
+
+### G78. Redis-backed shared game state (multi-container HA)
+**Why:** Game state today lives in `app/game/state.py:games` as an in-process dict. Two consequences: (1) a container crash loses every active room on it, and (2) you can't run more than one container because each would have its own isolated `games` dict — players in the "same" game id but routed to different containers would see different state. Sticky sessions ([[G77]] Phase 2) mitigates this but doesn't solve the crash-loss case. The real fix is moving state to a shared store so any container can resume any game.
+**Scope (Phase 3 of [[G77]]):**
+- **Redis** as the state store (managed Upstash or Fly.io's Redis add-on, ~$5/mo at small scale).
+- Refactor `state.games` to a Redis-backed proxy: `Game` instances serialised as JSON, fetched/written per WS message. Keep an in-process cache with TTL for hot paths.
+- AFK timers + bot handback tasks become Redis sorted-set scheduled jobs OR move to a small Celery worker tier.
+- Connection manager (`manager` in `app/game/ws.py`) broadcasts via Redis pub/sub so a player on container A can receive a broadcast triggered by a player's WS write on container B.
+- Tests: a 2-container integration test (compose) verifying game state survives a container restart.
+- Cost trigger: do this when concurrent rooms exceed ~20 OR when a real user reports a crash-induced lost game.
+**Acceptance:** Kill the container hosting a live game → players see a momentary disconnect, then the same game resumes when their WS reconnects (to any container). Zero lost state.
+**Dependencies:** [[G77]] (production deploy first; can't validate without a real multi-container setup).
+
+### G79. Multi-game architecture refactor (when adding game #2)
+**Why:** The codebase today assumes one game type. `app/game/` is hard-coded singular; `Game` dataclass, WS actions (`roll`, `keep`, `done`, `tiebreak_roll`), `/api/create` schema params (`bank_rule`, `afk_seconds`), `app/schemas/rankings.py` combined stats, and the frontend dice/piste rendering all bake in 421-specific concepts. Adding a second game (Belote, Tarot, Yams, etc.) without restructuring means duplicating room/player/persistence logic — a maintenance trap.
+**Scope (executed in the same PR as the first commit of game #2, not preemptively):**
+- Restructure the backend to a per-game-type namespace:
+    ```
+    app/games/
+    ├── _common/        # Player, Room, PhaseEnum, matchmaking, persistence shell
+    ├── _421/           # 421 logic moved here
+    │   ├── logic.py
+    │   ├── ws_actions.py
+    │   ├── classify.py
+    │   └── room_config.py
+    ├── <game2>/
+    └── registry.py     # game_type → module mapping
+    ```
+- DB schema: add `Game.game_type: str` column (default "421" for existing rows), migrate `bank_rule` / `afk_seconds` / etc. into a polymorphic `room_config: jsonb` field.
+- WS routes: `/ws/{game_type}/{game_id}/{player_id}` — game type discriminates which `ws_actions` module handles incoming messages.
+- HTTP routes: `/api/games/{game_type}/create` similarly.
+- Frontend: split `Game.jsx` per game type, with a thin `<GameRouter>` that switches on `state.game_type`. Shared primitives (`PisteSeat`, `ChipStack`) move to `frontend/src/components/games/_common/`.
+- Migration plan: ship game #2 + the refactor as one PR with a feature flag. Old `/api/create` keeps working for back-compat for at least one release.
+**Acceptance:** A second game type ships with its own `app/games/<game2>/` namespace. Adding a third game from there requires no further restructuring — just create the new directory + register it.
+**Dependencies:** None — defer until game #2 is decided. Premature execution = wrong abstraction. Three soft triggers for opening this item:
+- (a) Game #2 is concretely scoped, not just "maybe later".
+- (b) The "Now" roadmap section is < 5 open items (so the refactor doesn't stall feature work).
+- (c) 421 has been stable in production for ≥ 3 months — i.e. the patterns we're abstracting are battle-tested.
+
+### G80. Native mobile apps — iOS + Android via React Native + Expo
+**Why:** A web-only game leaves Apple/Android store discovery, push notifications, and the "permanent home screen icon" trust signal on the table. For a casual real-time dice game the "buddy pings you for a round" workflow is much smoother with native push notifications than with web push. App-store presence also confers legitimacy that helps onboarding (« is this a real app? » → app-store listing answers yes).
+
+**Why React Native + Expo specifically:**
+- **Stack continuity** — same React mental model + JS as the existing SPA. Custom hooks (`useGame`, `useAuth`, `useLang`, `useTheme`) can mostly transfer with minimal changes. i18n dictionaries port 1:1.
+- **Single codebase for iOS + Android** — Flutter would also do this but requires learning Dart from scratch. Native Swift + Kotlin doubles the work for a solo dev.
+- **Expo Application Services (EAS) handles deploy/sign/distribute** — Apple signing certificates, Android keystores, store-submission CLI. Without it, iOS deployment alone is ~2 weeks of Apple-specific yak-shaving.
+- **WebSocket support is first-class** — `react-native` ships a `WebSocket` global identical to the browser's.
+- **Sentry + Anthropic/Brevo SDKs all have RN packages** — the monitoring stack from [[G77]] carries over.
+
+**Why NOT Capacitor (wrap the existing SPA):**
+- Apple's "minimum functionality" guideline (4.2.3) rejects bare website wrappers. We'd need to add native features anyway — at which point we're already off the wrapper path.
+- WebView performance on the piste animation + dice rendering would noticeably lag native.
+- Push notifications via web are weaker than native (background reliability, action buttons).
+- Listed for completeness but not the recommendation.
+
+**Scope (phased):**
+
+- **Phase A — minimum viable native app (~3-4 weeks of focused work):**
+    * `mobile/` directory in the monorepo, scaffolded with `npx create-expo-app`.
+    * Port the auth flow first (login, register, /auth/me) — uses the existing `/auth/*` endpoints unchanged. Authenticated screens reuse the JWT.
+    * Port the lobby flow (list public rooms via existing `/api/rooms`, join via `/api/join/{game_id}`).
+    * Game screen: re-implement the piste + dice + action bar in RN-native components (no WebView). Reuse the WS message protocol exactly — `useGame` hook ports with `import { WebSocket } from 'react-native'`.
+    * Drop the heavier desktop features for v1 — admin dashboard, the full Privacy/Terms pages link out to the web URL.
+    * Persistent storage via `@react-native-async-storage/async-storage` (mirrors web `localStorage`).
+
+- **Phase B — push notifications + deep links (~1 week):**
+    * Apple Push Notification service (APNs) + Firebase Cloud Messaging (FCM) registration. Expo's `expo-notifications` wraps both.
+    * Backend: `POST /api/me/push-token` to register a device token; persist in a new `UserPushToken(user_id, token, platform, last_seen_at)` table.
+    * Send notifications on:
+        - Your turn in a game where you're AFK (already wired to G2/G50 events backend-side).
+        - Game invite from a friend ([[G29]] dependency).
+        - Moderation verdict ([[G33]] dependency).
+    * Deep links: `421bistro://join?code=ABC123` opens the app on the room-join screen pre-filled.
+
+- **Phase C — polish + store submission (~1 week per platform):**
+    * App icons + splash screens (Expo handles the size matrix).
+    * Privacy nutrition labels (Apple) + data safety form (Google Play) — both stores require declaring what data is collected. We're already RGPD-compliant so the answers are honest and short.
+    * Apple Developer Program enrolment ($99/yr). Google Play one-time $25.
+    * « Sign in with Apple » — Apple guideline 4.8 *requires* it if the app offers any third-party SSO (we offer Google). Implementation via `expo-auth-session` is straightforward.
+    * EAS Build → EAS Submit pushes to TestFlight + Play Store internal testing.
+    * Beta with a small group (10–20 testers via TestFlight + Play Internal Testing) for 1–2 weeks before public release.
+
+**Backend changes needed (small):**
+- `UserPushToken` table + migration.
+- `POST /api/me/push-token` endpoint.
+- Push-send service alongside the email service (`app/services/push.py`). Triggers from existing event-emission points in `app/game/ws.py`.
+- « Sign in with Apple » OAuth route mirroring the existing `/auth/google` path.
+
+**Cost estimate:**
+- Apple Developer: **$99/yr** (mandatory)
+- Google Play: **$25 one-time** (mandatory)
+- EAS Build: free for hobby tier; **$19/mo** when you need parallel builds
+- Push notification volume: free up to large scale on both APNs and FCM
+- Total ongoing: **~$11/mo** equivalent ($99/yr Apple)
+
+**Acceptance:** A user can:
+- Download "421 Bistro" from the App Store / Google Play
+- Sign in with their existing web account, or create a new one
+- Join a public room and play a full match end-to-end
+- Receive a push notification when it's their turn in a game they backgrounded
+- The mobile app's RGPD privacy disclosures match the web app's Privacy page
+
+**Dependencies:**
+- [[G75]] (domain owned — for deep-link domains + share-link generation)
+- [[G77]] (production deployment — beta users need a stable backend to point at)
+- [[G29]] / [[G30]] (friend invites + external invite delivery) — they're more compelling on mobile where push delivery is native; the mobile entry could land first and these become higher-priority follow-ups.
+- Optional but recommended: [[G79]] (multi-game refactor) before Phase A if a second game is on the horizon — the mobile codebase would inherit whatever shape the web codebase has.
+
+**Skip-for-now alternatives if Phase A feels too big right now:**
+- **PWA polish** — make the web app installable via "Add to Home Screen" (manifest.json, service worker, web-push). Zero new stack, gets ~70% of the UX benefit. Captured separately as G80b if you want me to spin it out.
+- **TestFlight-only release** (no Play Store) — Apple side first, Android later. Halves the store-submission work but limits beta audience to iPhone users.
 
 ### G61. Right-rail panels become collapsible "tabs"
 **Why:** Reported during playtest. The right `<aside>` today is a fixed layout: collapsible **Journal** on top, *always-visible* **Combo hierarchy** at the bottom. The user wants the hierarchy to collapse the same way the journal does — and more broadly, they want the right rail to behave like a small set of *stackable tabs* (Journal · Hierarchy · later: Chat) that each open/close independently. This sets up the eventual chat slot ([[G59]]) without ripping out the existing panels.
