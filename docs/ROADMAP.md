@@ -575,6 +575,120 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 **Acceptance:** On the create-room and (future [[G45]]) edit-room-rules forms, the user can either tap up/down OR click the number and type a value. Out-of-range typed values clamp on blur with a visual cue.
 **Dependencies:** None. Light-touch frontend change.
 
+### G68. (DONE — pending PR merge) RGPD consent — Contact form checkbox + Register links Privacy too
+**Why:** The Privacy.jsx page already covers all 7 RGPD-required sections (data controller, collected data, purposes, retention, your rights, cookies/storage, DPO contact). Two gaps remained: (1) the Contact form had no consent checkbox, so users were submitting personal data (name, email, free-text message) without an explicit data-processing opt-in; (2) the Register form's consent checkbox only linked to `/terms`, so users weren't being told they were also agreeing to the Privacy/RGPD policy.
+**Scope shipped:**
+- `Contact.jsx`: new required consent checkbox linking to both `/privacy` and `/terms`. Submit button gated until checked + JS belt-and-suspenders check before POST. Error message in FR/EN if the user manages to bypass the `required` flag.
+- `Login.jsx` (RegisterForm): existing `accept-cgu` checkbox text expanded to link to both `/terms` AND `/privacy` via new `accept_terms_and` + `accept_privacy_link` i18n keys.
+- New FR/EN i18n keys: `contact_consent_pre`, `contact_consent_privacy_link`, `contact_consent_and`, `contact_consent_terms_link`, `err_accept_consent`, `accept_terms_and`, `accept_privacy_link`.
+**Acceptance:** Sending a contact message without checking the consent box → error + no POST fires. Registering → checkbox text mentions both Terms AND Privacy with both links working.
+**Dependencies:** None.
+
+### G69. (DONE — pending PR merge) Privacy & Terms content expansion + EN translation
+**Why:** Reported during the G68 verification. Privacy.jsx was hard-coded French and never switched to English — the visible page stayed in French even when the user's language was set to EN. Terms covered the basics but had no explicit conduct rule list, no mention of host moderation discretion (G24 kick), and no description of the strike-escalation flow (G38 schema). The user wanted the legal pages to actually reflect what's implemented.
+**Scope shipped:**
+- `Privacy.jsx` rewritten with i18n keys; new full EN translation. New section 7 « Modération et journalisation » documenting the audit log (host kicks, warnings, suspensions, bans, IP retention).
+- `TermsAndConditions.jsx` expanded:
+    * Section 2 now lists explicit prohibited behaviors (harassment, hate speech, sexual content, spam, impersonation, doxxing, cheating).
+    * New section 5 « Modération par les hôtes de salle » documents the host's kick + report powers and the misuse policy.
+    * New section 6 « Application des règles & échelle des sanctions » spells out the 3-strike progression (warning → temp suspension → long ban) and the immediate-permanent path for severe offenses (French law violations).
+    * Existing sections renumbered.
+- New FR/EN i18n keys (~50): all `privacy_s*_*` + `terms_community_rule_*` + `terms_host_*` + `terms_enforcement_strike*` keys.
+**Acceptance:** Switching language flips both Privacy and Terms between FR and EN. Terms accurately describes the kick/report flow + strike progression that's actually live in the codebase. Privacy mentions the moderation audit log.
+**Dependencies:** None. Content is grounded in what's actually built (G24 kick, G38 strike schema, GdprAuditLog) — no aspirational features described.
+
+### G70. Inactive-account auto-deletion pipeline (RGPD compliance)
+**Why:** RGPD's data-minimisation principle requires that we don't keep personal data longer than necessary. Indefinitely retaining dormant accounts both violates this principle and increases blast radius if the database is ever compromised. The Privacy policy (section 8) commits to a 2-year inactivity + 30-day grace deletion flow; this entry tracks the actual implementation.
+**Scope:**
+- **Schema**: add `User.last_login_at: datetime` column (already implicit via `last_login_ip` if it exists — check). Update on every successful auth: `/auth/login`, Google SSO callback, and remember-me refresh.
+- **Inactivity sweep**: nightly cron (Celery beat or a plain cron + management command) that finds users where `last_login_at < now - 2y` AND `deleted_at IS NULL` AND `inactivity_warned_at IS NULL`. For each match:
+    * Send a templated email (« Votre compte 421 Bistro va être supprimé dans 30 jours ») via the existing Resend pipeline. Subject + body in the user's `lang_pref`.
+    * Stamp `inactivity_warned_at = now` so we don't spam them.
+- **Deletion sweep**: same cron, finds users where `inactivity_warned_at < now - 30d` AND no login since then → run the existing soft-delete pipeline (`/auth/me DELETE` flow). Hard-delete from `users` table after the standard 30-day grace window, drop their `GdprAuditLog` rows older than 365d, anonymise game history.
+- **Recovery path**: a login between `inactivity_warned_at` and the deletion sweep clears `inactivity_warned_at` and resets the clock. Add a banner on `/profile` if the user is currently in the warning window.
+- **Admin override**: G73's admin dashboard exposes a list of "users in warning window" so I can spot-check the queue before the deletion fires.
+- **Tests**: unit for the sweep selectors; integration for the end-to-end warned → login resets → deletion-skipped flow.
+**Acceptance:** A test account with `last_login_at = 2y+1d` ago receives the warning email, has its `inactivity_warned_at` stamped. 30 days later (or simulated with frozen time) the account is soft-deleted; 30 days after that, hard-deleted.
+**Dependencies:** Existing Resend pipeline (already wired for password resets). Backend cron infrastructure decision (Celery vs. simple cron + management command — pick the simplest that handles failure restart).
+
+### G71. Data breach detection + user notification pipeline (RGPD Art. 33-34)
+**Why:** RGPD Article 33 requires reporting confirmed personal-data breaches to the CNIL within 72 hours; Article 34 requires notifying affected users without undue delay if the breach is likely to result in high risk to their rights. Privacy section 9 commits to both; this entry tracks the actual response playbook + tooling.
+**Scope (two halves: detection and response):**
+- **Detection** (signal sources):
+    * Sentry alerts on unauthorised access patterns (existing Sentry SDK wiring captures errors; needs a rule for "auth events with anomalous IPs/UAs").
+    * Failed-login spike detector (cron-aggregated count over a sliding window) — if >100 failures from <10 IPs in 1h, raise an incident.
+    * Database access audit (Postgres `pg_stat_activity` snapshot, log diff against expected app connections).
+    * Manual incident trigger via admin endpoint `POST /api/admin/incidents/declare` for cases we hear about externally.
+- **Response playbook** (documented in `docs/INCIDENT_RESPONSE.md`, not just code):
+    * Incident table `Incident(id, detected_at, declared_at, declared_by, scope_estimate, affected_users_count, status, cnil_reported_at, users_notified_at, resolution_summary)`.
+    * Affected users list scoped per-incident (could be all users, all users with passwords created before date X, all users from a specific IP range, etc.).
+    * Automated email to affected users using a templated message (subject, scope, recommended actions). Body assembled from the incident's `scope_estimate` field, the data fields known to be exposed, and the standard "change password, review activity, enable 2FA when available" recommendations. Email rendered in the user's `lang_pref`.
+    * CNIL reporting endpoint stub — actual filing happens via their portal; the system stores the filing reference number.
+- **Tests**: incident creation, notification rendering with each scope flavor, idempotency (re-running shouldn't double-email anyone).
+**Acceptance:** Admin declares an incident with scope "all users registered before 2026-01-01". The system enumerates affected users, queues the notification emails (templated, localised), records the timestamps, and exposes a status page at `/admin/incidents/{id}`.
+**Dependencies:** Existing Resend pipeline. Sentry SDK already wired. New `Incident` table + Alembic migration. Pairs with [[G73]] (admin UI surfaces the incident state).
+
+### G71b. Security hardening + intrusion detection (defensive baseline)
+**Why:** Even with G71's incident response, the goal is to never need it. Today the codebase has light protections: H1 caps WS message size, the `limiter` slowapi middleware rate-limits some endpoints, FastAPI's Pydantic validation blocks most injection patterns. Gaps to close before opening to a wider audience.
+**Scope:**
+- **OWASP audit checklist** (`docs/SECURITY_AUDIT.md`): walk the OWASP Top 10 and document where each protection lives.
+- **SQL injection**: SQLAlchemy parameterised queries are the default everywhere — confirm with a `grep -r "f\".*WHERE.*{" app/` audit. No raw string interpolation into SQL.
+- **XSS**: React's JSX auto-escapes; confirm no `dangerouslySetInnerHTML` in components. Any new chat / user-content surface must use a sanitiser.
+- **CSRF**: the API is bearer-token based, not cookie-session, so CSRF is structurally moot for `/api/*`. Document this so future cookie-session work doesn't reintroduce it.
+- **Rate limiting**: extend `limiter` to cover `/auth/login`, `/auth/register`, `/auth/forgot-password`, `/api/contact`. Per-IP + per-account. Current state — check what's actually limited.
+- **Brute-force protection**: lockout after 10 failed logins / 15 min / IP. Track in Redis once we have it, in-memory dict before.
+- **Header hardening**: CSP, X-Frame-Options DENY, X-Content-Type-Options nosniff, Referrer-Policy strict-origin-when-cross-origin, HSTS in production. Add a Starlette middleware.
+- **Dependency scanning**: GitHub Dependabot or Snyk on the repo; track + remediate vulnerabilities monthly.
+- **Audit logging**: every admin action via `GdprAuditLog`-style row. Already exists for role changes; extend to G73's user-edit actions.
+- **Secrets hygiene**: confirm no secrets in commit history (`git log -p --all | grep -i "secret\|key\|password" | head`). All env-driven (`.env` already in `.gitignore`).
+**Acceptance:** SECURITY_AUDIT.md documents the protection per OWASP item with code references. CSP + security headers visible in browser dev-tools network response.
+**Dependencies:** None for the audit doc; some items (Redis, Dependabot) need infrastructure decisions.
+
+### G72. Admin user management UI
+**Why:** I'm the sole admin today (`role="admin"`); when a real user runs into trouble, an issue I need to fix, or a request comes in via the contact form, I need a UI to find that user, see their full record, and act. Today the admin dashboard exposes only the dashboard-summary + role-change endpoints — no list, no search, no detail view.
+**Scope:**
+- **Backend**: new admin endpoints, all gated by `require_admin`:
+    * `GET /api/admin/users` — paginated list with filters (`?q=username|email`, `?role`, `?banned=true`, `?inactive=true`, `?page=1`). Returns `{items, total, page, page_size}`.
+    * `GET /api/admin/users/{id}` — full record: account fields, role, strike_count, ban state, last_login, recent games, recent moderation actions, ip history.
+    * `PATCH /api/admin/users/{id}` — multi-field update: username, email, lang_pref, theme_pref, role (already exists separately, fold in here), strike_count reset, ban_until clear, chat_ban_until clear. Audited via `GdprAuditLog`.
+    * `DELETE /api/admin/users/{id}` — hard delete with confirmation token (admin must type the username to confirm).
+- **Frontend**: extend `AdminDashboard.jsx`:
+    * New tab « Utilisateurs » with the paginated table + filter chips.
+    * Detail panel (drawer or sub-route `/admin/users/{id}`) with all fields editable inline + a danger-zone footer for delete.
+    * Audit-trail strip at the bottom of the detail panel: "12 May 2026 — strike +1 (G34 hate_speech, auto)".
+- **A11y**: filter inputs labelled, table rows keyboard-navigable, destructive actions require explicit confirmation.
+**Acceptance:** I can search "sierra", see my own account row, click in, see all my fields + a list of any moderation actions, edit my username, and (theoretically) delete a test account with the username-typed confirmation.
+**Dependencies:** [[G38]] (admin role + dashboard surface) — extends it.
+
+### G73. Admin moderation review UI
+**Why:** When a sanction is applied automatically by G34/G37 (or manually via G24/G32), I need to see *what triggered it* — the original message, the report context, the AI verdict + confidence, the dice of similar incidents — so I can confirm the system is acting reasonably and overturn false positives. Bans without context are unauditable.
+**Scope:**
+- **Backend** (some of this overlaps with G39 "moderation inbox" — reuse those tables):
+    * `GET /api/admin/moderation/sanctions` — list of all sanctions ever issued, paginated, filterable by user / kind (warn/temp/perm) / source (auto/manual) / status (active/expired/overturned).
+    * `GET /api/admin/moderation/sanctions/{id}` — full context: the `ModerationReport` that triggered it, the `ChatModerationLog` rows or `MessageReport` row, the AI verdict + confidence + rationale, the user's strike history, the IP at offense.
+    * `POST /api/admin/moderation/sanctions/{id}/overturn` — admin can clear the sanction; cascades to clear strike_count increment, unban, restore chat access. Audited.
+- **Frontend**:
+    * New tab « Modération » with two sub-panels:
+        - **Active sanctions** — current bans, mutes, warnings. Each row clickable into the detail view.
+        - **Recent decisions** — last 100 sanctions (any status), so I can spot-check trends.
+    * Detail view shows the full context (above) + an « Annuler la sanction » button (with confirmation modal).
+    * Threading: if a sanction stems from multiple reports, show all of them.
+- **Tests**: list endpoint pagination, detail enriches with linked records, overturn cascades correctly + audits.
+**Acceptance:** A sanction created (auto or manual) is visible in the list within a few seconds; clicking it shows the original triggering content; I can overturn it and the strike_count + ban state revert.
+**Dependencies:** [[G34]] / [[G37]] / [[G39]] supply the underlying schema. Some of this lives in G39 already; this entry is the user-facing surface.
+
+### G74. AI chat moderation with delayed-send pattern
+**Why:** [[G34]] already plans an AI classifier that runs in the request path. The user explicitly asked for a *delayed-send* variant: the chat message doesn't appear immediately; it's held for ~1-2s while the classifier runs, and only relayed if clean. This prevents the "send → flash → ban" race where harmful content briefly appears.
+**Scope (refinement of G34):**
+- WS chat action `chat_send` queues the message in a per-room delay buffer instead of broadcasting immediately.
+- Background task calls the Claude Haiku classifier; on safe → broadcast; on block → drop + notify sender.
+- Latency budget: classifier p50 should be < 800ms so the delay is felt as "thinking" not "broken". If the classifier times out (>1.5s), fall back to the regex deny-list AND mark the room as "moderation degraded" for ops.
+- The delay applies only when the room has chat enabled AND moderation isn't bypassed (e.g., admin-room).
+- UI: the sender sees their message immediately in a "pending" state (italic, grey, with a small clock icon). When clean, it transitions to normal; on block, replaced with a strikethrough placeholder + the rule-violation toast.
+- Trade-off acknowledged: the small latency hurts conversation flow but eliminates the "harm window". Default ON; future flag to disable per-room if a friends-only private room wants raw chat.
+**Acceptance:** A clean message round-trips in <1.5s with a brief pending state; a slur is held, dropped, and never relayed to other clients.
+**Dependencies:** [[G34]] is the parent; this entry is the delayed-send variant the user asked for specifically.
+
 ### G61. Right-rail panels become collapsible "tabs"
 **Why:** Reported during playtest. The right `<aside>` today is a fixed layout: collapsible **Journal** on top, *always-visible* **Combo hierarchy** at the bottom. The user wants the hierarchy to collapse the same way the journal does — and more broadly, they want the right rail to behave like a small set of *stackable tabs* (Journal · Hierarchy · later: Chat) that each open/close independently. This sets up the eventual chat slot ([[G59]]) without ripping out the existing panels.
 **Scope:**

@@ -254,9 +254,13 @@ function RegisterForm({ t, lang, onRegister, onGoogleLogin, onSwitch, onNav }) {
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
         <input id="accept-cgu" type="checkbox" required checked={acceptCgu} onChange={e => setAcceptCgu(e.target.checked)}
           style={{ marginTop: 3, flexShrink: 0 }} />
+        {/* G68: consent text now explicitly mentions both Terms AND
+            Privacy/RGPD so the user knows what they're accepting. */}
         <label htmlFor="accept-cgu" className="serif" style={{ fontSize: '0.9rem', cursor: 'pointer', lineHeight: 1.4 }}>
           {t('accept_terms_pre')}{' '}
           <Link to="/terms" target="_blank" style={{ color: 'var(--rouge)' }}>{t('accept_terms_link')}</Link>
+          {' '}{t('accept_terms_and')}{' '}
+          <Link to="/privacy" target="_blank" style={{ color: 'var(--rouge)' }}>{t('accept_privacy_link')}</Link>
           {' '}<span style={{ color: 'var(--rouge)' }}>*</span>
         </label>
       </div>
