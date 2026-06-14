@@ -66,7 +66,7 @@ const I18N = {
     reset_password: "Réinitialiser le mot de passe",
     reset_sent: "Si cette adresse existe, un e-mail a été envoyé.",
     accept_cgu: "J'accepte les conditions générales d'utilisation",
-    accept_emails: "J'accepte de recevoir des e-mails de 421 Bistro",
+    accept_emails: "J'accepte de recevoir des e-mails de 421 Bistro (bienvenue, changements de rang, invitations entre amis). Les e-mails de sécurité du compte (réinitialisation de mot de passe, modération) restent envoyés indépendamment. Désinscription possible à tout moment.",
     back_to_login: "Retour à la connexion",
 
     // Waiting room
@@ -617,6 +617,14 @@ const I18N = {
     reset_password_h1_pre: "Choisissez",
     reset_password_h1_em: "votre mot de passe",
     err_pwd_too_long: "Mot de passe trop long (72 caractères maximum).",
+    // G76: unsubscribe confirmation page
+    unsub_eyebrow: "Préférences e-mail",
+    unsub_title_ok: "Vous êtes désinscrit(e)",
+    unsub_title_invalid: "Lien invalide",
+    unsub_body_ok: "Vous ne recevrez plus d'e-mails de bienvenue, d'annonces de classement ou d'invitations entre amis. Les e-mails liés à la sécurité de votre compte (réinitialisation de mot de passe, sanctions de modération, suppression de compte) continueront d'arriver — ils sont obligatoires.",
+    unsub_body_invalid: "Ce lien est invalide ou a expiré. Connectez-vous à votre compte pour gérer vos préférences e-mail depuis votre profil.",
+    unsub_back_home: "Retour à l'accueil",
+    unsub_open_profile: "Ouvrir mon profil",
   },
   en: {
     // Navigation
@@ -685,7 +693,7 @@ const I18N = {
     reset_password: "Reset password",
     reset_sent: "If that email exists, a reset link has been sent.",
     accept_cgu: "I accept the terms and conditions",
-    accept_emails: "I agree to receive emails from 421 Bistro",
+    accept_emails: "I agree to receive emails from 421 Bistro (welcome, rank changes, friend invites). Account security emails (password reset, moderation) are sent regardless. Unsubscribe anytime.",
     back_to_login: "Back to login",
 
     // Waiting room
@@ -1236,6 +1244,14 @@ const I18N = {
     reset_password_h1_pre: "Choose",
     reset_password_h1_em: "your password",
     err_pwd_too_long: "Password too long (72 characters maximum).",
+    // G76: unsubscribe confirmation page
+    unsub_eyebrow: "Email preferences",
+    unsub_title_ok: "You're unsubscribed",
+    unsub_title_invalid: "Invalid link",
+    unsub_body_ok: "You won't receive welcome emails, rank-up announcements, or friend invites anymore. Security-related emails for your account (password resets, moderation actions, deletion notices) will keep arriving — they're mandatory.",
+    unsub_body_invalid: "This link is invalid or expired. Sign in to your account to manage your email preferences from your profile.",
+    unsub_back_home: "Back to home",
+    unsub_open_profile: "Open my profile",
   }
 }
 

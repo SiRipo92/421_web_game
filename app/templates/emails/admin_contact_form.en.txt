@@ -1,0 +1,11 @@
+{% extends "_base.txt" %}
+{% block body %}
+From    : {{ name }} <{{ from_email }}>
+Category: {{ category_label }}
+
+----------------------------------------
+{{ message }}
+----------------------------------------
+
+To reply, use your mail client's reply function.
+{% endblock %}

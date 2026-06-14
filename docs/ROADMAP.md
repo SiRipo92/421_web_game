@@ -852,6 +852,48 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 - **PWA polish** — make the web app installable via "Add to Home Screen" (manifest.json, service worker, web-push). Zero new stack, gets ~70% of the UX benefit. Captured separately as G80b if you want me to spin it out.
 - **TestFlight-only release** (no Play Store) — Apple side first, Android later. Halves the store-submission work but limits beta audience to iPhone users.
 
+### G81. Ban-notice + appeal flow — email + endpoint
+**Why:** Moderation can already temp-ban accounts ([[G42]]), but the user is told *nothing* — they hit a 403 on login with `account_temporarily_suspended` and have to guess what happened. The `ban_notice` email template is already in repo (shipped with G76); this item wires the actual sender + the appeal-form backend so a banned user can contest the decision without emailing support manually.
+**Scope:**
+- New `send_ban_notice()` function in `app/services/email.py` — renders the existing `ban_notice.{fr,en}.{html,txt}` templates and POSTs via Brevo. Same pattern as `send_welcome_email()`.
+- Fired from wherever moderation enforces a ban (currently the admin router + auto-mod path). Pass `case_id` (UUID), `reason_label`, `duration_label` (`24h`, `7 jours`, `permanent`), `expires_at_label` (localized date), `evidence_summary` (text excerpt or none), `appeal_url`.
+- **Appeal form backend:**
+    - `POST /api/moderation/appeals` — body: `{case_id, message}`. Stores in a new `ModerationAppeal(id, user_id, case_id, message, status='pending', created_at, reviewed_by, reviewed_at, verdict, verdict_message)` table.
+    - `GET /admin/appeals?status=pending` — admin-only list, paginated. Already-banned users can see their open appeal.
+    - `POST /admin/appeals/{id}/verdict` — body: `{outcome: 'upheld' | 'overturned', message}`. On `overturned`, clears `User.banned_until` + `User.ban_reason`. Fires the (also-template-ready) `appeal_verdict` email (template needs to be added — small follow-up).
+- **Appeal page in SPA:** `/appeal?case=<case_id>` — minimal form (textarea + submit), accessible without being logged in (since banned users can't auth). Submitter identifies themselves by providing their account email + the `case_id` from the email; backend matches against `GdprAuditLog` to confirm the email matches the ban record.
+**Acceptance:**
+- Admin temp-bans a user → user receives a French/English email with case ID, duration, appeal button.
+- User clicks the appeal button → fills form → sees confirmation.
+- Admin sees pending appeal in the admin dashboard.
+- Admin overturns the verdict → ban is lifted + user receives `appeal_verdict` email.
+**Dependencies:** [[G42]] moderation enforcement ✅, [[G76]] email migration ✅, [[G33]] moderation dashboard (for the admin-side appeal list — currently partial).
+
+### G82. Lifecycle emails — rank_up + friend invites + achievements
+**Why:** The email infrastructure ([[G76]]) is built but only welcome + password reset currently send. Lifecycle emails (« hey, you ranked up to Confirmé », « X invited you to a game ») are high-ROI — they pull users back without notifications infrastructure on mobile yet ([[G80]]). Each ships alongside the feature that triggers it; this roadmap entry tracks the *pattern* and groups them.
+**Scope per email (all gated by `email_opt_in=True`):**
+- **rank_up** — triggered when `PlayerStats.elo` crosses a rank threshold (`badge_beginner` → `badge_amateur` etc.). Variables: `username`, `new_rank_label`, `previous_rank_label`, `current_elo`, `profile_url`, `unsubscribe_url`. New `app/services/ranks.py` exposes `rank_for(elo) → str` (single source of truth for backend + email render). Hook: end-of-game ELO write in `app/services/elo.py`.
+- **friend_invite_received** — depends on [[G29]] shipping. Variables: `username`, `inviter_name`, `game_code`, `accept_url`, `unsubscribe_url`.
+- **achievement_unlocked** — depends on an achievements system existing (not yet captured; would be a new item). Punted to later — *not in this iteration*.
+**Templates:** Already use the established Jinja pattern. Site colors inlined, FR + EN + plain-text, footer unsubscribe link.
+**Backend additions:**
+- `app/services/email.py`: `send_rank_up_email()`, `send_friend_invite_email()`.
+- Hook into ELO write (`app/services/elo.py`) → only fire on threshold crossing, not every game.
+- Rate limit: max 1 rank_up email per user per 24h (avoid spamming during a hot streak).
+**Acceptance:** A user opted into emails plays a game that promotes them from 1195 → 1210 ELO (crosses 1200 = `badge_confirmed` threshold) → within 60s they receive the rank_up email with the new badge label, FR or EN per their `lang_pref`.
+**Dependencies:** [[G76]] ✅, [[G29]] (friend invites — for friend_invite_received), ELO rank-name mapping refactor.
+
+### G83. Wire account-deletion emails into the G70 cron
+**Why:** The `account_deletion_warning` + `account_deleted` templates ship with [[G76]], but nothing fires them yet. [[G70]] is the cron that scans for users inactive ≥ N years and queues them for deletion. This item connects the two: each step of the lifecycle emits the right email.
+**Scope:**
+- **Step 1 — warning email** (T-{INACTIVE_ACCOUNT_DELETION_DAYS} before deletion). Triggered when the cron flags a user. Uses existing `account_deletion_warning` template. Variables: `username`, `inactive_years` (from settings), `deletion_date_label` (computed), `keep_active_url` (`{app_url}/login?reason=keep_active`).
+- **Step 2 — final notice** (T-7 days). New template `account_deletion_final.{fr,en}.{html,txt}` — shorter, more urgent tone. Same variables.
+- **Step 3 — confirmation of deletion** (T+0). New template `account_deleted.{fr,en}.{html,txt}` — confirms deletion, no action buttons, mentions backups/retention windows for moderation/audit logs ([[MODERATION_LOG_RETENTION_DAYS]]). Sent to the email on file *before* the row is wiped.
+- New senders in `app/services/email.py`: `send_deletion_warning()`, `send_deletion_final()`, `send_deleted_confirmation()`.
+- Cron itself ([[G70]]) gains scheduling flags so each row tracks "last_warning_sent_at" to prevent re-firing.
+**Acceptance:** A user inactive for `INACTIVE_ACCOUNT_WARNING_YEARS` receives email 1 → email 2 (T-7d) → email 3 (T+0) → row is deleted with cascades. All three emails are transactional (RGPD: legally required, no opt-out).
+**Dependencies:** [[G70]] inactive-account pipeline (currently dry-run mode), [[G76]] ✅.
+
 ### G61. Right-rail panels become collapsible "tabs"
 **Why:** Reported during playtest. The right `<aside>` today is a fixed layout: collapsible **Journal** on top, *always-visible* **Combo hierarchy** at the bottom. The user wants the hierarchy to collapse the same way the journal does — and more broadly, they want the right rail to behave like a small set of *stackable tabs* (Journal · Hierarchy · later: Chat) that each open/close independently. This sets up the eventual chat slot ([[G59]]) without ripping out the existing panels.
 **Scope:**

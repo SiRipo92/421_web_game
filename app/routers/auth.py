@@ -28,7 +28,7 @@ from app.schemas.auth import (
     TokenResponse,
     UpdateMeRequest,
 )
-from app.services.email import send_reset_email
+from app.services.email import send_reset_email, send_welcome_email
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -64,6 +64,16 @@ async def register(request: Request, body: RegisterRequest, db: AsyncSession = D
     )
     await db.commit()
     await db.refresh(user)
+
+    # G76: fire welcome email only when the user opted in at signup.
+    # Failure is logged inside send_welcome_email — never blocks signup.
+    if user.email_opt_in:
+        await send_welcome_email(
+            to_email=user.email,
+            username=user.username,
+            user_id=str(user.id),
+            lang=user.lang_pref,
+        )
 
     return TokenResponse(access_token=create_access_token(str(user.id)))
 
@@ -139,7 +149,7 @@ async def forgot_password(body: ForgotPasswordRequest, db: AsyncSession = Depend
     db.add(PasswordResetToken(user_id=user.id, token_hash=token_hash, expires_at=expires_at))
     await db.commit()
 
-    await send_reset_email(user.email, raw_token, lang=user.lang_pref)
+    await send_reset_email(user.email, raw_token, lang=user.lang_pref, username=user.username)
     return {"detail": "If that email exists, a reset link has been sent"}
 
 

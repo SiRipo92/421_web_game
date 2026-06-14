@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="{{ lang|default('fr') }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title|default('421 Bistro') }}</title>
+</head>
+<body style="margin:0;padding:0;background:#ECE0C2;font-family:Georgia,'Times New Roman',serif;color:#1C1612;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#ECE0C2;padding:24px 12px;">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;background:#F9F3E2;border:1px solid #9A8770;border-radius:6px;overflow:hidden;">
+        <tr><td style="background:#A8302A;padding:24px 32px;text-align:center;border-bottom:3px solid #7A1F1B;">
+          <div style="font-family:Georgia,serif;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:#F4ECD8;opacity:0.85;margin-bottom:4px;">{{ eyebrow|default('421 Bistro') }}</div>
+          <h1 style="margin:0;font-family:Georgia,serif;font-weight:normal;font-size:28px;color:#F4ECD8;letter-spacing:0.5px;">{{ title|default('421 Bistro') }}</h1>
+        </td></tr>
+        <tr><td style="padding:32px;background:#F9F3E2;color:#1C1612;font-size:15px;line-height:1.65;">
+          {% block body %}{% endblock %}
+        </td></tr>
+        <tr><td style="background:#F4ECD8;padding:20px 32px;border-top:1px solid #ECE0C2;font-size:12px;color:#6B5A4A;text-align:center;">
+          {% block footer_top %}{% endblock %}
+          <p style="margin:0 0 8px 0;">
+            <a href="{{ app_url }}/privacy" style="color:#A8302A;text-decoration:none;">{% if lang == 'en' %}Privacy{% else %}Confidentialité{% endif %}</a>
+            &nbsp;·&nbsp;
+            <a href="{{ app_url }}/terms" style="color:#A8302A;text-decoration:none;">{% if lang == 'en' %}Terms{% else %}Conditions{% endif %}</a>
+            {% if unsubscribe_url %}
+            &nbsp;·&nbsp;
+            <a href="{{ unsubscribe_url }}" style="color:#6B5A4A;text-decoration:underline;">{% if lang == 'en' %}Unsubscribe{% else %}Se désinscrire{% endif %}</a>
+            {% endif %}
+          </p>
+          <p style="margin:0;color:#9A8770;">
+            &copy; {{ current_year }} 421 Bistro &middot;
+            {% if lang == 'en' %}A traditional French dice game, online.{% else %}Un jeu de dés traditionnel français, en ligne.{% endif %}
+          </p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>

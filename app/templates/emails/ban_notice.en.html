@@ -1,0 +1,20 @@
+{% extends "_base.html" %}
+{% block body %}
+<p style="margin:0 0 16px 0;">Hi <strong>{{ username }}</strong>,</p>
+<p style="margin:0 0 16px 0;">Your 421 Bistro account has been <strong>suspended</strong> for violating our community rules.</p>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;background:#F4ECD8;border-left:3px solid #A8302A;padding:16px 20px;margin:20px 0;font-size:14px;">
+  <tr><td style="padding:4px 0;color:#6B5A4A;width:120px;">Reason:</td><td style="padding:4px 0;"><strong>{{ reason_label }}</strong></td></tr>
+  <tr><td style="padding:4px 0;color:#6B5A4A;">Duration:</td><td style="padding:4px 0;">{{ duration_label }}</td></tr>
+  <tr><td style="padding:4px 0;color:#6B5A4A;">Expires:</td><td style="padding:4px 0;">{{ expires_at_label }}</td></tr>
+  {% if case_id %}<tr><td style="padding:4px 0;color:#6B5A4A;">Reference:</td><td style="padding:4px 0;font-family:monospace;font-size:13px;">{{ case_id }}</td></tr>{% endif %}
+</table>
+{% if evidence_summary %}
+<p style="margin:0 0 12px 0;font-weight:bold;">Evidence on file:</p>
+<div style="background:#F4ECD8;padding:12px 16px;border-radius:4px;font-size:13px;color:#3A2F26;margin:0 0 20px 0;">{{ evidence_summary }}</div>
+{% endif %}
+<p style="margin:0 0 16px 0;">You can contest this decision via the form below. A moderation team member will review your request within 7 days.</p>
+<p style="margin:24px 0;text-align:center;">
+  <a href="{{ appeal_url }}" style="display:inline-block;background:#A8302A;color:#F4ECD8;padding:14px 28px;text-decoration:none;border-radius:4px;font-family:Georgia,serif;font-size:15px;letter-spacing:0.5px;">Appeal this decision</a>
+</p>
+<p style="margin:24px 0 0 0;font-size:13px;color:#6B5A4A;border-top:1px solid #ECE0C2;padding-top:16px;">This is a transactional email — you receive it because it directly concerns your account. There is no opt-out.</p>
+{% endblock %}

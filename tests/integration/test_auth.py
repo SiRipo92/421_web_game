@@ -12,6 +12,27 @@ async def test_register_creates_user(client, make_user):
     assert "access_token" in r.json()
 
 
+async def test_register_with_opt_in_sends_welcome_email(client, make_user):
+    """email_opt_in=True at signup → send_welcome_email is invoked."""
+    data = make_user("welcomed")
+    data["email_opt_in"] = True
+    with patch("app.routers.auth.send_welcome_email", new_callable=AsyncMock) as send_mock:
+        r = await client.post("/auth/register", json=data)
+    assert r.status_code == 201
+    send_mock.assert_called_once()
+    assert send_mock.call_args.kwargs["to_email"] == data["email"]
+
+
+async def test_register_without_opt_in_skips_welcome_email(client, make_user):
+    """email_opt_in=False (default) → no welcome email."""
+    data = make_user("quiet")
+    # Don't set email_opt_in — defaults to False
+    with patch("app.routers.auth.send_welcome_email", new_callable=AsyncMock) as send_mock:
+        r = await client.post("/auth/register", json=data)
+    assert r.status_code == 201
+    send_mock.assert_not_called()
+
+
 async def test_register_duplicate_rejected(client, make_user):
     """Registering the same email twice returns 409."""
     data = make_user()
@@ -94,7 +115,7 @@ async def test_reset_password_success(client, make_user):
 
     captured = []
 
-    async def capture_token(email, token, lang):
+    async def capture_token(email, token, lang, username=""):
         captured.append(token)
 
     with patch("app.routers.auth.send_reset_email", side_effect=capture_token):
@@ -307,7 +328,7 @@ async def test_reset_password_new_password_enables_login(client, make_user):
 
     captured = []
 
-    async def capture(email, token, lang):
+    async def capture(email, token, lang, username=""):
         captured.append(token)
 
     with patch("app.routers.auth.send_reset_email", side_effect=capture):
@@ -331,7 +352,7 @@ async def test_reset_password_token_single_use(client, make_user):
 
     captured = []
 
-    async def capture(email, token, lang):
+    async def capture(email, token, lang, username=""):
         captured.append(token)
 
     with patch("app.routers.auth.send_reset_email", side_effect=capture):

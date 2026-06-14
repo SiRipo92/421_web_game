@@ -1,0 +1,11 @@
+{% extends "_base.html" %}
+{% block body %}
+<p style="margin:0 0 16px 0;">Bonjour <strong>{{ username }}</strong>,</p>
+<p style="margin:0 0 16px 0;">Votre compte 421 Bistro est inactif depuis <strong>{{ inactive_years }} ans</strong>. Conformément à notre politique de minimisation des données (RGPD), il sera <strong>automatiquement supprimé le {{ deletion_date_label }}</strong>.</p>
+<p style="margin:0 0 16px 0;">Pour garder votre compte, il suffit de vous reconnecter :</p>
+<p style="margin:24px 0;text-align:center;">
+  <a href="{{ keep_active_url }}" style="display:inline-block;background:#A8302A;color:#F4ECD8;padding:14px 28px;text-decoration:none;border-radius:4px;font-family:Georgia,serif;font-size:15px;letter-spacing:0.5px;">Garder mon compte actif</a>
+</p>
+<p style="margin:0 0 16px 0;font-size:14px;color:#3A2F26;">À la suppression, votre profil, vos statistiques de jeu et vos messages dans les chats publics seront effacés. Cette opération est irréversible.</p>
+<p style="margin:24px 0 0 0;font-size:13px;color:#6B5A4A;border-top:1px solid #ECE0C2;padding-top:16px;">Cet e-mail est transactionnel — il concerne directement votre compte. Vous ne pouvez pas vous y désinscrire.</p>
+{% endblock %}

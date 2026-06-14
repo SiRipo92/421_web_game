@@ -1,0 +1,14 @@
+{% extends "_base.txt" %}
+{% block body %}
+Hi {{ username }},
+
+Your 421 Bistro account has been inactive for {{ inactive_years }} years.
+Under our data-minimisation policy (GDPR), it will be automatically deleted
+on {{ deletion_date_label }}.
+
+To keep your account, log in:
+{{ keep_active_url }}
+
+On deletion, your profile, game statistics, and public chat messages will
+be erased. This action is irreversible.
+{% endblock %}
