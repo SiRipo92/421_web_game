@@ -779,6 +779,79 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 - (b) The "Now" roadmap section is < 5 open items (so the refactor doesn't stall feature work).
 - (c) 421 has been stable in production for ≥ 3 months — i.e. the patterns we're abstracting are battle-tested.
 
+### G80. Native mobile apps — iOS + Android via React Native + Expo
+**Why:** A web-only game leaves Apple/Android store discovery, push notifications, and the "permanent home screen icon" trust signal on the table. For a casual real-time dice game the "buddy pings you for a round" workflow is much smoother with native push notifications than with web push. App-store presence also confers legitimacy that helps onboarding (« is this a real app? » → app-store listing answers yes).
+
+**Why React Native + Expo specifically:**
+- **Stack continuity** — same React mental model + JS as the existing SPA. Custom hooks (`useGame`, `useAuth`, `useLang`, `useTheme`) can mostly transfer with minimal changes. i18n dictionaries port 1:1.
+- **Single codebase for iOS + Android** — Flutter would also do this but requires learning Dart from scratch. Native Swift + Kotlin doubles the work for a solo dev.
+- **Expo Application Services (EAS) handles deploy/sign/distribute** — Apple signing certificates, Android keystores, store-submission CLI. Without it, iOS deployment alone is ~2 weeks of Apple-specific yak-shaving.
+- **WebSocket support is first-class** — `react-native` ships a `WebSocket` global identical to the browser's.
+- **Sentry + Anthropic/Brevo SDKs all have RN packages** — the monitoring stack from [[G77]] carries over.
+
+**Why NOT Capacitor (wrap the existing SPA):**
+- Apple's "minimum functionality" guideline (4.2.3) rejects bare website wrappers. We'd need to add native features anyway — at which point we're already off the wrapper path.
+- WebView performance on the piste animation + dice rendering would noticeably lag native.
+- Push notifications via web are weaker than native (background reliability, action buttons).
+- Listed for completeness but not the recommendation.
+
+**Scope (phased):**
+
+- **Phase A — minimum viable native app (~3-4 weeks of focused work):**
+    * `mobile/` directory in the monorepo, scaffolded with `npx create-expo-app`.
+    * Port the auth flow first (login, register, /auth/me) — uses the existing `/auth/*` endpoints unchanged. Authenticated screens reuse the JWT.
+    * Port the lobby flow (list public rooms via existing `/api/rooms`, join via `/api/join/{game_id}`).
+    * Game screen: re-implement the piste + dice + action bar in RN-native components (no WebView). Reuse the WS message protocol exactly — `useGame` hook ports with `import { WebSocket } from 'react-native'`.
+    * Drop the heavier desktop features for v1 — admin dashboard, the full Privacy/Terms pages link out to the web URL.
+    * Persistent storage via `@react-native-async-storage/async-storage` (mirrors web `localStorage`).
+
+- **Phase B — push notifications + deep links (~1 week):**
+    * Apple Push Notification service (APNs) + Firebase Cloud Messaging (FCM) registration. Expo's `expo-notifications` wraps both.
+    * Backend: `POST /api/me/push-token` to register a device token; persist in a new `UserPushToken(user_id, token, platform, last_seen_at)` table.
+    * Send notifications on:
+        - Your turn in a game where you're AFK (already wired to G2/G50 events backend-side).
+        - Game invite from a friend ([[G29]] dependency).
+        - Moderation verdict ([[G33]] dependency).
+    * Deep links: `421bistro://join?code=ABC123` opens the app on the room-join screen pre-filled.
+
+- **Phase C — polish + store submission (~1 week per platform):**
+    * App icons + splash screens (Expo handles the size matrix).
+    * Privacy nutrition labels (Apple) + data safety form (Google Play) — both stores require declaring what data is collected. We're already RGPD-compliant so the answers are honest and short.
+    * Apple Developer Program enrolment ($99/yr). Google Play one-time $25.
+    * « Sign in with Apple » — Apple guideline 4.8 *requires* it if the app offers any third-party SSO (we offer Google). Implementation via `expo-auth-session` is straightforward.
+    * EAS Build → EAS Submit pushes to TestFlight + Play Store internal testing.
+    * Beta with a small group (10–20 testers via TestFlight + Play Internal Testing) for 1–2 weeks before public release.
+
+**Backend changes needed (small):**
+- `UserPushToken` table + migration.
+- `POST /api/me/push-token` endpoint.
+- Push-send service alongside the email service (`app/services/push.py`). Triggers from existing event-emission points in `app/game/ws.py`.
+- « Sign in with Apple » OAuth route mirroring the existing `/auth/google` path.
+
+**Cost estimate:**
+- Apple Developer: **$99/yr** (mandatory)
+- Google Play: **$25 one-time** (mandatory)
+- EAS Build: free for hobby tier; **$19/mo** when you need parallel builds
+- Push notification volume: free up to large scale on both APNs and FCM
+- Total ongoing: **~$11/mo** equivalent ($99/yr Apple)
+
+**Acceptance:** A user can:
+- Download "421 Bistro" from the App Store / Google Play
+- Sign in with their existing web account, or create a new one
+- Join a public room and play a full match end-to-end
+- Receive a push notification when it's their turn in a game they backgrounded
+- The mobile app's RGPD privacy disclosures match the web app's Privacy page
+
+**Dependencies:**
+- [[G75]] (domain owned — for deep-link domains + share-link generation)
+- [[G77]] (production deployment — beta users need a stable backend to point at)
+- [[G29]] / [[G30]] (friend invites + external invite delivery) — they're more compelling on mobile where push delivery is native; the mobile entry could land first and these become higher-priority follow-ups.
+- Optional but recommended: [[G79]] (multi-game refactor) before Phase A if a second game is on the horizon — the mobile codebase would inherit whatever shape the web codebase has.
+
+**Skip-for-now alternatives if Phase A feels too big right now:**
+- **PWA polish** — make the web app installable via "Add to Home Screen" (manifest.json, service worker, web-push). Zero new stack, gets ~70% of the UX benefit. Captured separately as G80b if you want me to spin it out.
+- **TestFlight-only release** (no Play Store) — Apple side first, Android later. Halves the store-submission work but limits beta audience to iPhone users.
+
 ### G61. Right-rail panels become collapsible "tabs"
 **Why:** Reported during playtest. The right `<aside>` today is a fixed layout: collapsible **Journal** on top, *always-visible* **Combo hierarchy** at the bottom. The user wants the hierarchy to collapse the same way the journal does — and more broadly, they want the right rail to behave like a small set of *stackable tabs* (Journal · Hierarchy · later: Chat) that each open/close independently. This sets up the eventual chat slot ([[G59]]) without ripping out the existing panels.
 **Scope:**
