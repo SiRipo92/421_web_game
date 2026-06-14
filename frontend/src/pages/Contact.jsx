@@ -2,6 +2,10 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useLang } from '../context/useLang.js'
 
+const Required = () => (
+  <span style={{ color: 'var(--rouge)', marginLeft: 4 }} aria-hidden="true">*</span>
+)
+
 export function Contact() {
   const { t } = useLang()
   const [name, setName] = useState('')
@@ -17,9 +21,18 @@ export function Contact() {
   const [sent, setSent] = useState(false)
   const [error, setError] = useState('')
 
+  // G68 follow-up: surface specific messages instead of a generic
+  // "An error occurred". Each return path maps to a distinct i18n key
+  // so the user knows what to do — re-check inputs, accept the
+  // checkbox, wait out the rate limit, or wait for email-service
+  // recovery.
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
+    if (!name.trim() || !email.trim() || !message.trim()) {
+      setError(t('err_contact_missing_fields'))
+      return
+    }
     if (!acceptConsent) {
       setError(t('err_accept_consent'))
       return
@@ -31,18 +44,31 @@ export function Contact() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, email, subject, message }),
       })
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        if (res.status === 429) { setError(t('err_rate_limit')); return }
-        throw new Error(body.detail || 'error')
+      if (res.ok) { setSent(true); return }
+      if (res.status === 429) { setError(t('err_rate_limit')); return }
+      if (res.status === 422) { setError(t('err_contact_missing_fields')); return }
+      // 502: the backend caught the email-service failure and tagged it.
+      // detail can be a string (legacy) or { code, message } (G68 fu).
+      let code = ''
+      try {
+        const body = await res.json()
+        const detail = body.detail
+        code = typeof detail === 'object' && detail ? detail.code : ''
+      } catch { /* non-JSON body — fall through */ }
+      if (code === 'email_sender_not_configured') {
+        setError(t('err_contact_email_sender_not_configured'))
+      } else if (code === 'email_service_unavailable') {
+        setError(t('err_contact_email_service_unavailable'))
+      } else {
+        setError(t('err_generic'))
       }
-      setSent(true)
     } catch {
       setError(t('err_generic'))
     } finally {
       setLoading(false)
     }
   }
+
 
   return (
     <div style={{ maxWidth: 680, margin: '4rem auto', padding: '0 1.5rem' }}>
@@ -63,15 +89,18 @@ export function Contact() {
         </div>
       ) : (
         <div className="ticket" style={{ padding: '2rem' }}>
+          <p className="serif" style={{ fontSize: '0.82rem', color: 'var(--ink-mute)', fontStyle: 'italic', margin: '0 0 1.2rem' }}>
+            {t('contact_required_legend')}
+          </p>
           <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.2rem' }}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }} className="contact-row">
               <div>
-                <label className="field-label" htmlFor="c-name">{t('contact_name')}</label>
+                <label className="field-label" htmlFor="c-name">{t('contact_name')}<Required /></label>
                 <input id="c-name" className="input" required value={name}
                   onChange={e => setName(e.target.value)} autoComplete="name" />
               </div>
               <div>
-                <label className="field-label" htmlFor="c-email">{t('email')}</label>
+                <label className="field-label" htmlFor="c-email">{t('email')}<Required /></label>
                 <input id="c-email" className="input" type="email" required value={email}
                   onChange={e => setEmail(e.target.value)} autoComplete="email" />
               </div>
@@ -86,7 +115,7 @@ export function Contact() {
               </select>
             </div>
             <div>
-              <label className="field-label" htmlFor="c-message">{t('contact_message')}</label>
+              <label className="field-label" htmlFor="c-message">{t('contact_message')}<Required /></label>
               <textarea id="c-message" className="input" required rows={5}
                 value={message} onChange={e => setMessage(e.target.value)}
                 style={{ resize: 'vertical', fontFamily: 'var(--body)' }} />

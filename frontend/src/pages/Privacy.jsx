@@ -1,9 +1,14 @@
 import { Link } from 'react-router-dom'
 import { useLang } from '../context/useLang.js'
+import { usePolicyConfig } from '../hooks/usePolicyConfig.js'
 import { clearCookieConsent, getCookieConsent } from '../utils/consent.js'
 
 export function Privacy() {
   const { t } = useLang()
+  // G68 follow-up: env-driven values for retention / inactivity /
+  // breach windows. The strings below pass `policy` as the substitution
+  // dict — useT() handles the {placeholder} replacement.
+  const policy = usePolicyConfig()
   return (
     <div style={{ maxWidth: 800, margin: '0 auto', padding: '2.5rem 1.5rem' }}>
       <div className="eyebrow">RGPD</div>
@@ -36,8 +41,8 @@ export function Privacy() {
         </Section>
 
         <Section title={t('privacy_s4_title')}>
-          <p>{t('privacy_s4_account')}</p>
-          <p style={{ marginTop: '0.5rem' }}>{t('privacy_s4_audit')}</p>
+          <p>{t('privacy_s4_account', policy)}</p>
+          <p style={{ marginTop: '0.5rem' }}>{t('privacy_s4_audit', policy)}</p>
         </Section>
 
         <Section title={t('privacy_s5_title')}>
@@ -78,18 +83,18 @@ export function Privacy() {
 
         <Section title={t('privacy_s8_title')}>
           <p>{t('privacy_s8_intro')}</p>
-          <p style={{ marginTop: '0.5rem' }}>{t('privacy_s8_detail')}</p>
+          <p style={{ marginTop: '0.5rem' }}>{t('privacy_s8_detail', policy)}</p>
         </Section>
 
         <Section title={t('privacy_s9_title')}>
           <p>{t('privacy_s9_intro')}</p>
           <ul>
-            <li>{t('privacy_s9_item_who')}</li>
+            <li>{t('privacy_s9_item_who', policy)}</li>
             <li>{t('privacy_s9_item_what')}</li>
             <li>{t('privacy_s9_item_when')}</li>
             <li>{t('privacy_s9_item_actions')}</li>
           </ul>
-          <p style={{ marginTop: '0.5rem' }}>{t('privacy_s9_authority')}</p>
+          <p style={{ marginTop: '0.5rem' }}>{t('privacy_s9_authority', policy)}</p>
         </Section>
 
         <Section title={t('privacy_s10_title')}>

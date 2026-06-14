@@ -1,8 +1,10 @@
 import { Link } from 'react-router-dom'
 import { useLang } from '../context/useLang.js'
+import { usePolicyConfig } from '../hooks/usePolicyConfig.js'
 
 export function TermsAndConditions() {
   const { t } = useLang()
+  const policy = usePolicyConfig()
   return (
     <div style={{ maxWidth: 800, margin: '0 auto', padding: '2.5rem 1.5rem' }}>
       <div className="eyebrow">{t('terms_eyebrow')}</div>
@@ -58,7 +60,7 @@ export function TermsAndConditions() {
             <Link to="/contact" style={{ color: 'var(--rouge)' }}>
               {t('terms_enforcement_appeal_contact_link')}
             </Link>
-            {t('terms_enforcement_appeal_mid')}{' '}
+            {t('terms_enforcement_appeal_mid', policy)}{' '}
             <Link to="/privacy" style={{ color: 'var(--rouge)' }}>
               {t('privacy_title')}
             </Link>

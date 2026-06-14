@@ -7,11 +7,24 @@ from pydantic import BaseModel, EmailStr
 
 from app.core.config import settings
 from app.core.limiter import limiter
-from app.services.email import _FROM
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["contact"])
+
+
+@router.get("/policy-config")
+async def policy_config():
+    """G68 follow-up: surface the env-driven legal/policy values so the
+    Privacy and Terms pages can render the current numbers (inactivity
+    window, deletion grace, breach notification window, audit log
+    retention). Public — no auth required."""
+    return {
+        "inactive_account_warning_years": settings.inactive_account_warning_years,
+        "inactive_account_deletion_days": settings.inactive_account_deletion_days,
+        "breach_notification_hours": settings.breach_notification_hours,
+        "moderation_log_retention_days": settings.moderation_log_retention_days,
+    }
 
 
 class ContactRequest(BaseModel):
@@ -53,7 +66,7 @@ async def contact(request: Request, body: ContactRequest):
     try:
         resend.Emails.send(
             {
-                "from": _FROM,
+                "from": settings.sender_email,
                 "to": settings.contact_email,
                 "reply_to": f"{body.name} <{body.email}>",
                 "subject": email_subject,
@@ -61,7 +74,19 @@ async def contact(request: Request, body: ContactRequest):
             }
         )
         logger.info("Contact email sent from %s (subject: %s)", body.email, body.subject)
-    except Exception:
+    except Exception as exc:
+        # G68 follow-up: differentiate sender-domain issues (Resend rejects
+        # unverified domains during dev) from genuine outages. The frontend
+        # uses `code` to render a useful message instead of generic
+        # "An error occurred".
         logger.exception("Failed to send contact email from %s", body.email)
-        raise HTTPException(status_code=502, detail="Failed to send message")
+        msg = str(exc).lower()
+        if "domain" in msg or "from" in msg or "not verified" in msg:
+            code = "email_sender_not_configured"
+        else:
+            code = "email_service_unavailable"
+        raise HTTPException(
+            status_code=502,
+            detail={"code": code, "message": "Failed to send message"},
+        )
     return {"detail": "Message received"}

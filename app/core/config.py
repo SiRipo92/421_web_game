@@ -22,6 +22,21 @@ class Settings(BaseSettings):
     sentry_dsn: str = ""
     google_client_id: str = ""
     contact_email: str = ""
+    # G68 follow-up: env-driven so legal pages reflect current values
+    # without redeploys, and the email sender can be swapped without
+    # touching code. Production should set SENDER_EMAIL once the domain
+    # is purchased + verified with Resend; otherwise the default below
+    # will keep failing Resend's sender-domain check.
+    sender_email: str = "421 Bistro <noreply@421bistro.fr>"
+    # RGPD inactive-account auto-deletion (G70). Default 2 years → 30
+    # day grace, override via env to test the pipeline.
+    inactive_account_warning_years: int = 2
+    inactive_account_deletion_days: int = 30
+    # RGPD breach notification window (Art. 33-34). 72h is the legal
+    # default in the EU; surfaced in the Privacy page.
+    breach_notification_hours: int = 72
+    # Moderation audit log retention (referenced in Privacy s7 + Terms s6).
+    moderation_log_retention_days: int = 365
 
 
 settings = Settings()
