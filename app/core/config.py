@@ -10,6 +10,11 @@ class Settings(BaseSettings):
 
     debug: bool = False
     database_url: str = "postgresql+asyncpg://app:change_me@localhost:5432/fourtwentyone"
+    # Separate DB the test suite runs against — keeps `tests/` from
+    # polluting the live `users` / `games` tables. When set, tests/
+    # conftest swaps DATABASE_URL → TEST_DATABASE_URL *before* any app
+    # module imports (pydantic-settings reads env at instantiation time).
+    test_database_url: str = ""
     secret_key: str = "dev-insecure-key-change-in-production"
     access_token_expire_minutes: int = 30
     remember_me_expire_days: int = 30

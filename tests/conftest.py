@@ -1,8 +1,59 @@
-"""Top-level test fixtures shared across unit and integration tests."""
+"""Top-level test fixtures shared across unit and integration tests.
 
-import pytest
+WARNING: the test-database swap below MUST execute before any `app.*`
+import in this file (or in any other conftest). pydantic-settings
+caches env values at module-instantiation time — so once
+`app.core.config.settings` runs, it's locked to whatever DATABASE_URL
+was in os.environ at that moment. Re-ordering imports here will
+silently re-point tests at the production DB.
+"""
 
-from app.core.limiter import limiter
+import os
+from pathlib import Path
+
+# pytest doesn't auto-load `.env`, but pydantic-settings will read it
+# when `app.core.config.settings` is instantiated. We need to know
+# TEST_DATABASE_URL *before* that, so we parse `.env` manually here.
+# Tiny parser: KEY=value lines, ignore blanks + #comments, no escaping
+# / multiline / quotes (matches the shape of our .env exactly).
+_env_path = Path(__file__).resolve().parent.parent / ".env"
+if _env_path.exists():
+    for _line in _env_path.read_text().splitlines():
+        _line = _line.strip()
+        if not _line or _line.startswith("#") or "=" not in _line:
+            continue
+        _key, _, _val = _line.partition("=")
+        _key = _key.strip()
+        _val = _val.strip()
+        # Don't clobber values explicitly set in the shell — those win.
+        if _key and _key not in os.environ:
+            os.environ[_key] = _val
+
+# Swap DATABASE_URL → TEST_DATABASE_URL before app modules import.
+# Two guards:
+#   1. Refuse to run if TEST_DATABASE_URL isn't set — better to fail
+#      loudly than to silently hit prod.
+#   2. Refuse to run if the chosen URL doesn't contain "test" — the
+#      "test" substring is a typo trip-wire (a misconfigured env that
+#      points the test suite at fourtwentyone would otherwise wipe
+#      the user table).
+_test_url = os.environ.get("TEST_DATABASE_URL", "").strip()
+if not _test_url:
+    raise RuntimeError(
+        "TEST_DATABASE_URL is not set. Create a separate test database "
+        "(see README → Tests) and add the connection string to .env."
+    )
+if "test" not in _test_url.lower():
+    raise RuntimeError(
+        f"TEST_DATABASE_URL does not contain 'test' — refusing to run "
+        f"tests against this URL ({_test_url}). Safety guard to prevent "
+        f"accidental writes to the production DB."
+    )
+os.environ["DATABASE_URL"] = _test_url
+
+import pytest  # noqa: E402
+
+from app.core.limiter import limiter  # noqa: E402
 
 
 @pytest.fixture(autouse=True)

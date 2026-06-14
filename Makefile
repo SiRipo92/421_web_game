@@ -22,5 +22,11 @@ build-frontend:
 test:
 	.venv/bin/pytest tests/ -v
 
+# Apply migrations to the test database (one-time, after creating it in
+# pgAdmin). Reads TEST_DATABASE_URL from .env and points alembic at it
+# by overriding DATABASE_URL just for this invocation.
+test-db-migrate:
+	@source .env && DATABASE_URL="$$TEST_DATABASE_URL" .venv/bin/alembic upgrade head
+
 lint:
 	.venv/bin/ruff check app/ tests/ && .venv/bin/ruff format --check app/ tests/
