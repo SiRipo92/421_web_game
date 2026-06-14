@@ -741,6 +741,44 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 **Acceptance:** `git push` to `main` triggers a build + deploy; the deployed app is reachable at `https://<domain>`; monitoring dashboards show errors/uptime/latency in real time.
 **Dependencies:** [[G75]] (domain), [[G76]] (Brevo for email-sending from the deployed surface). [[G71b]] (security hardening) is logical to land before opening the URL to the public.
 
+### G78. Redis-backed shared game state (multi-container HA)
+**Why:** Game state today lives in `app/game/state.py:games` as an in-process dict. Two consequences: (1) a container crash loses every active room on it, and (2) you can't run more than one container because each would have its own isolated `games` dict — players in the "same" game id but routed to different containers would see different state. Sticky sessions ([[G77]] Phase 2) mitigates this but doesn't solve the crash-loss case. The real fix is moving state to a shared store so any container can resume any game.
+**Scope (Phase 3 of [[G77]]):**
+- **Redis** as the state store (managed Upstash or Fly.io's Redis add-on, ~$5/mo at small scale).
+- Refactor `state.games` to a Redis-backed proxy: `Game` instances serialised as JSON, fetched/written per WS message. Keep an in-process cache with TTL for hot paths.
+- AFK timers + bot handback tasks become Redis sorted-set scheduled jobs OR move to a small Celery worker tier.
+- Connection manager (`manager` in `app/game/ws.py`) broadcasts via Redis pub/sub so a player on container A can receive a broadcast triggered by a player's WS write on container B.
+- Tests: a 2-container integration test (compose) verifying game state survives a container restart.
+- Cost trigger: do this when concurrent rooms exceed ~20 OR when a real user reports a crash-induced lost game.
+**Acceptance:** Kill the container hosting a live game → players see a momentary disconnect, then the same game resumes when their WS reconnects (to any container). Zero lost state.
+**Dependencies:** [[G77]] (production deploy first; can't validate without a real multi-container setup).
+
+### G79. Multi-game architecture refactor (when adding game #2)
+**Why:** The codebase today assumes one game type. `app/game/` is hard-coded singular; `Game` dataclass, WS actions (`roll`, `keep`, `done`, `tiebreak_roll`), `/api/create` schema params (`bank_rule`, `afk_seconds`), `app/schemas/rankings.py` combined stats, and the frontend dice/piste rendering all bake in 421-specific concepts. Adding a second game (Belote, Tarot, Yams, etc.) without restructuring means duplicating room/player/persistence logic — a maintenance trap.
+**Scope (executed in the same PR as the first commit of game #2, not preemptively):**
+- Restructure the backend to a per-game-type namespace:
+    ```
+    app/games/
+    ├── _common/        # Player, Room, PhaseEnum, matchmaking, persistence shell
+    ├── _421/           # 421 logic moved here
+    │   ├── logic.py
+    │   ├── ws_actions.py
+    │   ├── classify.py
+    │   └── room_config.py
+    ├── <game2>/
+    └── registry.py     # game_type → module mapping
+    ```
+- DB schema: add `Game.game_type: str` column (default "421" for existing rows), migrate `bank_rule` / `afk_seconds` / etc. into a polymorphic `room_config: jsonb` field.
+- WS routes: `/ws/{game_type}/{game_id}/{player_id}` — game type discriminates which `ws_actions` module handles incoming messages.
+- HTTP routes: `/api/games/{game_type}/create` similarly.
+- Frontend: split `Game.jsx` per game type, with a thin `<GameRouter>` that switches on `state.game_type`. Shared primitives (`PisteSeat`, `ChipStack`) move to `frontend/src/components/games/_common/`.
+- Migration plan: ship game #2 + the refactor as one PR with a feature flag. Old `/api/create` keeps working for back-compat for at least one release.
+**Acceptance:** A second game type ships with its own `app/games/<game2>/` namespace. Adding a third game from there requires no further restructuring — just create the new directory + register it.
+**Dependencies:** None — defer until game #2 is decided. Premature execution = wrong abstraction. Three soft triggers for opening this item:
+- (a) Game #2 is concretely scoped, not just "maybe later".
+- (b) The "Now" roadmap section is < 5 open items (so the refactor doesn't stall feature work).
+- (c) 421 has been stable in production for ≥ 3 months — i.e. the patterns we're abstracting are battle-tested.
+
 ### G61. Right-rail panels become collapsible "tabs"
 **Why:** Reported during playtest. The right `<aside>` today is a fixed layout: collapsible **Journal** on top, *always-visible* **Combo hierarchy** at the bottom. The user wants the hierarchy to collapse the same way the journal does — and more broadly, they want the right rail to behave like a small set of *stackable tabs* (Journal · Hierarchy · later: Chat) that each open/close independently. This sets up the eventual chat slot ([[G59]]) without ripping out the existing panels.
 **Scope:**
