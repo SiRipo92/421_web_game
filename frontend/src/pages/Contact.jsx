@@ -124,7 +124,6 @@ export function Contact() {
               <input
                 id="c-consent"
                 type="checkbox"
-                required
                 checked={acceptConsent}
                 onChange={e => setAcceptConsent(e.target.checked)}
                 style={{ marginTop: 3, flexShrink: 0 }}
@@ -143,7 +142,14 @@ export function Contact() {
               </label>
             </div>
             {error && <p style={{ color: 'var(--rouge)', fontSize: '0.9rem', margin: 0 }}>{error}</p>}
-            <button type="submit" disabled={loading || !acceptConsent} className="btn btn-primary" style={{ justifyContent: 'center', opacity: acceptConsent ? 1 : 0.45 }}>
+            {/* G68 follow-up: button only disables during in-flight POST.
+                Previously also disabled when !acceptConsent, but that
+                hid the "please consent" error — a click went nowhere
+                and the user couldn't tell what was blocking them. Now
+                they can click; the JS check in handleSubmit surfaces
+                the specific consent error. Dimmed opacity still signals
+                the form isn't quite ready. */}
+            <button type="submit" disabled={loading} className="btn btn-primary" style={{ justifyContent: 'center', opacity: acceptConsent ? 1 : 0.6 }}>
               {loading ? '…' : t('contact_send')}
             </button>
           </form>
