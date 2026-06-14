@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useLang } from '../context/useLang.js'
 
@@ -20,6 +20,11 @@ export function Contact() {
   const [loading, setLoading] = useState(false)
   const [sent, setSent] = useState(false)
   const [error, setError] = useState('')
+  // Synchronous re-entry guard. React's batched `setLoading(true)` flushes
+  // on the next render, so a fast double-tap could fire handleSubmit
+  // twice before the disabled prop applies. The ref is set + checked in
+  // the same tick, so click #2 always sees the guard set.
+  const submittingRef = useRef(false)
 
   // G68 follow-up: surface specific messages instead of a generic
   // "An error occurred". Each return path maps to a distinct i18n key
@@ -28,6 +33,7 @@ export function Contact() {
   // recovery.
   const handleSubmit = async (e) => {
     e.preventDefault()
+    if (submittingRef.current) return // double-tap guard
     setError('')
     if (!name.trim() || !email.trim() || !message.trim()) {
       setError(t('err_contact_missing_fields'))
@@ -37,6 +43,7 @@ export function Contact() {
       setError(t('err_accept_consent'))
       return
     }
+    submittingRef.current = true
     setLoading(true)
     try {
       const res = await fetch('/api/contact', {
@@ -66,6 +73,7 @@ export function Contact() {
       setError(t('err_generic'))
     } finally {
       setLoading(false)
+      submittingRef.current = false
     }
   }
 
