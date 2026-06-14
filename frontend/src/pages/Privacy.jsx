@@ -12,56 +12,75 @@ export function Privacy() {
       </h1>
 
       <div className="ticket" style={{ padding: '2rem', lineHeight: 1.7 }}>
-        <Section title="1. Responsable du traitement">
+        <Section title={t('privacy_s1_title')}>
           <p>421 Bistro</p>
         </Section>
-        <Section title="2. Données collectées">
+
+        <Section title={t('privacy_s2_title')}>
           <ul>
-            <li>Nom d'utilisateur, adresse e-mail, date de naissance (lors de l'inscription)</li>
-            <li>Historique des parties, score Elo, statistiques de jeu</li>
-            <li>Adresse IP lors de la création du compte (conservée dans les journaux d'audit)</li>
+            <li>{t('privacy_s2_item_identity')}</li>
+            <li>{t('privacy_s2_item_game')}</li>
+            <li>{t('privacy_s2_item_ip')}</li>
+            <li>{t('privacy_s2_item_mod')}</li>
           </ul>
         </Section>
-        <Section title="3. Finalités">
+
+        <Section title={t('privacy_s3_title')}>
           <ul>
-            <li>Gestion du compte et authentification</li>
-            <li>Classement et statistiques de jeu</li>
-            <li>Envoi d'e-mails transactionnels (réinitialisation de mot de passe)</li>
-            <li>E-mails promotionnels (uniquement si vous y avez consenti)</li>
+            <li>{t('privacy_s3_item_account')}</li>
+            <li>{t('privacy_s3_item_rankings')}</li>
+            <li>{t('privacy_s3_item_transactional')}</li>
+            <li>{t('privacy_s3_item_promotional')}</li>
+            <li>{t('privacy_s3_item_safety')}</li>
           </ul>
         </Section>
-        <Section title="4. Durée de conservation">
-          <p>Les données sont conservées pendant la durée du compte, puis supprimées 30 jours après la demande de suppression.</p>
+
+        <Section title={t('privacy_s4_title')}>
+          <p>{t('privacy_s4_account')}</p>
+          <p style={{ marginTop: '0.5rem' }}>{t('privacy_s4_audit')}</p>
         </Section>
-        <Section title="5. Vos droits">
+
+        <Section title={t('privacy_s5_title')}>
           <p>
-            Conformément au RGPD, vous disposez d'un droit d'accès, de rectification, d'effacement et de portabilité de vos données.
-            Pour exercer ces droits, utilisez le <Link to="/contact" style={{ color: 'var(--rouge)' }}>formulaire de contact</Link> en bas de page.
+            {t('privacy_s5_intro')}{' '}
+            <Link to="/contact" style={{ color: 'var(--rouge)' }}>{t('privacy_s5_contact_link')}</Link>.
           </p>
         </Section>
-        <Section title="6. Cookies & stockage local">
-          <p>
-            Aucun cookie tiers, aucun script de suivi publicitaire. Le site utilise
-            uniquement le <code>localStorage</code> de votre navigateur pour des fonctions
-            essentielles : votre jeton d'authentification, votre langue et votre thème.
-          </p>
+
+        <Section title={t('privacy_s6_title')}>
+          <p>{t('privacy_s6_cookies')}</p>
           <p style={{ marginTop: '0.5rem' }}>
-            Si nous ajoutons à l'avenir des outils statistiques anonymes, ils ne se
-            chargeront que si vous avez accepté via la bannière de consentement.
-            État actuel de votre choix :{' '}
-            <strong>{getCookieConsent() ?? 'non défini'}</strong>.{' '}
+            {t('privacy_s6_analytics_pre')}{' '}
+            <strong>{getCookieConsent() ?? t('privacy_s6_consent_undefined')}</strong>.{' '}
             <button
               type="button"
               onClick={() => { clearCookieConsent(); window.location.reload() }}
               className="btn-link"
               style={{ fontSize: '0.9rem' }}
             >
-              Modifier mon choix
+              {t('privacy_s6_change_choice')}
             </button>
           </p>
         </Section>
-        <Section title="7. Contact DPO">
-          <p>Pour toute question relative à vos données, utilisez le <Link to="/contact" style={{ color: 'var(--rouge)' }}>formulaire de contact</Link>.</p>
+
+        <Section title={t('privacy_s7_title')}>
+          <p>{t('privacy_s7_intro')}</p>
+          <ul>
+            <li>{t('privacy_s7_item_logs')}</li>
+            <li>{t('privacy_s7_item_audit')}</li>
+            <li>{t('privacy_s7_item_retention')}</li>
+          </ul>
+          <p style={{ marginTop: '0.5rem' }}>
+            {t('privacy_s7_terms_pointer_pre')}{' '}
+            <Link to="/terms" style={{ color: 'var(--rouge)' }}>{t('privacy_s7_terms_pointer_link')}</Link>.
+          </p>
+        </Section>
+
+        <Section title={t('privacy_s8_title')}>
+          <p>
+            {t('privacy_s8_intro')}{' '}
+            <Link to="/contact" style={{ color: 'var(--rouge)' }}>{t('privacy_s8_contact_link')}</Link>.
+          </p>
         </Section>
       </div>
     </div>

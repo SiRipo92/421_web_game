@@ -584,13 +584,18 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 **Acceptance:** Sending a contact message without checking the consent box → error + no POST fires. Registering → checkbox text mentions both Terms AND Privacy with both links working.
 **Dependencies:** None.
 
-### G69. Privacy / Terms content audit (future, when needed)
-**Why:** Captured for future. Privacy.jsx is comprehensive today but its content is hard-coded in French only — no i18n. TermsAndConditions.jsx is i18n'd but each section is a single short paragraph. If we ship to a wider audience (or get a legal review), both pages will need a content pass + EN translation of Privacy.jsx.
-**Scope (sketch):**
-- Convert Privacy.jsx hard-coded French to i18n keys + add EN translations.
-- Expand TermsAndConditions section bodies if a legal review flags gaps.
-- Consider versioning consent (record the policy version the user accepted) — relevant if policies change materially after registration.
-**Dependencies:** Out of scope for now — pages are functional. Open when a real legal review happens or when EN audience grows.
+### G69. (DONE — pending PR merge) Privacy & Terms content expansion + EN translation
+**Why:** Reported during the G68 verification. Privacy.jsx was hard-coded French and never switched to English — the visible page stayed in French even when the user's language was set to EN. Terms covered the basics but had no explicit conduct rule list, no mention of host moderation discretion (G24 kick), and no description of the strike-escalation flow (G38 schema). The user wanted the legal pages to actually reflect what's implemented.
+**Scope shipped:**
+- `Privacy.jsx` rewritten with i18n keys; new full EN translation. New section 7 « Modération et journalisation » documenting the audit log (host kicks, warnings, suspensions, bans, IP retention).
+- `TermsAndConditions.jsx` expanded:
+    * Section 2 now lists explicit prohibited behaviors (harassment, hate speech, sexual content, spam, impersonation, doxxing, cheating).
+    * New section 5 « Modération par les hôtes de salle » documents the host's kick + report powers and the misuse policy.
+    * New section 6 « Application des règles & échelle des sanctions » spells out the 3-strike progression (warning → temp suspension → long ban) and the immediate-permanent path for severe offenses (French law violations).
+    * Existing sections renumbered.
+- New FR/EN i18n keys (~50): all `privacy_s*_*` + `terms_community_rule_*` + `terms_host_*` + `terms_enforcement_strike*` keys.
+**Acceptance:** Switching language flips both Privacy and Terms between FR and EN. Terms accurately describes the kick/report flow + strike progression that's actually live in the codebase. Privacy mentions the moderation audit log.
+**Dependencies:** None. Content is grounded in what's actually built (G24 kick, G38 strike schema, GdprAuditLog) — no aspirational features described.
 
 ### G61. Right-rail panels become collapsible "tabs"
 **Why:** Reported during playtest. The right `<aside>` today is a fixed layout: collapsible **Journal** on top, *always-visible* **Combo hierarchy** at the bottom. The user wants the hierarchy to collapse the same way the journal does — and more broadly, they want the right rail to behave like a small set of *stackable tabs* (Journal · Hierarchy · later: Chat) that each open/close independently. This sets up the eventual chat slot ([[G59]]) without ripping out the existing panels.

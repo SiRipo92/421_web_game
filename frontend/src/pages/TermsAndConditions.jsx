@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { useLang } from '../context/useLang.js'
 
 export function TermsAndConditions() {
@@ -13,18 +14,58 @@ export function TermsAndConditions() {
         <Section title={t('terms_intro_title')}>
           <p>{t('terms_intro_body')}</p>
         </Section>
+
         <Section title={t('terms_community_title')}>
           <p>{t('terms_community_body')}</p>
+          <ul>
+            <li>{t('terms_community_rule_harassment')}</li>
+            <li>{t('terms_community_rule_hate')}</li>
+            <li>{t('terms_community_rule_sexual')}</li>
+            <li>{t('terms_community_rule_spam')}</li>
+            <li>{t('terms_community_rule_impersonation')}</li>
+            <li>{t('terms_community_rule_doxxing')}</li>
+            <li>{t('terms_community_rule_cheating')}</li>
+          </ul>
         </Section>
+
         <Section title={t('terms_fairplay_title')}>
           <p>{t('terms_fairplay_body')}</p>
         </Section>
+
         <Section title={t('terms_account_title')}>
           <p>{t('terms_account_body')}</p>
         </Section>
-        <Section title={t('terms_enforcement_title')}>
-          <p>{t('terms_enforcement_body')}</p>
+
+        <Section title={t('terms_host_title')}>
+          <p>{t('terms_host_body')}</p>
+          <ul>
+            <li>{t('terms_host_item_kick')}</li>
+            <li>{t('terms_host_item_report')}</li>
+          </ul>
+          <p style={{ marginTop: '0.5rem' }}>{t('terms_host_misuse')}</p>
         </Section>
+
+        <Section title={t('terms_enforcement_title')}>
+          <p>{t('terms_enforcement_intro')}</p>
+          <ul>
+            <li>{t('terms_enforcement_strike1')}</li>
+            <li>{t('terms_enforcement_strike2')}</li>
+            <li>{t('terms_enforcement_strike3')}</li>
+          </ul>
+          <p style={{ marginTop: '0.5rem' }}>{t('terms_enforcement_severe')}</p>
+          <p style={{ marginTop: '0.5rem' }}>
+            {t('terms_enforcement_appeal_pre')}{' '}
+            <Link to="/contact" style={{ color: 'var(--rouge)' }}>
+              {t('terms_enforcement_appeal_contact_link')}
+            </Link>
+            {t('terms_enforcement_appeal_mid')}{' '}
+            <Link to="/privacy" style={{ color: 'var(--rouge)' }}>
+              {t('privacy_title')}
+            </Link>
+            {t('terms_enforcement_appeal_post')}
+          </p>
+        </Section>
+
         <Section title={t('terms_changes_title')}>
           <p>{t('terms_changes_body')}</p>
         </Section>
