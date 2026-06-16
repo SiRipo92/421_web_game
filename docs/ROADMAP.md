@@ -230,10 +230,13 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 ### G31. 3D dice animation + organized combo banner + sound
 **Why:** The current dice are flat 2D images that snap to a new value with no animation, and the player has to scan the values and remember the hierarchy table to know what they rolled (was 1-1-3 worth 3 chips? a basic? 11x?). User wants a more immersive feel — visible dice tumble, a sorted result banner that names the combo, and a "shake" sound before the throw so it feels like real dice in a hand.
 **Scope:**
-- **3D dice rendering.** Two options to weigh during research:
-  - CSS 3D transforms (lightweight, no extra deps; ~12 keyframes per face): faster to ship, narrow visual ceiling.
-  - Three.js or react-three-fiber (~150 KB gzip): richer physics, more polish, larger bundle.
-  - Decision criterion: visual quality vs. bundle size budget. Default lean: CSS 3D first; promote to Three.js only if the look falls short.
+- **3D dice rendering — library choice locked: three.js + cannon-es** (per user research; she has a reference GitHub project to crib from).
+  - **three.js** for rendering — the dice meshes, the table surface (felt-textured plane), camera, lights.
+  - **cannon-es** for physics — the maintained ES-modules fork of cannon.js. Handles the throw arc, dice tumbling, collision damping, settle detection.
+  - **react-three-fiber** as the React wrapper (~50 KB gzip on top of three.js) — declarative scene graph, plays nicely with our existing component model.
+  - Bundle impact: ~200 KB gzip total (three + cannon-es + r3f). Acceptable for a feature this central to the game's feel; lazy-load the bundle behind a dynamic import so the SPA's initial paint isn't affected.
+  - Mobile perf: cap physics at 60fps, drop to 30fps when battery saver detected. Pre-bake the dice geometry (no real-time mesh generation).
+  - **Reference repo: paste the URL into this section when you next touch G31** so future-Sierra has a clear starting point.
 - **Adaptive sizing.** On mount of `Game.jsx`, measure the piste container via a `ResizeObserver` and pass dimensions down to the dice area so the throw fills the available space instead of being capped at 600×600 (this also helps G14). Re-measure on viewport resize.
 - **Animation flow per throw:**
   1. **Shake** (~1 s): kept dice slide to a side panel inside the piste; remaining dice cluster centre, shake in place with audio loop.
@@ -249,7 +252,9 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 - **Accessibility:** keep `<Die>` keyboard-focus + Enter/Space behaviour intact even when 3D. Animation skipped entirely when `prefers-reduced-motion: reduce`.
 - **Performance:** all animation runs on `transform` + `opacity` (GPU-composited). No layout thrashing. Pause animation when the tab is hidden (`document.visibilityState`).
 
-**Research first.** This item carries enough unknowns (3D library choice, audio asset sourcing, mobile perf) that the first PR should be a research note + tiny prototype, not the production drop. Split it: G31a (research + prototype) → G31b (production implementation).
+**Research first.** Library is now chosen (three.js + cannon-es); remaining unknowns are audio asset sourcing + mobile perf budget. First PR should be a tiny prototype landing the bundle + a static "shake then throw three dice" demo on a `/devtools/dice-lab` route, not the production drop. Split it: **G31a** (prototype + bundle measurement + audio asset selection) → **G31b** (production integration into Game.jsx).
+
+**Adjacent ship benefit:** Once G31a is live, [[G94]] (homepage interactive dice) becomes nearly-free — same 3D dice component, just a different scene + interaction trigger.
 
 **Dependencies:** ideally lands alongside G14 (piste sizing) since both touch the piste container measurement. G16 (hint text) and G15 (rhythm indicator) won't fight with the new dice but their placement might need tweaking once the dice area grows.
 
@@ -1367,6 +1372,56 @@ Promote tickets from "random slugs in email" to a real `ContactTicket(id, ref, f
 **Dependencies:** [[G2]] ✅ + [[G9]] ✅ + [[G87]] (spectator-to-player slot fill).
 
 **Effort:** ~2-3 days.
+
+### G94. Interactive dice on the homepage — tap to roll
+**Why:** The homepage hero currently displays three static dice (locked at « 4-2-1 » with a gentle ambient animation). Visitors get the brand visual but no sense of the game's *feel* — what does a roll look like, what combos exist beyond the iconic 421? Making the dice tappable transforms passive decoration into interactive demo. One tap, three dice shake + tumble, settle on a random combo, the combo name appears below. Zero commitment, immediate « ooh this looks fun ». Strong cheap conversion win at the top of the funnel.
+
+**Two implementation paths depending on [[G31]] timing:**
+
+#### G94a — Lightweight 2D variant (ships first, no dependencies)
+
+Use the existing 2D dice rendering. A click/tap triggers:
+1. Brief shake animation (~600ms): CSS keyframes rotating each die randomly ±15°.
+2. Roll animation (~400ms): dice flicker through 8-10 random faces (fast cycling).
+3. Settle: each die lands on a uniformly-random face 1-6.
+4. Combo banner appears below for ~3s: « 4-2-1 · **421** » or « 1-1-3 · **113** · 3 fiches ».
+
+**Scope:**
+- New `HomepageDiceRoller.jsx` component replacing the static hero dice.
+- Click handler on the dice container (also fires on `Enter`/`Space` for keyboard accessibility).
+- Random face generation client-side (`Math.floor(Math.random()*6)+1` × 3 — no backend hit, demo only).
+- Combo classification: port `classify()` from `app/game/logic.py` to JS as `frontend/src/utils/classify.js`. Returns the same `{name, fiches}` shape so the banner copy matches what players see in-game.
+- Combo banner: small ribbon below the dice, fades in/out with the bistro accent (rouge for 421 / 111 / 11x, brass for triples + suites, ink-mute for basics).
+- Throttle: max one roll per ~600ms (ignore repeated taps mid-animation).
+- Accessibility: dice container gets `role="button"` + `tabIndex=0` + `aria-label="Lancer les dés (cliquez ou appuyez)"`. Respects `prefers-reduced-motion`: skip the shake + roll animations, just instant-swap values + fade in the banner.
+
+**Acceptance:**
+- Visitor lands on `/` → sees the three dice with a subtle « tap me » affordance (small pulse animation on first viewport entry).
+- Click anywhere on the dice area → shake → tumble → settle → combo banner appears.
+- Different combos render with appropriate styling (421 gets the rouge accent + chip count; basic figures get the muted ink color).
+- Mobile tap works identically to desktop click.
+- `prefers-reduced-motion`: dice swap instantly without animation; banner still appears.
+
+**Effort:** ~half day. Pure frontend, no backend, no schema changes.
+
+#### G94b — Upgrade to 3D once [[G31]] ships
+
+After [[G31a]] lands (three.js + cannon-es 3D dice prototype), replace the homepage 2D dice with the same component. The 3D physics + sound effects make the homepage demo even more impressive. Same interaction contract (tap → roll → settle → banner), different rendering.
+
+**Scope:**
+- Reuse the `<Dice3D>` component from G31's prototype, configure with a smaller "showcase" camera + table surface.
+- Trigger uses the same physics throw — random initial velocity + spin, settles via cannon-es.
+- Bundle: lazy-load three.js chunk on first interaction (don't pay the bundle cost for users who never scroll to the dice). For users who DO tap, the small loading delay (~200-400ms first time) is masked behind the shake animation.
+
+**Acceptance:** Same UX as G94a but with the 3D dice rendering, optional sound (respecting user mute preference).
+
+**Effort:** ~half day on top of G31a.
+
+**Dependencies:**
+- G94a: none — can ship anytime as a polish item.
+- G94b: [[G31a]] (three.js + cannon-es prototype must exist).
+
+**Recommendation:** Ship G94a after [[G77]] launch as a polish PR (1 evening of work, immediate visible value to new visitors). Upgrade to G94b whenever G31 lands.
 
 ### G61. Right-rail panels become collapsible "tabs"
 **Why:** Reported during playtest. The right `<aside>` today is a fixed layout: collapsible **Journal** on top, *always-visible* **Combo hierarchy** at the bottom. The user wants the hierarchy to collapse the same way the journal does — and more broadly, they want the right rail to behave like a small set of *stackable tabs* (Journal · Hierarchy · later: Chat) that each open/close independently. This sets up the eventual chat slot ([[G59]]) without ripping out the existing panels.
