@@ -814,9 +814,7 @@ def _start_new_partie(game: "Game") -> None:
     )
     game.phase = GamePhase.CHARGE
 
-    starter_name = next(
-        (p.name for p in game.players if p.id == game.round_starter_id), ""
-    )
+    starter_name = next((p.name for p in game.players if p.id == game.round_starter_id), "")
     _log(
         game,
         "log_new_partie_start",

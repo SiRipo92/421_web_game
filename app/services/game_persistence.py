@@ -193,9 +193,7 @@ async def _write(game: Game, db: AsyncSession) -> None:
 
     # ELO update via pairwise survivor-vs-loser. Need loser's stats row to
     # compute K-factor; skip if loser is unregistered.
-    loser_uid = (
-        uuid.UUID(game.user_ids[loser_id_str]) if game.user_ids.get(loser_id_str) else None
-    )
+    loser_uid = uuid.UUID(game.user_ids[loser_id_str]) if game.user_ids.get(loser_id_str) else None
     loser_stats = stats_rows.get(loser_uid) if loser_uid else None
 
     survivor_inputs: list[tuple[int, int]] = []

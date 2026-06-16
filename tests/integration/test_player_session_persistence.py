@@ -55,9 +55,7 @@ async def test_persist_player_session_resets_streak(client, make_user):
 
     # Seed a current_streak directly (simulating prior survivals)
     async with AsyncSessionLocal() as db:
-        result = await db.execute(
-            select(PlayerStats).where(PlayerStats.user_id == user_id)
-        )
+        result = await db.execute(select(PlayerStats).where(PlayerStats.user_id == user_id))
         stats = result.scalar_one()
         stats.current_streak = 3
         stats.longest_streak = 3
