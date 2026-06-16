@@ -201,13 +201,31 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 - Profile page: notifications bell with unread count + a panel that lists recent.
 - First populators: G28 (friends) and G29 (invites).
 
-### G28. Friends / follow system
-**Why:** Captured for future. User wants the ability to follow other accounts to see what they're up to and quickly invite them to a game.
-**Scope (sketch only):**
-- Table `Follow(follower_id, followee_id, created_at)`. Both-direction or one-way? Spec'd as "follow" (one-way), but a mutual-follow shortcut might be nice (think "friends").
-- Endpoints: `POST /api/follow/{user_id}`, `DELETE /api/follow/{user_id}`, `GET /api/me/following`, `GET /api/me/followers`.
-- UI: follow button on `/profile/{username}`; followers/following count + list on own profile.
-- Privacy: respect a future `User.profile_visibility` setting (defer).
+### G28. Follow system + presence indicators
+**Why:** Asymmetric follow (Sierra follows June; June doesn't auto-follow back). Like Twitter/Instagram, not Facebook friends. Combined with a presence layer ([[G88]]), this lets users see who's online, who's currently in a game, and when offline followers were last seen — the foundation for "join my friend's game" without needing an invite-accept dance.
+
+**Scope:**
+- **Schema:** `Follow(follower_id UUID FK users, followee_id UUID FK users, created_at)`, PK `(follower_id, followee_id)`, both columns with `ON DELETE CASCADE`. No self-follows (CHECK constraint).
+- **REST endpoints:**
+    * `POST /api/follow/{user_id}` — start following (201 idempotent on existing follow)
+    * `DELETE /api/follow/{user_id}` — unfollow (204 idempotent if not following)
+    * `GET /api/me/following` — paginated list of who I follow (returns `{user, presence}` joined with [[G88]])
+    * `GET /api/me/followers` — paginated list of who follows me
+    * `GET /api/users/{username}/followers` + `/following` — public lists (defer privacy controls)
+- **UI:**
+    * Follow button on `/profile/{username}` — toggles state, optimistic update
+    * Followers / Following counts on own profile (clickable → drawer with the list)
+    * Following list rows show: avatar + username + presence indicator (green dot if online, "il y a 3h" / "yesterday" / "21 mai 2026" depending on staleness, OR "en partie · room XXXX" with a join-link when they're in a public room)
+    * Followers list rows show: avatar + username + a follow-back button if not yet mutual
+- **No notification on follow** (defer to [[G27]] — for now it's silent; mutual-follow could trigger one later)
+- **Privacy: defer.** No private profiles in v1.
+
+**Acceptance:**
+- Sierra clicks « Suivre » on June's profile → row appears in `Follow` table → June's profile shows updated follower count
+- Sierra opens her « Following » list → sees June with a green online dot (if June is connected) or "vu(e) il y a 2h" if offline
+- June is currently in public room `ABC123` → Sierra's following list shows « June · en partie » with a clickable join link
+
+**Dependencies:** [[G88]] (presence tracking — provides the online/last_seen/in-game data this UI renders).
 
 ### G31. 3D dice animation + organized combo banner + sound
 **Why:** The current dice are flat 2D images that snap to a new value with no animation, and the player has to scan the values and remember the hierarchy table to know what they rolled (was 1-1-3 worth 3 chips? a basic? 11x?). User wants a more immersive feel — visible dice tumble, a sorted result banner that names the combo, and a "shake" sound before the throw so it feels like real dice in a hand.
@@ -516,30 +534,50 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 **Acceptance:** A player goes AFK, the bot plays several turns, the player returns and clicks roll. A « ↩ {name} est de retour à la table. » card appears in the ticker. The G2 in-grace path still emits `log_bot_handback` for its narrower case.
 **Dependencies:** None.
 
-### G59. Restructure in-game info surfaces — gameplay feed left, chat right
-**Why:** Captured for future. Today the in-game UI has two information panels: a **right-side journal** with every log event (useful for debugging, but visually heavy) and a **left-side ticker** (the « En Direct » feed, currently showing only filtered headlines). When chat ships ([[item 8]] + [[G34]] + [[G36]] + [[G37]]), it needs a permanent home, and the right-side journal is the most natural slot — it's already a scrolling text column. But losing the journal means the left ticker must absorb *all* essential gameplay information, becoming the single source of truth for what's happening at the table.
-**Vision (target end-state):**
-- **Left ticker = full gameplay feed.** Replaces the current minimal headline filter with a richer per-cycle stream:
-  - Round start: « Tour 4 · Sierra donne le rythme »
-  - Each player's submitted play, in turn order starting with the rhythm-setter:
-    - « Sierra a joué un **421 en 3 lancers** » (the rhythm-setter; explicit throw count)
-    - « June a joué **1-1-4 (114)** · 114 to beat for 8 fiches » (a follower, with the "score to beat / chips in play" rolled in)
-  - Tie detection: « Égalité entre Sierra et June à 114 — départage en cours »
-  - Tiebreak throws as they land: « June (départage) : 632 → 1f »
-  - Cycle resolution: « June prend 8 fiches · Banque : 3 » / « Sierra donne 2 fiches à June »
-  - Phase transitions, sit-outs, manchés, round points — all surfaced here.
-  - "Score to beat" line auto-updates as new plays push the bar.
-- **Right column = chat (future).** Replaces the current right-side journal once chat ships. Same width, same scroll behavior; users gain real-time chat with their tablemates. Moderation (G34 / G36 / G37) gates message visibility.
-- **Debug/dev access to the raw log.** The user values the raw event log for debugging — preserve it via a `/devtools` route or a host-only "Show event log" toggle that opens an overlay. Not in the default play layout.
-**Scope (sketch only — not for immediate implementation):**
-- Backend: expand HEADLINE_KEYS in `CommentaryTicker.jsx` toward "include everything that matters" rather than "include only the highlights." Likely additions: `log_turn`, `log_charge_takes`, `log_decharge_gives`, `log_round_start`. Drop the dedup-collapse for non-AFK events (each play is its own announcement).
-- Backend: emit a new `log_score_to_beat` event whenever a play raises the highest rank in `current_round_plays`, so the ticker can render the "X to beat for Y fiches" line without re-computing client-side.
-- Frontend: a new card variant in `TickerCard` for player plays — more visual presence (small dice glyph + combo name + chip outcome). The "headline" cards (manché, pool empty, tiebreak start) keep their existing accent treatment.
-- Frontend: right-side `<aside>` swaps `<LogPanel>` → `<ChatPanel>` once chat ships. Until then, leave the journal in place as the dev/debug view (or add the host-only toggle).
-- Grid: today is `260px 1fr 320px`. With chat ascending to first-class status, may need to widen to `320px 1fr 380px` so both side rails have breathing room.
-- **Coordinate with [[G50]]:** the ticker dedup logic stays for AFK events (one card per session) but doesn't apply to plays — each play is unique by design.
-**Acceptance:** A player can follow the entire game without ever looking at the right column. The ticker tells them whose turn it is, what each played, the running score-to-beat, and the cycle outcome. When chat ships, the right column becomes the chat surface.
-**Dependencies:** [[item 8]] (chat), [[G34]] (AI moderation), [[G36]] (rate-limiter), [[G37]] (peer reporting) — all need to land before the right-column flip. The ticker enrichment can ship first, independent of chat, as a pure UX upgrade.
+### G59. Restructure in-game info surfaces — gameplay feed left, chat as additional right-rail panel
+**Why:** The in-game UI today has two information surfaces: a **right-side journal** logging every event (useful for debugging + neat for following the game) and a **left-side ticker** (the « En Direct » feed showing filtered headlines). The journal stays — it's where everyone follows the game cleanly. Chat ([[G89]]) adds **as a third panel** in the right rail alongside the journal and the combo hierarchy, surfaced via [[G61]]'s collapsible tabs so the page doesn't get heavier — users open and close panels independently. The left ticker is also enriched independently as a pure UX upgrade so the play-by-play is more legible at a glance.
+
+**Two independent improvements, can ship separately:**
+
+#### 59a — Left ticker enrichment (no dependency on chat)
+
+Today the ticker shows only filtered "headline" events. Expand it to the full gameplay feed:
+- Round start: « Tour 4 · Sierra donne le rythme »
+- Each player's submitted play, in turn order:
+    * « Sierra a joué un **421 en 3 lancers** » (the rhythm-setter; explicit throw count)
+    * « June a joué **1-1-4 (114)** · 114 to beat for 8 fiches » (a follower, with score-to-beat rolled in)
+- Tie detection: « Égalité entre Sierra et June à 114 — départage en cours »
+- Tiebreak throws: « June (départage) : 632 → 1f »
+- Cycle resolution: « June prend 8 fiches · Banque : 3 »
+- Phase transitions, sit-outs, manchés, round points — all surfaced here.
+- "Score to beat" auto-updates as new plays push the bar.
+
+**Scope:**
+- Backend: expand `HEADLINE_KEYS` in `CommentaryTicker.jsx` consumer logic. Add: `log_turn`, `log_charge_takes`, `log_decharge_gives`, `log_round_start`. Drop dedup-collapse for non-AFK events (each play is its own announcement).
+- Backend: emit a new `log_score_to_beat` event whenever a play raises the rank in `current_round_plays`, so the ticker renders the "X to beat for Y fiches" line without client-side recomputation.
+- Frontend: new card variant in `TickerCard` for player plays — small dice glyph + combo name + chip outcome. Headline cards (manché, pool empty, tiebreak start) keep their accent treatment.
+- **Coordinate with [[G50]]:** ticker dedup stays for AFK events (one card per session) but doesn't apply to plays — each play is unique by design.
+
+**Acceptance:** A player can follow the entire game from the ticker alone, without looking at the journal. The ticker tells them whose turn it is, what each played, the running score-to-beat, and the cycle outcome.
+
+#### 59b — Right rail becomes a three-panel surface (depends on [[G61]] + [[G89]])
+
+The right `<aside>` currently has Journal + Combo Hierarchy. Add Chat as a third collapsible panel via [[G61]]'s tab pattern.
+
+**Scope:**
+- Right rail panels (after [[G61]] tabs): **Journal** (existing, collapsible), **Hiérarchie** (existing, becomes collapsible via G61), **Chat** (new — surface of [[G89]]).
+- Each panel can be open or collapsed independently; only-open panels take vertical space. User picks what's visible per their preference (persisted to localStorage).
+- Default state per user: Journal **collapsed** on mount (since the ticker now carries most of the info per 59a); Hiérarchie + Chat **expanded** by default.
+- Grid: today is `260px 1fr 320px`. With chat first-class, widen to `320px 1fr 380px` so both rails have breathing room.
+- Mobile (< 768px): right rail collapses to a bottom drawer with tab chips at the top — same Journal / Hiérarchie / Chat options. Tap a chip → drawer slides up.
+- Notification cue: when chat is collapsed and a new message arrives, the chat tab chip pulses + shows an unread count.
+
+**Acceptance:**
+- A player can have only Hiérarchie open and follow the game purely via the left ticker (59a).
+- A player can have Journal + Chat both open, hidden Hiérarchie, and chat with tablemates while still seeing the full event log.
+- Mobile: tap chat chip → drawer slides up with full chat history → tap away → drawer closes.
+
+**Dependencies:** [[G61]] collapsible tabs (must land first — provides the panel host); [[G89]] chat backend (provides the data the panel shows); [[G34]] + [[G36]] + [[G37]] (moderation — content gating).
 
 ### G60. Persist the game session across page refreshes
 **Why:** Reported during playtest. Refreshing the page mid-game drops the player back to an empty home/lobby instead of resuming their seat at the table. The backend already keeps the `Game` in-memory (it survives any single client refresh; the WS just closes and the player's `connected` flips False until reconnect), so the gap is purely client-side: the frontend doesn't remember which game it was just in, so after refresh it has nowhere to navigate.
@@ -1027,6 +1065,308 @@ Promote tickets from "random slugs in email" to a real `ContactTicket(id, ref, f
 **Effort:** ~half-day to 1 day per skill. Build the highest-ROI ones first (`/triage-from-email`, `/analyze-sentry`).
 
 **Dependencies:** None — these run locally against your dev environment. Sentry-using skills need the Sentry API token in `.env`.
+
+### G87. Spectator mode in game rooms
+**Why:** Today a game room only knows "players" — anyone connecting either takes a seat or fails. The user wants followers (G28) to be able to watch their friend's game without taking a seat. Also useful for: spectating a match before deciding to join the next one, tournament-style audiences for a competitive room, learning the game by watching others. Requires careful information-hiding so spectators see the public game state (whose turn, dice on piste, score-to-beat, journal) but **not** private info (other players' kept dice mid-throw, anyone's strategy hints).
+
+**Scope:**
+- **WS handler refactor (`app/game/ws.py`):**
+    * Connection identifies itself with a `role` param on connect: `player` (default, must be in `game.players`) or `spectator` (joins read-only).
+    * Spectator connections are tracked in a separate `game.spectators: list[WSConnection]` set, not in `game.players`.
+    * Per-game cap: `MAX_SPECTATORS_PER_ROOM = 10` (configurable via env `MAX_SPECTATORS_PER_ROOM`). New spectators beyond the cap get rejected with `{error: "room_spectator_full"}`.
+    * Broadcast logic gains a `to: 'all' | 'players' | 'spectators'` parameter. Most game-state broadcasts go to `'all'`. Per-player private state (your dice, your turn options) goes to `'players'` (filtered by player_id).
+    * Spectators can NOT send game actions (`roll`, `keep`, `validate`, etc.) — server rejects with `{error: "spectator_no_action"}`.
+    * Spectators CAN send chat messages once [[G89]] ships (chat is public to the room).
+- **Game state filter for spectators:**
+    * Spectator-view payload omits: any player's `kept` dice during their turn (until validation), private rhythm-setter hints, AFK timer countdowns for OTHER players.
+    * Spectator-view includes: all players' validated combos, the running score-to-beat, the journal feed, current turn / current cycle, all phase transitions.
+- **Frontend:**
+    * `/game/:gameId?role=spectator` route (existing `/game/:gameId` defaults to `?role=player` if pid present).
+    * Lobby + Waiting room: « Regarder cette partie » button on rooms that are in-progress (PLAYING phase, not waiting).
+    * Game view in spectator mode: action bar hidden, "spectating" badge in top bar, ability to chat (if [[G89]] shipped), ability to leave / convert-to-player-if-room-has-empty-seat.
+    * **Convert to player:** if a player leaves mid-game and a seat opens, spectators see a « Prendre une place » button. Click → backend swaps `role: 'spectator' → 'player'`, assigns them to the empty seat. Requires room to allow mid-game joins (existing `allow_late_join` setting).
+- **Privacy / fair-play guard:** if a spectator is in the same room as players from a friend-group ranking competition, log it in the audit feed so cheating-by-coaching can be retroactively detected. (Tracking only — no enforcement.)
+
+**Acceptance:**
+- Sierra is playing in room `ABC123`. June (follower) clicks « Regarder » on Sierra's profile → joins as spectator → sees all of Sierra's validated plays + the score-to-beat + the journal, but NOT what dice Sierra has kept on her current turn before validating.
+- June tries to send a `roll` action → backend returns `{error: "spectator_no_action"}`.
+- Sierra's table has a player drop out → June sees « Prendre une place » → click → June is now seated as a player in the next cycle.
+
+**Dependencies:** [[G88]] (presence — to know who's currently in which room and surface the « Regarder » CTA); [[G89]] (optional — spectator chat).
+
+### G88. User presence tracking — online status + last-seen + in-game
+**Why:** Foundation infrastructure for [[G28]] (online dots on follow list), [[G90]] (admin "players online" filter), [[G87]] (spectator « Regarder » CTAs), [[G29]] (don't email-invite someone who's already online — DM them instead). All these features ask "is user X currently online, and if so where?" — better to build one presence layer than scatter the logic across four features.
+
+**Scope:**
+- **Schema additions to `User`:**
+    * `last_seen_at TIMESTAMPTZ` — updated on any authenticated request (auth WS connect, REST hits with valid JWT). Indexed for the "last seen" query pattern.
+- **In-memory presence store (single-instance):**
+    * `app/services/presence.py` exports a `PresenceTracker` singleton.
+    * Keys: `user_id → {status: 'online' | 'offline', current_room_id: str | None, last_seen_at}`.
+    * Updated on: WS connect (status → online), WS disconnect (status → offline, persist `last_seen_at` to DB), room join (current_room_id), room leave (current_room_id → None).
+    * Exposes: `get_presence(user_id)`, `is_online(user_id)`, `users_in_room(room_id)`, `online_users()`, `subscribe(user_id, callback)` — for WS push.
+- **WS push channel:** when a watched user's presence changes, push to followers' open auth WS connections. Subscribers are gated (you can only subscribe to users you follow). Avoids broadcasting presence globally; only interested parties get updates.
+- **REST endpoints (used by G28 / G90):**
+    * `GET /api/presence/{user_id}` — returns `{status, current_room_id, last_seen_at}` if you follow them OR if you're admin.
+    * `GET /api/admin/presence/online` (admin-only) — paginated list of currently-online users.
+- **Production note:** in-process map works for single-backend ([[G77]] phase 1). When scaling to multiple instances ([[G78]] Redis), replace the in-memory map with a Redis-backed presence store. Same interface, different backend. Captured here so the abstraction is clean from day 1.
+- **Privacy:** `last_seen_at` precision rounded to the nearest 5 minutes when shown to non-mutual-followers to reduce stalking signal. Admin sees exact timestamp.
+
+**Acceptance:**
+- Sierra opens her browser → backend marks her `presence.status='online'`.
+- June (who follows Sierra) has her browser open → her followers list updates Sierra's row to show the green dot in real-time (via WS push, no polling).
+- Sierra closes her browser → after a 30s grace window (handles refresh / brief disconnect), `last_seen_at` is persisted to DB and her presence flips to offline → June sees the row update to "vu(e) à l'instant".
+- Admin opens `/admin` → "Players online" panel shows count + clickable list of current online users.
+
+**Dependencies:** [[G77]] eventually (auth WS infrastructure exists; in-memory map is fine for single-instance). [[G28]] consumes this. [[G87]] + [[G90]] consume this.
+
+### G89. Chat backend implementation
+**Why:** [[G59]] sets up the *UI* for chat (right-rail panel via [[G61]] tabs). This item is the *backend*: the WS message protocol, the per-room chat message stream, rate-limiting hooks, the persistence policy decision. Independent of moderation ([[G34]] / [[G36]] / [[G37]]) which add safety layers on top.
+
+**Scope:**
+- **WS message type:** new payload kind `{type: 'chat', text: string, ts: iso8601}` sent from client. Server broadcasts `{type: 'chat', sender_id, sender_name, text, ts, message_id (uuid)}` to all room members + spectators ([[G87]]).
+- **Per-message validation:**
+    * Length ≤ 280 chars (Twitter-style); reject longer with `{error: "chat_message_too_long"}`.
+    * Strip leading/trailing whitespace; reject empty after strip.
+    * No URLs in v1 (regex-blocked) — anti-phishing for early users. Revisit after [[G34]] AI moderation can score links.
+    * Server attaches `sender_id`, `sender_name` from authenticated WS context; client cannot spoof.
+- **Persistence policy: ephemeral.** Messages live in `game.chat_history: list[dict]` (in-memory, cap 200 messages per room). When the room dissolves, history is gone. Rationale: reduces RGPD surface area (no chat retention), simplifies moderation, matches the « bistro conversation » feel — what's said at the table stays at the table. Moderation audit log ([[G34]]) does persist message + verdict if a message gets flagged (audit only, not searchable history).
+- **Late-joiner / spectator history:** spectators + late-joining players receive the most recent 50 messages from `chat_history` on join (so they catch up without seeing a wall of empty chat).
+- **Per-room rate limit (hook for [[G36]]):** stub in v1. Default: `MAX_CHAT_MESSAGES_PER_MINUTE_PER_USER = 10` (env var). Exceeding → `{error: "chat_rate_limited"}` + short cooldown. [[G36]] replaces this with the proper rate-limiter later.
+- **Moderation hooks (placeholders, no enforcement yet):**
+    * Before broadcast: call `await moderate_chat(sender_id, text)` — stub returns `("allow", None)`. [[G34]] replaces stub with AI classifier returning `("allow" | "block" | "flag", reason)`.
+    * Blocked messages: not broadcast; sender gets `{error: "chat_message_blocked", reason}`; written to audit log.
+    * Flagged messages: broadcast but logged to moderation inbox ([[G39]]).
+- **Banned users:** existing `User.chat_banned_until` blocks send (already wired in [[G38]]); enforcement check in WS handler before broadcast.
+- **Frontend (the data layer — UI is [[G59b]]):**
+    * New hook `useChat(roomId, ws)` returns `{messages, send, status}`.
+    * Composes onto existing WS connection — no separate socket.
+    * Optimistic send (show locally before server ack); rollback if server rejects.
+
+**Acceptance:**
+- Two players in a room. Player A types « bien joué » → presses Enter → message appears in their own chat panel instantly (optimistic) → server ack → message appears in Player B's chat panel.
+- A spectator joins → sees last 50 messages from the room → can send a message.
+- A player sends 11 messages in 60 seconds → 11th gets `chat_rate_limited` toast.
+- A chat-banned user attempts to send → server rejects, banned-message toast shown.
+- Room dissolves → next room opened with same code has empty chat history (ephemeral).
+
+**Dependencies:** [[G87]] (spectator broadcast paths). Hooks for [[G34]] [[G36]] [[G37]] [[G39]] (moderation surfaces).
+
+### G90. Admin dashboard full build — pre-launch must-ship
+**Why:** Today `frontend/src/pages/AdminDashboard.jsx` is a skeleton with `PanelStub` placeholders. To launch, the user needs working admin tools: search users, ban/unban, change roles, delete accounts (RGPD right-to-be-forgotten + admin-initiated), see who's online, review the audit feed. Solo operator — needs to be ergonomic, not a 20-click maze.
+
+**Scope:**
+- **User list view (default landing):**
+    * Paginated (20 per page), sortable by `created_at`, `username`, `email`, `parties_played` ([[G91]]), `role`, `last_seen_at` ([[G88]]).
+    * Filters (URL-encoded so admin views are bookmarkable):
+        * Free-text search on `username` OR `email` (case-insensitive partial match).
+        * Role filter: all / player / moderator / admin.
+        * Status filter: all / active / banned / chat-banned / deleted.
+        * **Online filter** (NEW): show only users with `presence.status='online'` ([[G88]] dependency). When active, shows count: « 12 joueurs en ligne ».
+- **User detail panel (click row → side panel or full-page):**
+    * Profile data: avatar, username, email, birthdate, lang_pref, role, created_at.
+    * Stats ([[G91]]): parties_played, parties_lost, parties_survived, survival_rate, manches_lost / manches_played, current_streak, longest_streak, current ELO + badge.
+    * Moderation history: strike_count, current ban (banned_until + ban_reason), current chat-ban, role history from `GdprAuditLog`.
+    * Recent activity: last 5 game sessions (from `GamePlayer`), last 10 audit-log events.
+- **Action buttons (with confirmations):**
+    * **Change role** → dropdown (player / moderator / admin), confirm modal. Uses existing `PATCH /api/admin/users/{user_id}/role`. Fires audit event.
+    * **Ban** → modal: duration radio (1d / 7d / 30d / permanent), optional reason text. Sets `banned_until` + `ban_reason`. Fires `ban_notice` email ([[G81]] sender, template from G76). Records audit event.
+    * **Unban** → confirm modal. Clears `banned_until` + `ban_reason`. Fires « ban lifted » email (new template, similar shape to ban_notice). Audit event.
+    * **Chat-ban** → modal: duration radio (1h / 24h / 7d), reason. Sets `chat_banned_until`. Audit event.
+    * **Delete account** → **type-username-to-confirm modal** (GitHub-style — prevents accidents). On confirm: soft-delete (`User.deleted_at = now()`), fires `account_deleted` email (template from G76 stub). Anonymizes `username` to `deleted_user_<uuid>` and clears email field after the email sends. Cron hard-deletes after 30-day grace ([[G70]] pipeline).
+- **Summary widgets at top of dashboard:**
+    * Total users (active / banned / deleted breakdown)
+    * Online now ([[G88]])
+    * Pending moderation appeals ([[G81]] once shipped)
+    * Recent admin actions (last 5 — who banned whom, who deleted whom, etc.)
+- **Mode toggle in TopBar:**
+    * When user has `role` in (admin, moderator) AND is on an `/admin/*` route, TopBar shows « Quitter le mode admin » button → navigates to `/profile`.
+    * When admin user is on any non-admin route, TopBar shows « Mode admin » button → navigates to `/admin`.
+    * Removes the trap of "I clicked admin and now I'm stuck here".
+- **Moderation audit feed page** (`/admin/audit`):
+    * Reverse-chrono list of `GdprAuditLog` events with admin actions.
+    * Filter by event type, actor, target user, date range.
+- **Permissions:**
+    * Moderators see most of this but cannot delete accounts or change roles (admin-only).
+    * Backend already enforces via `require_admin` / `require_moderator`; frontend hides buttons when not allowed.
+
+**Acceptance:**
+- Admin opens `/admin` → sees user list, total counts, online count.
+- Admin types « ripoche » in search → sees the one matching row.
+- Admin clicks row → sees full profile + stats + history.
+- Admin clicks « Bannir » → modal → picks 7 days + reason "spam" → confirms → user's `banned_until` is set, audit row written, ban_notice email arrives in user's inbox within 30s.
+- Admin clicks « Supprimer le compte » → modal demands typing username exactly → confirms → user soft-deleted, account_deleted email fires, row visible in deleted-status filter for 30 days.
+- Admin clicks « Mode admin » → on player view → click « Quitter le mode admin » → back to player profile.
+
+**Dependencies:** [[G88]] (online filter + counts); [[G91]] (the stats fields rendered); [[G76]] ✅ (ban_notice + account_deleted templates exist as stubs).
+
+**Effort:** ~5 days. **Launch-blocker.**
+
+### G91. Stats redesign — partie / manche semantics + survival-based ELO
+**Why:** Current PlayerStats columns are `wins` / `losses` — wrong vocabulary for 421. The game's objective isn't to "win" but to NOT lose: the one who ends up with all the fiches (or 0, depending on phase) is the loser; everyone else is a survivor. The current Profile.jsx also references fields that don't exist (`streak`, `top_combos`, `recent_games`) — they always render as 0/empty. And ELO never moves in practice (TheWitch has played 9 games, ELO still 1200) — either the write path is broken or the calc only runs in code paths that don't fire. Pre-launch this needs to be made coherent so users see meaningful stats from day one.
+
+**Scope (in execution order — never breaks the API):**
+
+**Phase A — Schema (Alembic migration):**
+- Rename `PlayerStats.wins` → `parties_survived`
+- Rename `PlayerStats.losses` → `parties_lost`
+- (Keep `games_played` as-is; label updates in UI to « parties »)
+- Add:
+    * `manches_played INT DEFAULT 0`
+    * `manches_lost INT DEFAULT 0`
+    * `current_streak INT DEFAULT 0` (parties survived in a row)
+    * `longest_streak INT DEFAULT 0`
+- Migration also resets all existing rows to zero (since current data is muddy — see "Reset" below).
+
+**Phase B — Write paths (`app/services/game_persistence.py` + `app/services/elo.py`):**
+- On partie completion:
+    * Increment `parties_played` for everyone.
+    * For the loser: `parties_lost += 1`, `current_streak = 0`.
+    * For survivors: `parties_survived += 1`, `current_streak += 1`, `longest_streak = max(longest_streak, current_streak)`.
+- On every manche resolution:
+    * Increment `manches_played` for active participants.
+    * For the player who took fiches in CHARGE / who had to redistribute in DECHARGE: `manches_lost += 1`.
+- **ELO rewrite** in `app/services/elo.py`:
+    * Survival-based, weighted by table size. Surviving a 5-player game > surviving a 2-player game (more competition).
+    * Use a standard K-factor formula adapted: each player's *expected survival rate* = `(N-1)/N` where N = table size. If you survive, gain = K × (1 - expected). If you lose, loss = K × expected. K = 32 for ≤ 30 parties, K = 24 for 30+ parties (slower drift once established).
+    * Loser's ELO loss = sum of survivors' ELO gains × 0.95 (slight system drain to prevent inflation).
+    * Keep badge thresholds: `< 800 Débutant`, `800-1200 Amateur`, `1200-1600 Confirmé`, `1600-2000 Expert`, `2000+ Maître`.
+
+**Phase C — Reset existing data:**
+- Migration step resets all PlayerStats to defaults (`elo=1200`, all counts=0, streaks=0).
+- All historical GamePlayer rows stay (game history preserved), but the *aggregated* PlayerStats start clean from launch.
+- Rationale: existing rows have wrong semantics (wins=9 / losses=0 was actually "completions=9, finals-as-non-loser=9 only by accident"). Reset gives users a clean « new ranking system » story at launch.
+
+**Phase D — Read APIs:**
+- Update `/api/me/stats` to return the new shape:
+    * `{parties_played, parties_lost, parties_survived, survival_rate, manches_played, manches_lost, manche_resilience, current_streak, longest_streak, elo, badge}`
+- Compute derived fields on the server: `survival_rate = parties_survived / max(parties_played, 1)`, `manche_resilience = 1 - (manches_lost / max(manches_played, 1))`.
+- Update `/api/rankings` to sort by ELO (default), with secondary sort options for survival_rate or manche_resilience.
+
+**Phase E — UI:**
+- **`Profile.jsx`:**
+    * Replace `wins` / `losses` UI cards with: « Parties survécues », « Parties perdues », « Taux de survie ».
+    * Add « Résistance par manche » card (manche_resilience as percentage).
+    * Keep streak cards (now backed by real data).
+    * Remove the placeholder `top_combos` and `recent_games` sections for v1 (these need a separate aggregation pass — capture as G91 follow-up if you want them).
+- **`Rankings.jsx`:** Update column headers. Add sort-by-survival-rate option.
+- **i18n strings:** new keys for « partie », « manche », « survie », « résistance », badge labels stay (already exist).
+
+**Acceptance:**
+- After migration: all users have `parties_played=0, parties_survived=0, parties_lost=0, manches_played=0, manches_lost=0, current_streak=0, longest_streak=0, elo=1200`.
+- A player plays one partie in a 3-player table and survives. After: `parties_played=1, parties_survived=1, current_streak=1, longest_streak=1, elo ≈ 1211` (gained ~11 from a 33% expected survival rate).
+- Profile shows the new fields with correct values, no `top_combos` / `recent_games` placeholders.
+- A different player loses that same partie → `parties_played=1, parties_lost=1, current_streak=0, elo ≈ 1178`.
+
+**Dependencies:** None — pure backend + DB work. UI work follows once API is updated.
+
+**Effort:** ~5 days. **Launch-blocker.**
+
+### G92. Pre-launch security audit
+**Why:** Before exposing this to public traffic, the user wants a structured audit pass against common web-app vulnerabilities + a written punch list of fixes. Not a "we ran a scanner once" — a deliberate review of authentication, authorization, dependency hygiene, secrets management, rate-limit coverage, header hardening, RGPD posture, and incident-response preparedness.
+
+**Scope (audit + fix):**
+
+#### Dependency hygiene
+- `pip-audit` against `requirements.txt` → review every CVE, upgrade or document risk.
+- `npm audit` against `frontend/package-lock.json` → same.
+- Add both to CI as a non-blocking job (alerts but doesn't fail builds).
+
+#### Secrets management
+- Audit `.env.example` vs `.env` to ensure no secret has been accidentally committed historically (run `git log -p -S "xkeysib"` etc. for each secret prefix).
+- Confirm Sentry doesn't capture request bodies / Authorization headers (review `sentry_sdk.init` config).
+- Rotate `SECRET_KEY` for prod (different from dev) — must invalidate all existing JWTs cleanly.
+- Document secret-rotation runbook in `docs/SECURITY.md` (new file).
+
+#### Auth + session
+- Verify JWT signature algorithm is HS256 (no `alg: none` acceptance bug).
+- Verify JWT expiry is enforced server-side (not just claimed).
+- Confirm password storage is bcrypt with cost factor ≥ 12.
+- Test: replay an expired token → rejected with 401.
+- Test: forge a token with the wrong secret → rejected.
+- Confirm `/auth/reset-password` invalidates all existing sessions for the user (not implemented yet — add).
+- Confirm OAuth (Google) path validates the audience claim against `GOOGLE_CLIENT_ID`.
+- Session timeout: 30 min default, 30 days with remember_me — verify both enforced.
+
+#### Authorization
+- Every endpoint reviewed for proper `Depends(get_current_user)` / `require_admin` / `require_moderator` gating.
+- Confirm `/api/admin/*` endpoints return 403 (not 404) for non-admins — current behavior may be 404 from FastAPI's routing, which can leak existence.
+- Confirm WS connections re-validate JWT on every action (not just on connect).
+
+#### Rate limiting
+- Verify slowapi limits on: `/auth/register` (5/min), `/auth/login` (10/min), `/auth/forgot-password` (3/min), `/api/contact` (3/hr).
+- Verify limits are per-IP, with X-Forwarded-For trust configured for Fly.io proxy.
+- Add limit on `POST /api/follow/{user_id}` ([[G28]]) — 30/min to prevent follow-bombing.
+- Add limit on WS `chat` messages ([[G89]]) — already in scope.
+
+#### Input validation
+- XSS audit: every place that renders user-supplied data (username, profile bio if any, chat messages once shipped) — confirm React's default escaping is doing the work + no `dangerouslySetInnerHTML` slipped in.
+- SQL injection: SQLAlchemy ORM mostly safe by construction — confirm no raw-string concatenation in any `text()` call.
+- HTML email injection: confirm Jinja autoescape is ON for all email templates (re-verify after G76 — it was set in `Environment(autoescape=...)`).
+- CSV injection: if any admin export ([[G90]]) writes CSV, prefix `=`/`+`/`-`/`@` cells with `'`.
+
+#### Headers + transport
+- HSTS: `Strict-Transport-Security: max-age=31536000; includeSubDomains` — verify Cloudflare sets at proxy edge (probably yes).
+- CSP: write a `Content-Security-Policy` that blocks `'unsafe-inline'` script (audit any inline `<script>` first); allow `'self'` + google fonts + Sentry CDN.
+- X-Frame-Options: `DENY` (prevents clickjacking).
+- X-Content-Type-Options: `nosniff`.
+- Referrer-Policy: `strict-origin-when-cross-origin`.
+- Permissions-Policy: minimal (no camera, mic, geolocation requested).
+- Add a `app/middleware/security_headers.py` that sets all of these on every response.
+
+#### CORS
+- Confirm `Access-Control-Allow-Origin` is locked to known frontends (`https://421bistro.com` + localhost for dev) — not `*`.
+- No `Access-Control-Allow-Credentials: true` with wildcard.
+
+#### Data
+- Audit DB: any table without `ON DELETE CASCADE` / `SET NULL` that should have it? (Verified during G76 work but re-confirm.)
+- Confirm avatars (`User.avatar_data` LargeBinary) are size-limited at upload (already done in [[G46]]) and content-type validated (already done).
+
+#### RGPD posture
+- Confirm `/api/me/export` exists and returns the user's data (not currently implemented — add as part of G92 fixes).
+- Confirm `/api/me/delete` exists and triggers the deletion flow (currently only contact-form path — add direct endpoint).
+- Confirm the inactive-account cron ([[G70]]) is actually wired to run in prod (currently dry-run).
+
+#### Incident response
+- Write `docs/SECURITY.md` with: how to rotate secrets, how to revoke a leaked JWT (set new `SECRET_KEY`), how to ban a user from the command line, contact info for security disclosures (`security@421bistro.com` — add to Cloudflare routing).
+- Verify Sentry alerts you on a fresh high-severity error (test by raising one deliberately).
+
+**Acceptance:** A `docs/SECURITY_AUDIT_2026-06.md` punch list document is committed, every item either fixed or explicitly documented as accepted-risk. Mandatory items (auth, secrets, headers, RGPD endpoints) all fixed before launch.
+
+**Effort:** ~3 days (1 day audit + 2 days fixes). **Launch-blocker.**
+
+### G93. Bot-takeover hard timeout — evict AFK player after N minutes
+**Why:** Today when a player goes AFK, the bot ([[G9]]) takes over and plays in their stead — indefinitely. Result: an AFK human keeps their seat forever, blocking new joiners and forcing a bot-vs-human dynamic for everyone else. The fix: after a configurable timeout (default 10 min, env-driven), the human is fully removed from the game so the seat frees up. If the slot has joinable replacements (the room is set to allow late-joins), the seat opens for spectators ([[G87]]) or for the lobby. If not, the bot continues but the row stays — closer to the existing flow.
+
+**Scope:**
+- **New env var:** `BOT_TAKEOVER_MAX_MINUTES=10` (default 10, configurable 5-30). Validated at startup; out-of-range falls back to 10.
+- **Per-player AFK clock:** `game.players[i].afk_started_at: datetime | None`. Set when bot takes over ([[G9]]). Cleared on handback ([[G2]]).
+- **Eviction check** runs on every cycle advance (and on a 60s periodic timer for edge cases):
+    * If `now() - afk_started_at > BOT_TAKEOVER_MAX_MINUTES`:
+        * Broadcast `{type: 'player_evicted_afk', player_id, reason: 'afk_timeout'}`.
+        * Mark player as `evicted` in game state (different from `disconnected` — they can't reconnect; the slot is gone).
+        * If the room is mid-partie: the bot continues finishing the cycle, but on next cycle start, the player is removed from `game.players`.
+        * If the room is between parties: player is removed immediately.
+        * If they had `email_opt_in`: send them an « Your session was ended » email (new template `session_ended_afk.{fr,en}.{html,txt}` extending `_base.html`). RGPD: transactional, no opt-out.
+        * Audit log: `event_type='afk_eviction'` with metadata `{game_id, room_code, afk_duration_minutes}`.
+- **Slot freeing:**
+    * If room allows late-joins ([[Game.allow_late_join]] flag, already in scope), the evicted slot becomes available in the lobby's join flow.
+    * Spectator-to-player conversion ([[G87]]) treats this slot as a candidate seat.
+- **Anti-grief safeguard:** if a player has been evicted from 3+ rooms in 24h, lock their account for 24h with `chat_banned_until = ban_reason = 'repeated_afk'`. Discourages users who deliberately abuse the AFK / bot to grief tablemates.
+- **UI affordances:**
+    * The to-be-evicted player gets a warning toast at T-2min: « Vous serez retiré(e) de la partie dans 2 minutes pour inactivité ». Each subsequent minute updates the toast.
+    * If they come back (any WS action), the toast clears + bot hands back ([[G2]] flow).
+    * Other players see a journal entry: « June a été retirée pour inactivité » with the elapsed time.
+
+**Acceptance:**
+- Sierra is AFK; bot takes over. After 8 min, Sierra sees a "2 minutes until eviction" toast (if her tab is still open).
+- 2 more minutes pass with no input. Sierra is removed from the game. Journal logs the eviction. Other players see « Sierra a été retirée pour inactivité ». Sierra's seat is now joinable.
+- Sierra reopens the app → sees a banner « Vous avez été retirée d'une partie pour inactivité — code: ABC123 ». If she had `email_opt_in`, she also has an email.
+- Sierra repeats this in 3 different rooms within 24h → her account gets a 24h chat-ban + audit log row.
+
+**Dependencies:** [[G2]] ✅ + [[G9]] ✅ + [[G87]] (spectator-to-player slot fill).
+
+**Effort:** ~2-3 days.
 
 ### G61. Right-rail panels become collapsible "tabs"
 **Why:** Reported during playtest. The right `<aside>` today is a fixed layout: collapsible **Journal** on top, *always-visible* **Combo hierarchy** at the bottom. The user wants the hierarchy to collapse the same way the journal does — and more broadly, they want the right rail to behave like a small set of *stackable tabs* (Journal · Hierarchy · later: Chat) that each open/close independently. This sets up the eventual chat slot ([[G59]]) without ripping out the existing panels.
