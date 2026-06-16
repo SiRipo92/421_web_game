@@ -62,6 +62,12 @@ class User(Base):
         DateTime(timezone=True), nullable=True
     )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # G90: refreshed by `get_current_user` on every authenticated request
+    # (5-min throttle). Powers the admin "online" filter as a proxy for
+    # real WS presence until [[G88]] ships.
+    last_seen_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
 
     stats: Mapped["PlayerStats"] = relationship(
         back_populates="user", uselist=False, cascade="all, delete-orphan"
