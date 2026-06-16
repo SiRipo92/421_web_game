@@ -110,6 +110,17 @@ export function TopBar({ user, onLogout }) {
                 <Link to="/profile" onClick={() => setUserMenuOpen(false)}
                   style={{ display: 'block', padding: '0.7rem 1rem', textDecoration: 'none', color: 'var(--ink)', fontFamily: 'var(--body)' }}
                 >{t('profile')}</Link>
+                {(user.role === 'admin' || user.role === 'moderator') && (
+                  location.pathname.startsWith('/admin') ? (
+                    <Link to="/profile" onClick={() => setUserMenuOpen(false)}
+                      style={{ display: 'block', padding: '0.7rem 1rem', textDecoration: 'none', color: 'var(--ink-mute)', fontFamily: 'var(--body)', borderTop: '1px dashed var(--rule)' }}
+                    >← {t('admin_exit_to_player')}</Link>
+                  ) : (
+                    <Link to="/admin" onClick={() => setUserMenuOpen(false)}
+                      style={{ display: 'block', padding: '0.7rem 1rem', textDecoration: 'none', color: 'var(--rouge)', fontFamily: 'var(--body)', borderTop: '1px dashed var(--rule)' }}
+                    >🛡 {t('admin_enter_mode')}</Link>
+                  )
+                )}
                 <button type="button" onClick={() => { setUserMenuOpen(false); onLogout?.() }}
                   style={{ display: 'block', width: '100%', textAlign: 'left', padding: '0.7rem 1rem', fontFamily: 'var(--body)', color: 'var(--rouge)', borderTop: '1px dashed var(--rule)', cursor: 'pointer' }}
                 >{t('logout')}</button>

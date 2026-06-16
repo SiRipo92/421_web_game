@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Link, Navigate } from 'react-router-dom'
 import { useLang } from '../context/useLang.js'
 import * as adminApi from '../api/admin.js'
 
@@ -49,26 +49,62 @@ export function AdminDashboard({ user, token }) {
         <SummaryGrid summary={summary} t={t} />
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1.5rem', marginTop: '2.5rem' }} className="admin-panels">
-        <PanelStub
-          eyebrow={t('admin_panel_inbox_eyebrow')}
-          title={t('admin_panel_inbox_title')}
-          body={t('admin_panel_inbox_body')}
-          roadmap="G39"
-        />
-        <PanelStub
-          eyebrow={t('admin_panel_users_eyebrow')}
-          title={t('admin_panel_users_title')}
-          body={t('admin_panel_users_body')}
-          roadmap="G40"
-        />
-        <PanelStub
-          eyebrow={t('admin_panel_rooms_eyebrow')}
-          title={t('admin_panel_rooms_title')}
-          body={t('admin_panel_rooms_body')}
-          roadmap="G41"
-        />
+      {/* G90: real navigation panels replacing PanelStub placeholders */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.2rem', marginTop: '2rem' }} className="admin-panels">
+        <Link to="/admin/users" style={{ textDecoration: 'none', color: 'inherit' }}>
+          <div className="card" style={{ padding: '1.4rem', cursor: 'pointer', transition: 'background 0.15s' }}>
+            <div className="eyebrow">{t('admin_panel_users_eyebrow')}</div>
+            <h3 className="display" style={{ fontSize: '1.3rem', margin: '0.3rem 0 0.6rem' }}>
+              {t('admin_panel_users_title')}
+            </h3>
+            <p className="serif" style={{ margin: 0, color: 'var(--ink-soft)', fontSize: '0.92rem', lineHeight: 1.45 }}>
+              {t('admin_panel_users_body_g90')}
+            </p>
+            <div className="mono" style={{ marginTop: 12, fontSize: '0.78rem', color: 'var(--rouge)' }}>
+              {t('admin_open')} →
+            </div>
+          </div>
+        </Link>
+        <Link to="/admin/audit" style={{ textDecoration: 'none', color: 'inherit' }}>
+          <div className="card" style={{ padding: '1.4rem', cursor: 'pointer', transition: 'background 0.15s' }}>
+            <div className="eyebrow">{t('admin_panel_audit_eyebrow')}</div>
+            <h3 className="display" style={{ fontSize: '1.3rem', margin: '0.3rem 0 0.6rem' }}>
+              {t('admin_panel_audit_title')}
+            </h3>
+            <p className="serif" style={{ margin: 0, color: 'var(--ink-soft)', fontSize: '0.92rem', lineHeight: 1.45 }}>
+              {t('admin_panel_audit_body')}
+            </p>
+            <div className="mono" style={{ marginTop: 12, fontSize: '0.78rem', color: 'var(--rouge)' }}>
+              {t('admin_open')} →
+            </div>
+          </div>
+        </Link>
       </div>
+
+      {/* Recent admin actions feed */}
+      {summary?.recent_admin_actions && summary.recent_admin_actions.length > 0 && (
+        <div className="card" style={{ padding: '1.4rem', marginTop: '1.5rem' }}>
+          <div className="eyebrow">{t('admin_recent_actions')}</div>
+          <h3 className="display" style={{ fontSize: '1.1rem', margin: '0.3rem 0 0.8rem' }}>
+            {t('admin_recent_actions_title')}
+          </h3>
+          {summary.recent_admin_actions.map((a) => (
+            <div key={a.id} style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 12, padding: '0.5rem 0', borderBottom: '1px dashed var(--rule)' }}>
+              <div className="mono" style={{ fontSize: '0.75rem', color: 'var(--ink-mute)', width: 130 }}>
+                {new Date(a.occurred_at).toLocaleString()}
+              </div>
+              <div className="serif" style={{ fontSize: '0.9rem' }}>
+                {a.event_type}{' '}
+                {a.user_id && (
+                  <Link to={`/admin/users/${a.user_id}`} className="mono" style={{ fontSize: '0.7rem', color: 'var(--rouge)' }}>
+                    → {a.user_id.slice(0, 8)}
+                  </Link>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       <style>{`
         @media (max-width: 900px) {
@@ -85,7 +121,7 @@ function SummaryGrid({ summary, t }) {
     { label: t('admin_summary_account_bans'), value: summary?.active_account_bans ?? 0, accent: 'var(--rouge)' },
     { label: t('admin_summary_chat_bans'), value: summary?.active_chat_bans ?? 0, accent: 'var(--brass-deep)' },
     { label: t('admin_summary_strikes'), value: summary?.users_with_strikes ?? 0 },
-    { label: t('admin_summary_inbox'), value: summary?.pending_inbox_items ?? 0, accent: 'var(--rouge)' },
+    { label: t('admin_summary_online'), value: summary?.online_count ?? 0, accent: 'var(--felt-deep)' },
     { label: t('admin_summary_appeals'), value: summary?.appeals_awaiting_review ?? 0 },
   ]
   return (
@@ -111,17 +147,3 @@ function SummaryGrid({ summary, t }) {
   )
 }
 
-function PanelStub({ eyebrow, title, body, roadmap }) {
-  return (
-    <div className="card" style={{ padding: '1.4rem' }}>
-      <div className="eyebrow">{eyebrow}</div>
-      <h3 className="display" style={{ fontSize: '1.3rem', margin: '0.3rem 0 0.6rem' }}>{title}</h3>
-      <p className="serif" style={{ margin: 0, color: 'var(--ink-soft)', fontSize: '0.92rem', lineHeight: 1.45 }}>
-        {body}
-      </p>
-      <div className="mono" style={{ marginTop: 14, fontSize: '0.7rem', color: 'var(--ink-fade)', letterSpacing: '0.1em' }}>
-        ROADMAP · {roadmap}
-      </div>
-    </div>
-  )
-}
