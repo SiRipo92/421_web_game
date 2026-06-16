@@ -115,6 +115,19 @@ class Game:
     # of the match (no turns), but rejoin on match-end. Cleared when a new match
     # starts.
     out_of_match: set = field(default_factory=set)
+    # G91: partie-end mechanics. A "partie" is one full game played at the room
+    # table; multiple parties play out back-to-back in the same room until the
+    # last player leaves. When any player's `round_points` reaches
+    # `round_points_to_lose`, that player loses the partie, stats are persisted,
+    # and a new partie begins. Per-room override at room creation; defaults to 5.
+    round_points_to_lose: int = 5
+    partie_number: int = 1  # increments each time a new partie starts in the room
+    partie_loser_id: Optional[str] = None  # set when the partie ends; cleared on next
+    partie_started_at: Optional[datetime] = None
+    # G91: per-partie manche counters. Used at end-of-partie to roll into the
+    # players' lifetime PlayerStats. Reset when a new partie begins.
+    manches_played: dict = field(default_factory=dict)
+    manches_lost: dict = field(default_factory=dict)
     # Tiebreak context when phase == TIEBREAK. None otherwise. Shape:
     #   {
     #     "tied_pids": [pid, ...],   # in throw order: most recent first
@@ -329,6 +342,11 @@ def _do_start(game: Game):
     game.current_index = 0
     game.max_throws_this_round = 3
     game.out_of_match.clear()
+    # G91: stamp partie start time on first partie so persist_completed_partie
+    # can write the correct Game.started_at. Subsequent parties get this
+    # stamped in _start_new_partie.
+    if game.partie_started_at is None:
+        game.partie_started_at = datetime.now(UTC)
     for p in game.players:
         p.tokens = 0
         p.turn = new_turn()
@@ -502,6 +520,16 @@ async def _finalize_cycle(game: Game, next_starter_id: Optional[str]) -> None:
     """Common post-resolution work: sit-outs, match-end check, next cycle setup."""
     all_players = game.players
 
+    # G91: track manche participation + losses. The just-resolved cycle's
+    # loser is `next_starter_id` (per 421 rules — loser sets the next rhythm).
+    # Every active (non-sat-out) player participated in this manche.
+    for p in all_players:
+        if p.id in game.out_of_match:
+            continue
+        game.manches_played[p.id] = game.manches_played.get(p.id, 0) + 1
+    if next_starter_id is not None:
+        game.manches_lost[next_starter_id] = game.manches_lost.get(next_starter_id, 0) + 1
+
     # G44: Detect a manché winner BEFORE announcing sit-outs. When the same
     # cycle that empties a player also pushes someone to 11, `_start_new_set`
     # below clears `out_of_match` and resets every player's chips — so any
@@ -544,6 +572,24 @@ async def _finalize_cycle(game: Game, next_starter_id: Optional[str]) -> None:
                 name=manche.name,
                 count=rp_count,
             )
+            # G91: partie-end check. Once a player reaches round_points_to_lose,
+            # the partie ends and a new one starts in the same room. Persist
+            # stats synchronously so the next partie starts from a clean state
+            # and clients see one continuous narrative.
+            if rp_count >= game.round_points_to_lose:
+                game.partie_loser_id = ml_id
+                game.phase = GamePhase.FINISHED
+                _log(
+                    game,
+                    "log_partie_end",
+                    f"Fin de partie #{game.partie_number} — {manche.name} a perdu "
+                    f"({rp_count} points).",
+                    loser=manche.name,
+                    points=rp_count,
+                    partie_number=game.partie_number,
+                )
+                await _persist_partie_and_reset(game)
+                return
             # G45: this is the partie boundary — apply any host-queued rule
             # changes before the new partie starts. One journal event per
             # changed field so the table sees what was updated. Pending dict
@@ -601,17 +647,19 @@ async def _resolve_round(game: Game):
     """
     all_players = game.players
 
-    # E1: only one player remaining (everyone else left/disconnected) → they win
+    # E1: only one player remaining (everyone else left/disconnected).
+    # G91: this is attrition, not a real partie outcome — don't write stats.
+    # Just dissolve the room.
     if len(all_players) == 1:
         survivor = all_players[0]
         game.phase = GamePhase.FINISHED
         _log(
             game,
             "log_game_over",
-            f"Fin de partie ! {survivor.name} gagne (seul restant).",
+            f"Fin de partie ! {survivor.name} reste seul à table.",
             winner=survivor.name,
         )
-        asyncio.create_task(_persist_game(game))
+        asyncio.create_task(_dissolve_room_no_stats(game))
         return
 
     # Only active (non-sat-out) players are scored this cycle.
@@ -708,8 +756,71 @@ async def _resolve_round(game: Game):
     await _finalize_cycle(game, next_starter_id=loser.id)
 
 
-async def _persist_game(game: "Game") -> None:
-    """Fire-and-forget task: persist a finished game to the DB."""
-    from app.services.game_persistence import persist_completed_game
+async def _persist_partie_and_reset(game: "Game") -> None:
+    """End-of-partie hook: persist stats, then reset state for the next partie.
 
-    await persist_completed_game(game)
+    Synchronous (awaited) so the game state machine flips cleanly from
+    "partie ending" to "new partie starting" before any broadcast fires.
+    Persistence failures are swallowed inside `persist_completed_partie`
+    (logged + Sentry); they should never block the next partie from starting.
+    """
+    from app.services.game_persistence import persist_completed_partie
+
+    await persist_completed_partie(game)
+    _start_new_partie(game)
+
+
+async def _dissolve_room_no_stats(game: "Game") -> None:
+    """Lone-survivor / empty-room cleanup. No stats written."""
+    from app.services.game_persistence import dissolve_room_without_stats
+
+    await dissolve_room_without_stats(game)
+
+
+def _start_new_partie(game: "Game") -> None:
+    """Reset state for a new partie within the same room.
+
+    The previous partie's loser starts the new one (standard 421 rule —
+    the « bourgeois » of one partie sets the rhythm of the next). Initial
+    -roll voting is skipped; seating order is already established and
+    persists across parties in the same room.
+    """
+    new_starter_id = game.partie_loser_id  # save before clearing
+    game.partie_number += 1
+    game.partie_loser_id = None
+    game.partie_started_at = datetime.now(UTC)
+    game.round_num = 1
+    game.pool = 11
+    game.round_points = {}
+    game.match_losses = {}
+    game.out_of_match = set()
+    game.manches_played = {}
+    game.manches_lost = {}
+    game.tiebreak = None
+    game.last_round_plays = []
+    game.max_throws_this_round = 3
+
+    for p in game.players:
+        p.tokens = 0
+        p.turn = new_turn()
+
+    if new_starter_id and any(p.id == new_starter_id for p in game.players):
+        game.round_starter_id = new_starter_id
+    else:
+        # Fallback: previous loser left the room — start with seat 0.
+        game.round_starter_id = game.players[0].id if game.players else ""
+    game.current_index = next(
+        (i for i, p in enumerate(game.players) if p.id == game.round_starter_id), 0
+    )
+    game.phase = GamePhase.CHARGE
+
+    starter_name = next(
+        (p.name for p in game.players if p.id == game.round_starter_id), ""
+    )
+    _log(
+        game,
+        "log_new_partie_start",
+        f"Nouvelle partie #{game.partie_number} · {starter_name} donne le rythme",
+        partie_number=game.partie_number,
+        starter=starter_name,
+    )
