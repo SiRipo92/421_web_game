@@ -1,0 +1,21 @@
+{% extends "_base.txt" %}
+{% block body %}
+Bonjour {{ username }},
+
+Conformément à l'article 34 du RGPD, nous vous informons d'un incident
+de sécurité ayant pu affecter vos données personnelles.
+
+Date de l'incident: {{ breach_date_label }}
+Date de détection : {{ detection_date_label }}
+Données concernées: {{ affected_data }}
+
+Actions prises :
+{{ actions_taken }}
+
+Recommandations :
+{{ user_recommendations }}
+
+L'incident a été déclaré à la CNIL.
+
+Pour toute question : {{ app_url }}/contact
+{% endblock %}

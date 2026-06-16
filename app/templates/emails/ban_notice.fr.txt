@@ -1,0 +1,22 @@
+{% extends "_base.txt" %}
+{% block body %}
+Bonjour {{ username }},
+
+Votre compte 421 Bistro a été suspendu pour avoir enfreint nos règles
+communautaires.
+
+Motif         : {{ reason_label }}
+Durée         : {{ duration_label }}
+Levée prévue  : {{ expires_at_label }}
+{% if case_id %}Référence     : {{ case_id }}{% endif %}
+
+{% if evidence_summary %}
+Éléments retenus :
+{{ evidence_summary }}
+{% endif %}
+
+Pour contester cette décision :
+{{ appeal_url }}
+
+Un membre de l'équipe modération examinera votre demande sous 7 jours.
+{% endblock %}

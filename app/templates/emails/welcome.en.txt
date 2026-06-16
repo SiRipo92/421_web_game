@@ -1,0 +1,13 @@
+{% extends "_base.txt" %}
+{% block body %}
+Welcome {{ username }},
+
+Your account is live. The 421 awaits — a French dice game played for
+decades in bistros and around family tables.
+
+Join a game: {{ app_url }}/rooms
+Rules:       {{ app_url }}/rules
+
+You're receiving this because you opted in to our communications at signup.
+You can unsubscribe at any time via the link below.
+{% endblock %}

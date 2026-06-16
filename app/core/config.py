@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     secret_key: str = "dev-insecure-key-change-in-production"
     access_token_expire_minutes: int = 30
     remember_me_expire_days: int = 30
-    resend_api_key: str = ""
+    brevo_api_key: str = ""
     app_url: str = "http://localhost:8421"
     reset_token_expire_minutes: int = 60
     anthropic_api_key: str = ""
@@ -29,10 +29,9 @@ class Settings(BaseSettings):
     contact_email: str = ""
     # G68 follow-up: env-driven so legal pages reflect current values
     # without redeploys, and the email sender can be swapped without
-    # touching code. Production should set SENDER_EMAIL once the domain
-    # is purchased + verified with Resend; otherwise the default below
-    # will keep failing Resend's sender-domain check.
-    sender_email: str = "421 Bistro <noreply@421bistro.fr>"
+    # touching code. Production sets SENDER_EMAIL once the domain is
+    # verified in Brevo; the default below is only used in tests.
+    sender_email: str = "421 Bistro <noreply@421bistro.com>"
     # RGPD inactive-account auto-deletion (G70). Default 2 years → 30
     # day grace, override via env to test the pipeline.
     inactive_account_warning_years: int = 2

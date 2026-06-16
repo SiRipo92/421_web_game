@@ -1,0 +1,11 @@
+{% extends "_base.html" %}
+{% block body %}
+<p style="margin:0 0 16px 0;">Welcome <strong>{{ username }}</strong>,</p>
+<p style="margin:0 0 16px 0;">Your account is live. The 421 awaits — a French dice game played for decades in bistros and around family tables. Three dice, combinations to memorise, and plenty of bluffing.</p>
+<p style="margin:0 0 16px 0;">To get started, glance at the rules or jump straight into a public game:</p>
+<p style="margin:24px 0;text-align:center;">
+  <a href="{{ app_url }}/rooms" style="display:inline-block;background:#A8302A;color:#F4ECD8;padding:14px 28px;text-decoration:none;border-radius:4px;font-family:Georgia,serif;font-size:15px;letter-spacing:0.5px;">Join a game</a>
+</p>
+<p style="margin:16px 0;font-size:14px;color:#3A2F26;">Or learn the rules: <a href="{{ app_url }}/rules" style="color:#A8302A;">{{ app_url }}/rules</a></p>
+<p style="margin:24px 0 0 0;font-size:13px;color:#6B5A4A;border-top:1px solid #ECE0C2;padding-top:16px;">You're receiving this because you opted in to our communications at signup. You can unsubscribe at any time via the link in the footer.</p>
+{% endblock %}

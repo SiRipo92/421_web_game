@@ -852,6 +852,182 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 - **PWA polish** — make the web app installable via "Add to Home Screen" (manifest.json, service worker, web-push). Zero new stack, gets ~70% of the UX benefit. Captured separately as G80b if you want me to spin it out.
 - **TestFlight-only release** (no Play Store) — Apple side first, Android later. Halves the store-submission work but limits beta audience to iPhone users.
 
+### G81. Ban-notice + appeal flow — email + endpoint
+**Why:** Moderation can already temp-ban accounts ([[G42]]), but the user is told *nothing* — they hit a 403 on login with `account_temporarily_suspended` and have to guess what happened. The `ban_notice` email template is already in repo (shipped with G76); this item wires the actual sender + the appeal-form backend so a banned user can contest the decision without emailing support manually.
+**Scope:**
+- New `send_ban_notice()` function in `app/services/email.py` — renders the existing `ban_notice.{fr,en}.{html,txt}` templates and POSTs via Brevo. Same pattern as `send_welcome_email()`.
+- Fired from wherever moderation enforces a ban (currently the admin router + auto-mod path). Pass `case_id` (UUID), `reason_label`, `duration_label` (`24h`, `7 jours`, `permanent`), `expires_at_label` (localized date), `evidence_summary` (text excerpt or none), `appeal_url`.
+- **Appeal form backend:**
+    - `POST /api/moderation/appeals` — body: `{case_id, message}`. Stores in a new `ModerationAppeal(id, user_id, case_id, message, status='pending', created_at, reviewed_by, reviewed_at, verdict, verdict_message)` table.
+    - `GET /admin/appeals?status=pending` — admin-only list, paginated. Already-banned users can see their open appeal.
+    - `POST /admin/appeals/{id}/verdict` — body: `{outcome: 'upheld' | 'overturned', message}`. On `overturned`, clears `User.banned_until` + `User.ban_reason`. Fires the (also-template-ready) `appeal_verdict` email (template needs to be added — small follow-up).
+- **Appeal page in SPA:** `/appeal?case=<case_id>` — minimal form (textarea + submit), accessible without being logged in (since banned users can't auth). Submitter identifies themselves by providing their account email + the `case_id` from the email; backend matches against `GdprAuditLog` to confirm the email matches the ban record.
+**Acceptance:**
+- Admin temp-bans a user → user receives a French/English email with case ID, duration, appeal button.
+- User clicks the appeal button → fills form → sees confirmation.
+- Admin sees pending appeal in the admin dashboard.
+- Admin overturns the verdict → ban is lifted + user receives `appeal_verdict` email.
+**Dependencies:** [[G42]] moderation enforcement ✅, [[G76]] email migration ✅, [[G33]] moderation dashboard (for the admin-side appeal list — currently partial).
+
+### G82. Lifecycle emails — rank_up + friend invites + achievements
+**Why:** The email infrastructure ([[G76]]) is built but only welcome + password reset currently send. Lifecycle emails (« hey, you ranked up to Confirmé », « X invited you to a game ») are high-ROI — they pull users back without notifications infrastructure on mobile yet ([[G80]]). Each ships alongside the feature that triggers it; this roadmap entry tracks the *pattern* and groups them.
+**Scope per email (all gated by `email_opt_in=True`):**
+- **rank_up** — triggered when `PlayerStats.elo` crosses a rank threshold (`badge_beginner` → `badge_amateur` etc.). Variables: `username`, `new_rank_label`, `previous_rank_label`, `current_elo`, `profile_url`, `unsubscribe_url`. New `app/services/ranks.py` exposes `rank_for(elo) → str` (single source of truth for backend + email render). Hook: end-of-game ELO write in `app/services/elo.py`.
+- **friend_invite_received** — depends on [[G29]] shipping. Variables: `username`, `inviter_name`, `game_code`, `accept_url`, `unsubscribe_url`.
+- **achievement_unlocked** — depends on an achievements system existing (not yet captured; would be a new item). Punted to later — *not in this iteration*.
+**Templates:** Already use the established Jinja pattern. Site colors inlined, FR + EN + plain-text, footer unsubscribe link.
+**Backend additions:**
+- `app/services/email.py`: `send_rank_up_email()`, `send_friend_invite_email()`.
+- Hook into ELO write (`app/services/elo.py`) → only fire on threshold crossing, not every game.
+- Rate limit: max 1 rank_up email per user per 24h (avoid spamming during a hot streak).
+**Acceptance:** A user opted into emails plays a game that promotes them from 1195 → 1210 ELO (crosses 1200 = `badge_confirmed` threshold) → within 60s they receive the rank_up email with the new badge label, FR or EN per their `lang_pref`.
+**Dependencies:** [[G76]] ✅, [[G29]] (friend invites — for friend_invite_received), ELO rank-name mapping refactor.
+
+### G83. Wire account-deletion emails into the G70 cron
+**Why:** The `account_deletion_warning` + `account_deleted` templates ship with [[G76]], but nothing fires them yet. [[G70]] is the cron that scans for users inactive ≥ N years and queues them for deletion. This item connects the two: each step of the lifecycle emits the right email.
+**Scope:**
+- **Step 1 — warning email** (T-{INACTIVE_ACCOUNT_DELETION_DAYS} before deletion). Triggered when the cron flags a user. Uses existing `account_deletion_warning` template. Variables: `username`, `inactive_years` (from settings), `deletion_date_label` (computed), `keep_active_url` (`{app_url}/login?reason=keep_active`).
+- **Step 2 — final notice** (T-7 days). New template `account_deletion_final.{fr,en}.{html,txt}` — shorter, more urgent tone. Same variables.
+- **Step 3 — confirmation of deletion** (T+0). New template `account_deleted.{fr,en}.{html,txt}` — confirms deletion, no action buttons, mentions backups/retention windows for moderation/audit logs ([[MODERATION_LOG_RETENTION_DAYS]]). Sent to the email on file *before* the row is wiped.
+- New senders in `app/services/email.py`: `send_deletion_warning()`, `send_deletion_final()`, `send_deleted_confirmation()`.
+- Cron itself ([[G70]]) gains scheduling flags so each row tracks "last_warning_sent_at" to prevent re-firing.
+**Acceptance:** A user inactive for `INACTIVE_ACCOUNT_WARNING_YEARS` receives email 1 → email 2 (T-7d) → email 3 (T+0) → row is deleted with cascades. All three emails are transactional (RGPD: legally required, no opt-out).
+**Dependencies:** [[G70]] inactive-account pipeline (currently dry-run mode), [[G76]] ✅.
+
+### G84. Contact-form ticket pipeline + auto-acknowledgements
+**Why:** Today the contact form forwards to your inbox and that's it. No SLA tracking, no acknowledgement to the submitter, no record of what's been resolved. For a real product you need: (a) the submitter gets immediate « thanks, we received your request » so they're not in the dark, (b) you have a list of open tickets sorted by urgency, (c) you know when an SLA is about to be breached so you can act before customer trust erodes. This is the smallest-credible-ticket-system — not Zendesk, just enough for a solo operator.
+
+**This item splits naturally into two phases. Ship G84a first; defer G84b unless contact volume warrants it.**
+
+#### G84a — Auto-acknowledgement emails (smallest viable scope, ~half day)
+
+Today the contact form's only outbound is to the site owner. Add an immediate ack-email to the submitter so they know we received their message + what SLA we're committing to.
+
+**Scope:**
+- 4 new email templates (16 files = 4 × {fr, en} × {html, txt}):
+    * `contact_ack_export` — RGPD data export request. Body: "request received, you'll get your data within 30 days per RGPD Art. 12." Includes ticket reference.
+    * `contact_ack_delete` — Account deletion request. Body: "request received, processed within 30 days." Mentions [[G70]] auto-deletion is also an option if they just want to cool down.
+    * `contact_ack_bug` — Bug report. Body: "thanks for the report, we'll investigate and respond within 48h." Sets expectations.
+    * `contact_ack_other` — General question. Body: "message received, response within 5 working days."
+- All extend the existing `_base.html` shell — bistro palette, plain-text fallbacks, lang-aware.
+- New `app/services/email.py` function: `send_contact_ack(category, to_email, name, ticket_ref, lang)`.
+- A `_CATEGORY_TO_ACK_TEMPLATE` mapping in `app/routers/contact.py` looks up the right template per `body.subject`.
+- Ticket reference = random 8-char URL-safe slug (e.g. `T-K8N3WQA2`) generated per-request. **No DB table yet** — just generated, embedded in both the admin email and the ack, helps thread conversations.
+- Fired AFTER `send_admin_contact_form` succeeds (don't ack if forwarding failed — would be misleading).
+- Failure is logged but never raises — the user already got their 202 acceptance from the API.
+
+**Acceptance:** Submit a contact form with subject=`bug`. Within 30 seconds: (a) admin email arrives at `CONTACT_EMAIL` with ticket ref TXX-XXX, (b) submitter receives the bistro-branded ack email saying "thanks, we'll respond within 48h, ref TXX-XXX", both in their lang (`Accept-Language` header).
+
+**Dependencies:** [[G76]] ✅.
+
+#### G84b — Manual reply masking (deferred from G76)
+
+The current "Send mail as" gap: when you manually reply to a contact-form submitter from Gmail, your reply leaks `421bistro.contact@gmail.com`. This was deferred during G76 because Brevo's free-tier SMTP IP whitelisting can't be disabled, and Gmail's relay rotates IPs constantly.
+
+**Fix options when revisiting:**
+- **Option 1 (recommended):** Upgrade Brevo to a paid tier (~€19/mo) that exposes the IP-blocking toggle. Disable blocking, then Gmail's SMTP relay works permanently.
+- **Option 2:** Switch outbound SMTP relay to Mailgun or Postmark — they don't have IP whitelisting on free tiers.
+- **Option 3:** Use Gmail's "Send through Gmail" mode — recipients see a small "via gmail.com" suffix in some clients. Cosmetic only, no IP issues.
+
+**Triggers to open this item:**
+- Inbound contact form volume ≥ 5 per week (reply burden makes manual masking matter)
+- Or you're embarrassed to show a colleague the "from gmail address" leak
+- Until then: not worth the time
+
+#### G84c — Full ticket dashboard (later, ~1 day)
+
+Promote tickets from "random slugs in email" to a real `ContactTicket(id, ref, from_email, category, status, sla_due_at, created_at, resolved_at, resolution_note)` table.
+
+**Scope:**
+- Migration + model.
+- POST `/api/contact` writes a row in addition to firing emails.
+- Admin route `GET /admin/tickets` — list sorted by `sla_due_at`, color-coded by urgency (green > 24h left, amber 1-24h, red overdue).
+- Admin route `POST /admin/tickets/{id}/resolve` — sets `resolved_at`, optionally sends a follow-up email to the submitter.
+- Lives in [[G33]] admin dashboard.
+
+**Trigger to open this item:** When you've had ≥ 20 contact submissions and feel like you're losing track. Until then, email + the `T-XXXXX` reference in the subject line is enough.
+
+### G85. AI bug-triage agent — automated investigation + draft PR
+**Why:** This is the long-game piece: when a user reports a bug via the contact form, an AI agent reads the report, pulls relevant Sentry events, greps the codebase for affected files, drafts a proposed fix as a unified diff, and opens a draft PR for human review. You stay in the loop (approve / reject / iterate), but the agent does the discovery + draft work that currently eats your evenings.
+
+**Why this is genuinely useful (not hype):** Bug triage is mostly a context-gathering exercise. *« Which file does this affect? What was the last commit there? Are there related Sentry events I should know about? What's the simplest patch that doesn't break tests? »* — those are deterministic enough for an LLM to do credibly when given the right context. The risky part (deciding whether the fix is correct) stays with you.
+
+**Architecture:**
+- **Trigger:** When a `bug` ticket lands ([[G84a]] dependency), webhook fires the agent.
+- **Context-gathering phase** (no LLM yet, just instrumentation):
+    * Pull the last 50 Sentry events via Sentry API, filtered to the last 24h.
+    * `grep -rn` the repo for any function/route names mentioned in the bug report.
+    * Read the user's last few WebSocket messages from logs (PII-scrubbed via the existing G46 pipeline).
+    * Pull `git log --oneline -20` on files matching the symbols.
+- **Reasoning phase** (the Claude API call):
+    * Build a prompt with: bug description + gathered Sentry events + grep hits + recent commits.
+    * Ask Claude to return: likely root cause, affected files + lines, proposed unified diff, confidence (low/med/high).
+    * Use `claude-opus` (the slow-thinker) — bug triage is exactly the kind of task where reasoning quality matters more than latency.
+- **Output phase:**
+    * Create a new branch: `bot/triage-{ticket_ref}-{slug}`.
+    * Apply the diff if confidence ≥ med.
+    * Open a **draft** GitHub PR (never auto-merge). Title: `[auto-triage] T-XXXXX: <bug summary>`.
+    * PR body contains: original bug description, links to relevant Sentry events, the agent's analysis, the diff, **explicit "this is AI-generated, review carefully" warning**.
+    * Add label `auto-triage` so you can filter.
+- **Human-in-the-loop:** You see the draft PR in your usual flow, run tests locally if needed, approve / reject / hand-edit / close. The agent never merges. Ever.
+
+**Failure modes + safeguards:**
+- Confidence below threshold → agent opens an *issue* with its findings but no draft PR (you decide if it's worth fixing).
+- Diff doesn't apply cleanly → fall back to issue mode.
+- Diff applies but tests fail in CI → PR is auto-closed, comment posted explaining.
+- Rate limit: max 5 auto-triage PRs per day; further bug reports queue.
+
+**Skeleton implementation path:**
+- Phase 1: standalone Python script you run manually (`python -m agents.triage <ticket_ref>`) — no webhook, just to validate the prompting works on real reports. ~3-5 days.
+- Phase 2: webhook integration with [[G84a]] tickets, runs in background worker. ~2-3 days.
+- Phase 3: confidence scoring + automatic mode selection (PR vs issue vs ignore). ~1 week of tuning.
+
+**Cost:** ~$0.30-1.00 per triage run (opus tokens, big context). Even at 50 bug reports a month, ~$25-50/mo. Tolerable.
+
+**Dependencies:**
+- [[G77]] deployed in production (need real Sentry events to triage against).
+- [[G84a]] auto-ack tickets (the agent needs the structured ticket data).
+- A GitHub fine-grained personal access token with `pull_request:write` scope, stored in env (NOT committed).
+- Sentry API token with read scope.
+
+**Triggers to open this item:**
+- 421 stable in production ≥ 3 months
+- Real Sentry event volume (≥ 100/week — otherwise there's nothing to triage)
+- ≥ 5 bug reports per month manually triaged (so AI-triage actually saves time)
+
+**My honest take on timing:** Genuinely useful but easy to over-engineer. Don't build until your bug-report cadence makes triage feel like a chore. Until then, manual triage is faster than babying a half-working agent.
+
+### G86. In-project Claude Code skills for dev workflow
+**Why:** Different from [[G85]] — these are tools *YOU* invoke locally during development, not customer-facing automation. They make YOU faster at the same triage / investigation work, without the architectural complexity of a production pipeline.
+
+**The pattern:** A skill is a markdown file in `.claude/skills/<name>.md` that you invoke via `/skill-name <args>` in Claude Code. The agent reads the skill's instructions + has access to repo files + bash, then executes the workflow. Cheap to write, easy to iterate, never reach production.
+
+**Skills worth building (in order of expected ROI):**
+
+1. **`/triage-from-email`** — Paste a contact-form bug-report email. Agent: greps the repo for symbols mentioned, reads the last 20 commits, pulls relevant Sentry events via the Sentry CLI/API, writes an investigation report (root cause hypothesis + suggested fix area + 3 questions to clarify with the user). Output: markdown report in `tmp/triage-{date}.md` you skim before responding to the user.
+
+2. **`/analyze-sentry`** — Pull last N Sentry events via Sentry API, group by issue, summarise hottest issue, suggest fix area. Output: top 5 issues with one-line summaries + which file(s) likely involved + how many users affected. Run this weekly to catch fires before they spread.
+
+3. **`/draft-fix <file:line> <description>`** — Given a target location + brief description of the desired fix, agent: reads surrounding context (~50 lines), checks existing test coverage for the affected function, drafts a patch on a new branch (`fix/auto-{slug}`), opens a PR for review. Different from G85 in that it's invoked by you (not by user bug reports) and you supply the diagnosis.
+
+4. **`/roadmap-status`** — Reads `docs/ROADMAP.md`, summarises what's in Now / Next / Future / Deferred, flags items with stale dependencies (e.g. depends on `[[G42]]` but `[[G42]]` was completed 6 months ago), suggests what to pick up next based on existing PRs + open issues + your recent commit pattern.
+
+5. **`/post-deploy-check`** (after [[G77]]) — Hits production health endpoints, checks Sentry for new error spikes in the last hour, queries DB for unusual row counts (e.g. is signup velocity dropping?), reports a sanity-check summary. Run after every prod deploy.
+
+**Why these are different from G85:**
+- You invoke them; they don't trigger on customer activity.
+- They write reports/PRs you review; they don't take production actions.
+- Each is ≤ 1 day to build, vs. G85's multi-week effort.
+- They make YOU faster; G85 makes the system self-healing.
+
+**Triggers to open this item:**
+- Anytime. Skills are evergreen — even before [[G77]] deploy, `/roadmap-status` is useful right now.
+- Build one skill per slow-evening, ship continuously.
+
+**Effort:** ~half-day to 1 day per skill. Build the highest-ROI ones first (`/triage-from-email`, `/analyze-sentry`).
+
+**Dependencies:** None — these run locally against your dev environment. Sentry-using skills need the Sentry API token in `.env`.
+
 ### G61. Right-rail panels become collapsible "tabs"
 **Why:** Reported during playtest. The right `<aside>` today is a fixed layout: collapsible **Journal** on top, *always-visible* **Combo hierarchy** at the bottom. The user wants the hierarchy to collapse the same way the journal does — and more broadly, they want the right rail to behave like a small set of *stackable tabs* (Journal · Hierarchy · later: Chat) that each open/close independently. This sets up the eventual chat slot ([[G59]]) without ripping out the existing panels.
 **Scope:**

@@ -1,0 +1,14 @@
+{% extends "_base.txt" %}
+{% block body %}
+Bienvenue {{ username }},
+
+Votre compte est ouvert. Le 421 vous attend — un jeu de dés français qui se
+joue depuis des décennies dans les bistros et autour des tables familiales.
+
+Rejoindre une partie : {{ app_url }}/rooms
+Règles du jeu       : {{ app_url }}/rules
+
+Vous recevez cet e-mail parce que vous avez accepté nos communications à
+l'inscription. Vous pouvez vous désinscrire à tout moment via le lien
+ci-dessous.
+{% endblock %}
