@@ -1,4 +1,4 @@
-.PHONY: dev dev-frontend dev-backend dev-env-watch build-frontend test lint
+.PHONY: dev dev-frontend dev-backend dev-env-watch build-frontend test lint ci-lint
 
 dev: dev-backend
 
@@ -30,3 +30,11 @@ test-db-migrate:
 
 lint:
 	.venv/bin/ruff check app/ tests/ && .venv/bin/ruff format --check app/ tests/
+
+# Mirror exactly what CI's Lint job runs. Catches format-check + frontend
+# lint failures locally so we don't burn a CI cycle finding them after push.
+# Run before `git push` on any branch with code changes.
+ci-lint:
+	.venv/bin/ruff check app/ tests/
+	.venv/bin/ruff format --check app/ tests/
+	cd frontend && npm run lint

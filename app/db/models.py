@@ -78,7 +78,12 @@ class Game(Base):
     __tablename__ = "games"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
-    game_code: Mapped[str] = mapped_column(String(8), unique=True, nullable=False)
+    # G91: not unique anymore — a single room hosts multiple sequential
+    # parties. (game_code, partie_number) is the unique pair.
+    game_code: Mapped[str] = mapped_column(String(8), nullable=False)
+    partie_number: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="1", default=1
+    )
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     finished_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -115,7 +120,14 @@ class GamePlayer(Base):
 
 
 class PlayerStats(Base):
-    """Aggregated stats and ELO for a user; one row per user."""
+    """Aggregated stats + ELO for a user. One row per user.
+
+    G91: column names use 421 vocabulary. The objective isn't to "win" but
+    to NOT lose — `parties_lost` is the rare-and-bad outcome,
+    `parties_survived` is everyone else's outcome. Per-cycle (manche)
+    counters surface "how often this player took fiches" independent of
+    final-game outcomes.
+    """
 
     __tablename__ = "player_stats"
 
@@ -124,8 +136,20 @@ class PlayerStats(Base):
     )
     elo: Mapped[int] = mapped_column(Integer, default=1200)
     games_played: Mapped[int] = mapped_column(Integer, default=0)
-    wins: Mapped[int] = mapped_column(Integer, default=0)
-    losses: Mapped[int] = mapped_column(Integer, default=0)
+    parties_survived: Mapped[int] = mapped_column(Integer, default=0)
+    parties_lost: Mapped[int] = mapped_column(Integer, default=0)
+    manches_played: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0", default=0
+    )
+    manches_lost: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0", default=0
+    )
+    current_streak: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0", default=0
+    )
+    longest_streak: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0", default=0
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

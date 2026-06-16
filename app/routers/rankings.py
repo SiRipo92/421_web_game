@@ -1,4 +1,4 @@
-"""Rankings and player profile endpoints."""
+"""Rankings and player profile endpoints (G91 stats redesign)."""
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -28,6 +28,19 @@ def get_badge(elo: int) -> tuple[str, str]:
     return "Débutant", "🎲"
 
 
+def _survival_rate(stats: PlayerStats) -> float:
+    if stats.games_played <= 0:
+        return 0.0
+    return round(stats.parties_survived / stats.games_played, 4)
+
+
+def _manche_resilience(stats: PlayerStats) -> float:
+    """Lower manche_loss_rate is better — return the inverse so higher = better."""
+    if stats.manches_played <= 0:
+        return 0.0
+    return round(1.0 - (stats.manches_lost / stats.manches_played), 4)
+
+
 @router.get("/api/rankings", response_model=RankingsResponse)
 async def rankings(db: AsyncSession = Depends(get_db)):
     """Return the top-50 players ordered by ELO descending."""
@@ -46,8 +59,9 @@ async def rankings(db: AsyncSession = Depends(get_db)):
                 username=username,
                 elo=stats.elo,
                 games_played=stats.games_played,
-                wins=stats.wins,
-                losses=stats.losses,
+                parties_survived=stats.parties_survived,
+                parties_lost=stats.parties_lost,
+                survival_rate=_survival_rate(stats),
                 badge=badge,
                 badge_icon=icon,
             )
@@ -57,7 +71,7 @@ async def rankings(db: AsyncSession = Depends(get_db)):
 
 @router.get("/api/profile/{username}", response_model=ProfileResponse)
 async def profile(username: str, db: AsyncSession = Depends(get_db)):
-    """Return a player's stats and recent 20 game history."""
+    """Return a player's stats and recent 20 parties."""
     result = await db.execute(
         select(User).where(User.username == username, User.deleted_at.is_(None))
     )
@@ -70,7 +84,6 @@ async def profile(username: str, db: AsyncSession = Depends(get_db)):
     if not stats:
         raise HTTPException(status_code=404, detail="Stats not found")
 
-    # Recent games
     gp_result = await db.execute(
         select(GamePlayer, GameRecord)
         .join(GameRecord, GameRecord.id == GamePlayer.game_id)
@@ -80,12 +93,12 @@ async def profile(username: str, db: AsyncSession = Depends(get_db)):
     )
     recent = []
     for gp, game_rec in gp_result:
-        # Count total players in that game
         count_result = await db.execute(select(GamePlayer).where(GamePlayer.game_id == game_rec.id))
         total = len(count_result.scalars().all())
         recent.append(
             GameHistoryEntry(
                 game_code=game_rec.game_code,
+                partie_number=game_rec.partie_number,
                 played_at=game_rec.finished_at.isoformat(),
                 placement=gp.placement,
                 total_players=total,
@@ -102,7 +115,13 @@ async def profile(username: str, db: AsyncSession = Depends(get_db)):
         badge=badge,
         badge_icon=icon,
         games_played=stats.games_played,
-        wins=stats.wins,
-        losses=stats.losses,
+        parties_survived=stats.parties_survived,
+        parties_lost=stats.parties_lost,
+        survival_rate=_survival_rate(stats),
+        manches_played=stats.manches_played,
+        manches_lost=stats.manches_lost,
+        manche_resilience=_manche_resilience(stats),
+        current_streak=stats.current_streak,
+        longest_streak=stats.longest_streak,
         recent_games=recent,
     )

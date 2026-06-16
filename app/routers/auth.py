@@ -334,8 +334,12 @@ async def export_data(
         "stats": {
             "elo": stats.elo,
             "games_played": stats.games_played,
-            "wins": stats.wins,
-            "losses": stats.losses,
+            "parties_survived": stats.parties_survived,
+            "parties_lost": stats.parties_lost,
+            "manches_played": stats.manches_played,
+            "manches_lost": stats.manches_lost,
+            "current_streak": stats.current_streak,
+            "longest_streak": stats.longest_streak,
         }
         if stats
         else None,
