@@ -1,0 +1,16 @@
+{% extends "_base.html" %}
+{% block body %}
+<p style="margin:0 0 16px 0;">Hi <strong>{{ username }}</strong>,</p>
+<p style="margin:0 0 16px 0;">We are confirming your account deletion request. <strong>We're sorry to see you go.</strong></p>
+<p style="margin:0 0 16px 0;">Your personal data will be <strong>permanently erased in 24 hours</strong>. During this window:</p>
+<ul style="margin:0 0 16px 0;padding-left:20px;line-height:1.7;">
+  <li>Your account is deactivated — you can no longer use it as-is.</li>
+  <li>Your statistics, game history, and messages are queued for erasure.</li>
+  <li>If you change your mind, you can restore your account by logging in before the deadline expires.</li>
+</ul>
+<p style="margin:24px 0;text-align:center;">
+  <a href="{{ app_url }}/login" style="display:inline-block;background:#A8302A;color:#F4ECD8;padding:14px 28px;text-decoration:none;border-radius:4px;font-family:Georgia,serif;font-size:15px;letter-spacing:0.5px;">Restore my account</a>
+</p>
+<p style="margin:0 0 16px 0;font-size:14px;color:#3A2F26;">After this window, erasure is <strong>irreversible</strong> — all your data is removed from our systems, per your right to be forgotten (GDPR Art. 17).</p>
+<p style="margin:24px 0 0 0;font-size:13px;color:#6B5A4A;border-top:1px solid #ECE0C2;padding-top:16px;">Thank you for playing 421 Bistro. If you'd like to tell us what made you leave, we'd love to hear from you — <a href="{{ app_url }}/contact" style="color:#A8302A;">via the contact form</a>.</p>
+{% endblock %}

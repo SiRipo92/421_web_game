@@ -8,22 +8,54 @@ import { createGame, joinGame } from '../api/game.js'
 export function CreateRoom({ token }) {
   const { t } = useLang()
   const navigate = useNavigate()
-  const [isPublic, setIsPublic] = useState(false)
+  // Default to public — the lobby benefits from open tables being the
+  // standard choice. Hosts wanting a private friends-only table can flip
+  // the toggle.
+  const [isPublic, setIsPublic] = useState(true)
   const [maxPlayers, setMaxPlayers] = useState(4)
-  const [bankRule, setBankRule] = useState('sec')
+  // G66: default to « Au choix du donneur » (free / libre) — the canonical
+  // 421 experience where the round starter sets the rhythm. Sec is a
+  // special-case shortcut for fast play with many players, not the default.
+  // Backend already defaults `bank_rule` to "free" (app/game/logic.py:131);
+  // the frontend pre-selection just needed to match.
+  const [bankRule, setBankRule] = useState('free')
   const [afkSec, setAfkSec] = useState(45)
   const [afkBot, setAfkBot] = useState(true)
   const [allowSpectators, setAllowSpectators] = useState(true)
+  // G46: room presentation defaults — what new joiners adopt as their
+  // initial language + theme unless they've saved a per-player override.
+  // Defaults match the user's own current preferences (set via the
+  // TopBar) so the create flow feels consistent.
+  const [defaultLang, setDefaultLang] = useState(() => localStorage.getItem('lang') || 'fr')
+  const [defaultTheme, setDefaultTheme] = useState(() => localStorage.getItem('theme') || 'light')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
+  // G67: gate creation until the Stepper values are in their allowed ranges.
+  // The Stepper itself clamps on blur, but the user could (a) submit without
+  // ever blurring the field or (b) currently be mid-typing an out-of-range
+  // intermediate (e.g., "1" on the way to "15"). Disable + visual cue here.
+  const isAfkValid = Number.isInteger(afkSec) && afkSec >= 15 && afkSec <= 120
+  const isMaxPlayersValid = Number.isInteger(maxPlayers) && maxPlayers >= 2 && maxPlayers <= 5
+  const canCreate = isAfkValid && isMaxPlayersValid
+
   const handleCreate = async () => {
+    if (!canCreate) return
     const name = sessionStorage.getItem('playerName') || 'Joueur'
     setLoading(true)
     setError('')
     try {
       const { game_id } = await createGame(
-        { is_public: isPublic, max_players: maxPlayers, bank_rule: bankRule, afk_seconds: afkSec, afk_bot: afkBot, allow_spectators: allowSpectators },
+        {
+          is_public: isPublic,
+          max_players: maxPlayers,
+          bank_rule: bankRule,
+          afk_seconds: afkSec,
+          afk_bot: afkBot,
+          allow_spectators: allowSpectators,
+          default_lang: defaultLang,
+          default_theme: defaultTheme,
+        },
         token,
       )
       const res = await joinGame(game_id, name, token)
@@ -107,13 +139,49 @@ export function CreateRoom({ token }) {
             onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setAllowSpectators(!allowSpectators) } }}
           />
         </ConfigRow>
+
+        {/* G46: room presentation defaults — new joiners adopt these
+            unless they have a per-player override saved. */}
+        <ConfigRow title={t('presentation_lang_label')} hint={t('presentation_default_lang_hint')}>
+          <RadioSegment
+            value={defaultLang}
+            options={[
+              { value: 'fr', label: 'FR' },
+              { value: 'en', label: 'EN' },
+            ]}
+            onChange={setDefaultLang}
+            ariaLabel={t('presentation_lang_label')}
+          />
+        </ConfigRow>
+
+        <ConfigRow title={t('presentation_theme_label')} hint={t('presentation_default_theme_hint')}>
+          <RadioSegment
+            value={defaultTheme}
+            options={[
+              { value: 'light', label: `☀️ ${t('presentation_theme_light')}` },
+              { value: 'dark', label: `🌙 ${t('presentation_theme_dark')}` },
+            ]}
+            onChange={setDefaultTheme}
+            ariaLabel={t('presentation_theme_label')}
+          />
+        </ConfigRow>
       </div>
 
       {error && <p style={{ color: 'var(--rouge)', marginTop: 16 }}>{error}</p>}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '1.5rem', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-        <div className="note">Vous pouvez modifier ces réglages dans la salle d'attente.</div>
-        <button type="button" disabled={loading} className="btn btn-rouge" onClick={handleCreate}>
+        <div className="note">
+          {canCreate
+            ? "Vous pouvez modifier ces réglages dans la salle d'attente."
+            : <span style={{ color: 'var(--rouge)' }}>Vérifiez vos réglages : timer d'inactivité (15–120 s), joueurs max (2–5).</span>}
+        </div>
+        <button
+          type="button"
+          disabled={loading || !canCreate}
+          className="btn btn-rouge"
+          onClick={handleCreate}
+          style={{ opacity: !canCreate ? 0.45 : 1, cursor: !canCreate ? 'not-allowed' : 'pointer' }}
+        >
           {loading ? '…' : `❦ ${t('open_table')}`}
         </button>
       </div>
@@ -131,6 +199,44 @@ function ConfigRow({ title, hint, children }) {
       </div>
       <div>{children}</div>
       <style>{`@media (max-width: 720px) { .config-row { grid-template-columns: 1fr !important; gap: 0.8rem !important; } }`}</style>
+    </div>
+  )
+}
+
+function RadioSegment({ value, options, onChange, ariaLabel }) {
+  // G46: compact 2-option segment for the room presentation defaults. Same
+  // styling vocabulary as the in-game PresentationPopover's Segment so the
+  // two surfaces feel like one feature.
+  return (
+    <div
+      role="radiogroup"
+      aria-label={ariaLabel}
+      style={{ display: 'inline-flex', border: '1px solid var(--rule)', borderRadius: 2 }}
+    >
+      {options.map((opt, i) => {
+        const selected = opt.value === value
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            onClick={() => onChange(opt.value)}
+            style={{
+              padding: '0.45rem 0.85rem',
+              fontFamily: 'var(--body)',
+              fontWeight: 600,
+              fontSize: '0.85rem',
+              background: selected ? 'var(--ink)' : 'transparent',
+              color: selected ? 'var(--paper)' : 'var(--ink-soft)',
+              borderLeft: i > 0 ? '1px solid var(--rule)' : 'none',
+              cursor: selected ? 'default' : 'pointer',
+            }}
+          >
+            {opt.label}
+          </button>
+        )
+      })}
     </div>
   )
 }

@@ -1,0 +1,11 @@
+{% extends "_base.html" %}
+{% block body %}
+<p style="margin:0 0 16px 0;">Hi <strong>{{ username }}</strong>,</p>
+<p style="margin:0 0 16px 0;">Your 421 Bistro account has been inactive for <strong>{{ inactive_years }} years</strong>. Under our data-minimisation policy (GDPR), it will be <strong>automatically deleted on {{ deletion_date_label }}</strong>.</p>
+<p style="margin:0 0 16px 0;">To keep your account, simply log in:</p>
+<p style="margin:24px 0;text-align:center;">
+  <a href="{{ keep_active_url }}" style="display:inline-block;background:#A8302A;color:#F4ECD8;padding:14px 28px;text-decoration:none;border-radius:4px;font-family:Georgia,serif;font-size:15px;letter-spacing:0.5px;">Keep my account active</a>
+</p>
+<p style="margin:0 0 16px 0;font-size:14px;color:#3A2F26;">On deletion, your profile, game statistics, and public chat messages will be erased. This action is irreversible.</p>
+<p style="margin:24px 0 0 0;font-size:13px;color:#6B5A4A;border-top:1px solid #ECE0C2;padding-top:16px;">This is a transactional email — it directly concerns your account. There is no opt-out.</p>
+{% endblock %}

@@ -179,20 +179,34 @@ def _bot_pick_keepers(dice: list[int]) -> list[bool]:
                 kept[d] += 1
         return reroll
 
-    # Rule 3: any pair. Keep the pair + any lone 1.
+    # Rule 3: any pair. Two paths depending on the third die:
+    #   (a) Pair X-X + lone 1 (X != 1): keep 1 + ONE pair member, reroll the
+    #       other. Chases 11x (rank 7200+) — much higher EV than committing
+    #       to the basic X-X-1 (max rank 661). User playtest showed the
+    #       previous "keep all three" was the bot's biggest weakness: it
+    #       stopped at nénette / 4-4-1 / 6-6-1 even with throws remaining.
+    #   (b) Pair X-X + non-1 third: keep both pair members, reroll the
+    #       third. Chases triple X (rank 2200-2600).
     for v in (6, 5, 4, 3, 2):
         if counts[v] >= 2:
-            kept_count = 0
-            reroll = [True, True, True]
-            for i, d in enumerate(dice):
-                if d == v and kept_count < 2:
-                    reroll[i] = False
-                    kept_count += 1
             if counts[1] >= 1:
+                # Path (a): chase 11x.
+                reroll = [True, True, True]
+                kept_v = 0
                 for i, d in enumerate(dice):
-                    if d == 1 and reroll[i]:
+                    if d == 1:
                         reroll[i] = False
-                        break
+                    elif d == v and kept_v < 1:
+                        reroll[i] = False
+                        kept_v = 1
+                return reroll
+            # Path (b): chase triple X.
+            reroll = [True, True, True]
+            kept_v = 0
+            for i, d in enumerate(dice):
+                if d == v and kept_v < 2:
+                    reroll[i] = False
+                    kept_v += 1
             return reroll
 
     # Rule 4: lone 1. Keep it + the highest other die.
@@ -230,27 +244,108 @@ def _bot_pick_keepers(dice: list[int]) -> list[bool]:
     return [i != best_i for i in range(3)]
 
 
+# G55: rank threshold below which a starter shouldn't commit if it has throws
+# available. Basic figures classify with rank `a*100 + b*10 + c` (max 665);
+# the lowest suite is rank 1100. So `>= 1000` means "anything but a basic" —
+# the bot's starter-floor target. If a starter has thrown a basic with throws
+# still in hand, it should re-roll for a structured combo (the heuristic in
+# `_bot_pick_keepers` knows how to chase one). Without this floor, the bot
+# was committing to basics like `5-3-2` because `rank > target_rank == 0`
+# trivially held — handing the cycle's rhythm to opponents at a basic rank.
+_BOT_STARTER_FLOOR_RANK = 1000
+
+# G55 follow-up: cap on the per-game `bot_decisions` buffer so a long-running
+# room doesn't grow unbounded. Rolling — newest entries push old ones out.
+_BOT_DECISIONS_BUFFER_CAP = 200
+
+
+def _record_bot_throw(
+    game: "Game",
+    player: Player,
+    throw_num: int,
+    dice_before: list[int],
+    kept_mask: list[bool],
+    dice_after: list[int],
+    combo: str,
+    rank: int,
+    fiches: int,
+    target_rank: int,
+    is_starter: bool,
+    max_throws_allowed: int,
+    stop_reason: Optional[str],
+) -> None:
+    """G55 follow-up: append one per-throw entry to `game.bot_decisions`.
+
+    Captures the full reasoning context for a single bot throw — what dice
+    came up, which the heuristic kept, what target was on the table, what
+    the post-throw rank/combo became, and (if this throw ends the turn)
+    why the bot stopped. Suboptimal sequences can be replayed offline by
+    inspecting the buffer via the admin endpoint.
+
+    Also emits a structured `bot_decision` log line (key=value) so server
+    operators can grep production logs without touching the admin API.
+    """
+    entry = {
+        "game_id": game.id,
+        "player_id": player.id,
+        "player_name": player.name,
+        "is_starter": is_starter,
+        "throw": throw_num,
+        "dice_before": list(dice_before),
+        "kept_mask": list(kept_mask),
+        "dice_after": list(dice_after),
+        "combo": combo,
+        "rank": rank,
+        "fiches": fiches,
+        "target_rank": target_rank,
+        "max_throws_allowed": max_throws_allowed,
+        "stop_reason": stop_reason,
+    }
+    game.bot_decisions.append(entry)
+    if len(game.bot_decisions) > _BOT_DECISIONS_BUFFER_CAP:
+        # Drop oldest until back at the cap.
+        del game.bot_decisions[: len(game.bot_decisions) - _BOT_DECISIONS_BUFFER_CAP]
+    # Structured server log for grep/jq.
+    logger.info(
+        "bot_decision",
+        extra={"bot_decision": entry},
+    )
+
+
 def _bot_take_turn(player: Player, game: Optional[Game] = None) -> None:
-    """Bot plays the player's turn (G9: now reads the table to play to win).
+    """Bot plays the player's turn.
+
+    G9 introduced game-awareness (read the table, beat the target). G55
+    refines the heuristic so a *starter* doesn't lock the cycle's rhythm
+    at a basic figure — if the starter has throws left and only a basic
+    in hand, push for a structured combo (suite, pair, 11x, 421, ...).
+    Non-starter logic stays: beat the highest combo at the table, then
+    stop.
 
     Behavior:
-      * If `game` is None (used by isolated unit tests of the bot helper),
-        roll all three dice once and mark done — the legacy single-throw
-        behavior, preserved as a fallback.
-      * If `game` is provided, the bot reads `current_round_plays` to find
-        the highest combo to beat, then iteratively re-rolls within the
-        cycle's rhythm cap. Each iteration calls `_bot_pick_keepers` to
-        decide which dice to keep, and stops on any of:
-          - current rank strictly beats the target
-          - no throws left
-          - reached the rhythm cap (max_throws_this_round for non-starters,
-            or 1 for everyone under bank_rule=="sec" + CHARGE)
-          - already holding a 421 (ceiling)
+      * If `game` is None (isolated unit tests of the bot helper), roll
+        all three dice once and mark done — legacy fallback.
+      * If `game` is provided:
+          - Compute `target_rank` from players who've already played.
+          - For non-starters: stop on `rank > target_rank` (existing).
+          - For starters with `target_rank == 0`: stop only when rank
+            meets the starter floor (>= 1000, i.e. any non-basic).
+          - Always stop on: no throws left, max_throws cap reached, 421
+            ceiling, or `_bot_pick_keepers` says keep everything.
+      * Emits a `log_bot_decision` event on `game.log_events` summarizing
+        the turn (final dice, throws used, target, reason for stopping)
+        so the bot's reasoning is inspectable in the journal.
 
-    On exit, `turn.rolls_left` reflects the actual throws used (mirrors the
-    human `done` handler) so the caller can read it for starter-rhythm lock.
+    On exit, `turn.rolls_left` reflects the actual throws used (mirrors
+    the human `done` handler) so the caller can read it for starter-
+    rhythm lock.
     """
     turn = player.turn
+    # G55 follow-up: stash the pre-throw dice so the per-throw decision log
+    # can show "what came up" vs "what we kept". For the very first throw
+    # the bot rolls all three from a zeroed turn, so dice_before is [0,0,0].
+    pre_throw_dice = list(turn.dice)
+    first_throw_kept_mask = [False, False, False]
 
     # Fresh turn → take the first roll.
     if turn.rolls_left == 3:
@@ -284,28 +379,141 @@ def _bot_take_turn(player: Player, game: Optional[Game] = None) -> None:
     else:
         max_throws_for_me = 3
 
+    # G55 follow-up: collect per-throw snapshots here as the bot iterates.
+    # We don't write each one to `game.bot_decisions` until the turn ends
+    # so the `stop_reason` field can be filled in on the last entry. The
+    # buffer holds (throw_num, dice_before, kept_mask, dice_after, combo,
+    # rank, fiches) tuples.
+    throw_log: list[dict] = []
+    # Pre-throw dice for the very first iteration is whatever was on `turn`
+    # before this function ran (typically [0,0,0]). The first roll above
+    # already happened; treat it as throw #1 with kept_mask = all-True
+    # (the bot kept nothing — it rolled everything fresh).
+    throw_log.append(
+        {
+            "throw": 1,
+            "dice_before": pre_throw_dice,
+            "kept_mask": first_throw_kept_mask,
+            "dice_after": list(turn.dice),
+            "combo": turn.combo,
+            "rank": turn.rank,
+            "fiches": turn.fiches,
+        }
+    )
+
+    # Track why we stopped so the decision event can be inspected.
+    stop_reason = "unknown"
     while True:
         rolls_used = 3 - turn.rolls_left
-        if turn.rank > target_rank and turn.rank > 0:
+        # G55: the win check differs for starter vs non-starter.
+        # - Non-starter (target_rank > 0): any rank above target wins the
+        #   cycle, commit it.
+        # - Starter (target_rank == 0): a "basic" rank under 1000 hands
+        #   the rhythm cheaply; only commit when rank >= STARTER_FLOOR
+        #   *or* we're out of throws/options (those break paths below).
+        beats_target = turn.rank > target_rank and turn.rank > 0
+        meets_starter_floor = turn.rank >= _BOT_STARTER_FLOOR_RANK
+        if beats_target and (target_rank > 0 or meets_starter_floor):
+            stop_reason = "beats_target" if target_rank > 0 else "starter_floor_met"
             break
         if turn.rolls_left <= 0:
+            stop_reason = "no_throws_left"
             break
         if rolls_used >= max_throws_for_me:
+            stop_reason = "max_throws_cap"
             break
         if turn.combo == "421":
+            stop_reason = "ceiling_421"
             break
 
         reroll = _bot_pick_keepers(turn.dice)
         if not any(reroll):
-            break
+            # G55 follow-up: defensive safeguard for the case the heuristic
+            # says "hold" with a worse-than-our-goal hand and throws still
+            # available. The original logic would commit at a basic rank
+            # below the starter floor (or below the non-starter target) —
+            # the user's playtest flagged this for pair-plus-lone-1 hands
+            # (4-4-1, 6-6-1, 2-2-1). The fix to Rule 3 above resolves those
+            # specific dice patterns; this block catches any future
+            # heuristic regression that produces the same bad pattern by
+            # forcing the lowest die to re-roll.
+            below_starter_floor = (
+                is_starter
+                and target_rank == 0
+                and turn.rank > 0
+                and turn.rank < _BOT_STARTER_FLOOR_RANK
+            )
+            below_target = target_rank > 0 and turn.rank <= target_rank
+            if turn.rolls_left > 0 and (below_starter_floor or below_target):
+                lowest_i = min(range(3), key=lambda i: turn.dice[i])
+                reroll = [j == lowest_i for j in range(3)]
+            else:
+                stop_reason = "keepers_say_hold"
+                break
+        pre_reroll_dice = list(turn.dice)
+        # `reroll[i] == True` means re-roll position i; kept_mask is the
+        # inverse so the log reads "what we KEPT" directly.
+        kept_mask = [not r for r in reroll]
         for i, do_reroll in enumerate(reroll):
             if do_reroll:
                 turn.dice[i] = random.randint(1, 6)
         turn.rolls_left -= 1
         turn.combo, turn.rank, turn.fiches = classify(turn.dice)
+        throw_log.append(
+            {
+                "throw": 3 - turn.rolls_left,
+                "dice_before": pre_reroll_dice,
+                "kept_mask": kept_mask,
+                "dice_after": list(turn.dice),
+                "combo": turn.combo,
+                "rank": turn.rank,
+                "fiches": turn.fiches,
+            }
+        )
 
     turn.reroll = [False, False, False]
     turn.done = True
+
+    # G55 follow-up: flush the per-throw log to `game.bot_decisions`. The
+    # last entry carries the `stop_reason`; earlier entries get None for
+    # that field (they didn't end the turn). Each entry also picks up the
+    # static-per-turn context (target_rank, is_starter, max_throws cap).
+    for idx, snap in enumerate(throw_log):
+        is_last = idx == len(throw_log) - 1
+        _record_bot_throw(
+            game=game,
+            player=player,
+            throw_num=snap["throw"],
+            dice_before=snap["dice_before"],
+            kept_mask=snap["kept_mask"],
+            dice_after=snap["dice_after"],
+            combo=snap["combo"],
+            rank=snap["rank"],
+            fiches=snap["fiches"],
+            target_rank=target_rank,
+            is_starter=is_starter,
+            max_throws_allowed=max_throws_for_me,
+            stop_reason=stop_reason if is_last else None,
+        )
+
+    # G55: surface the bot's reasoning so the journal shows what it did
+    # and why. One event per turn — not in HEADLINE_KEYS, so the ticker
+    # ignores it; the right-side log renders it via the raw-msg fallback.
+    final_throws = 3 - turn.rolls_left
+    sorted_dice = sorted(turn.dice, reverse=True)
+    _log(
+        game,
+        "log_bot_decision",
+        f"🤖 {player.name} → {turn.combo} en {final_throws} lancer(s) · {stop_reason}",
+        name=player.name,
+        throws=final_throws,
+        dice=sorted_dice,
+        combo=turn.combo,
+        rank=turn.rank,
+        target=target_rank,
+        reason=stop_reason,
+        is_starter=is_starter,
+    )
 
 
 async def _afk_timer(game: Game, player_id: str, game_id: str):
@@ -581,6 +789,8 @@ async def create_game(
     afk_seconds: int = 45,
     afk_bot: bool = True,
     allow_spectators: bool = True,
+    default_lang: str = "fr",
+    default_theme: str = "light",
     token: Optional[str] = Query(default=None),
 ):
     """Create a new game room and return its short ID."""
@@ -590,6 +800,12 @@ async def create_game(
         bank_rule = "free"
     if afk_seconds < 10 or afk_seconds > 300:
         afk_seconds = 45
+    # G46: room-presentation defaults validated at the boundary so the
+    # Game dataclass + game_state both stay clean.
+    if default_lang not in ("fr", "en"):
+        default_lang = "fr"
+    if default_theme not in ("light", "dark"):
+        default_theme = "light"
 
     gid = str(uuid.uuid4())[:8].upper()
     games[gid] = Game(
@@ -600,6 +816,8 @@ async def create_game(
         afk_seconds=afk_seconds,
         afk_bot=afk_bot,
         allow_spectators=allow_spectators,
+        default_lang=default_lang,
+        default_theme=default_theme,
     )
     return {"game_id": gid}
 
@@ -1066,6 +1284,41 @@ async def _dispatch(
             await _resolve_round(game)
         else:
             _schedule_afk(game, game_id)
+        await manager.broadcast(game_id, game_state(game))
+        return None
+
+    if action == "update_room_rules":
+        # G45: host queues rule changes for the *next partie*. We validate
+        # each field independently and stack into `game.pending_room_rules`;
+        # nothing applies live. `_finalize_cycle` picks up the dict and
+        # applies + clears it when a partie boundary is reached.
+        if player_id != game.host_player_id:
+            return None
+        payload = msg.get("rules") or {}
+        if not isinstance(payload, dict):
+            return None
+
+        validators = {
+            "bank_rule": lambda v: v if v in ("sec", "free") else None,
+            "max_players": lambda v: int(v) if isinstance(v, int) and 2 <= v <= 5 else None,
+            "afk_seconds": lambda v: int(v) if isinstance(v, int) and 15 <= v <= 120 else None,
+            "afk_bot": lambda v: v if isinstance(v, bool) else None,
+            "allow_spectators": lambda v: v if isinstance(v, bool) else None,
+        }
+        for rule_field, validator in validators.items():
+            if rule_field not in payload:
+                continue
+            valid = validator(payload[rule_field])
+            if valid is None:
+                continue
+            current = getattr(game, rule_field, None)
+            if current == valid:
+                # Edited back to the current value → drop the pending entry
+                # rather than leave a noop sitting around.
+                game.pending_room_rules.pop(rule_field, None)
+            else:
+                game.pending_room_rules[rule_field] = valid
+
         await manager.broadcast(game_id, game_state(game))
         return None
 

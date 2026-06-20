@@ -201,21 +201,42 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 - Profile page: notifications bell with unread count + a panel that lists recent.
 - First populators: G28 (friends) and G29 (invites).
 
-### G28. Friends / follow system
-**Why:** Captured for future. User wants the ability to follow other accounts to see what they're up to and quickly invite them to a game.
-**Scope (sketch only):**
-- Table `Follow(follower_id, followee_id, created_at)`. Both-direction or one-way? Spec'd as "follow" (one-way), but a mutual-follow shortcut might be nice (think "friends").
-- Endpoints: `POST /api/follow/{user_id}`, `DELETE /api/follow/{user_id}`, `GET /api/me/following`, `GET /api/me/followers`.
-- UI: follow button on `/profile/{username}`; followers/following count + list on own profile.
-- Privacy: respect a future `User.profile_visibility` setting (defer).
+### G28. Follow system + presence indicators
+**Why:** Asymmetric follow (Sierra follows June; June doesn't auto-follow back). Like Twitter/Instagram, not Facebook friends. Combined with a presence layer ([[G88]]), this lets users see who's online, who's currently in a game, and when offline followers were last seen — the foundation for "join my friend's game" without needing an invite-accept dance.
+
+**Scope:**
+- **Schema:** `Follow(follower_id UUID FK users, followee_id UUID FK users, created_at)`, PK `(follower_id, followee_id)`, both columns with `ON DELETE CASCADE`. No self-follows (CHECK constraint).
+- **REST endpoints:**
+    * `POST /api/follow/{user_id}` — start following (201 idempotent on existing follow)
+    * `DELETE /api/follow/{user_id}` — unfollow (204 idempotent if not following)
+    * `GET /api/me/following` — paginated list of who I follow (returns `{user, presence}` joined with [[G88]])
+    * `GET /api/me/followers` — paginated list of who follows me
+    * `GET /api/users/{username}/followers` + `/following` — public lists (defer privacy controls)
+- **UI:**
+    * Follow button on `/profile/{username}` — toggles state, optimistic update
+    * Followers / Following counts on own profile (clickable → drawer with the list)
+    * Following list rows show: avatar + username + presence indicator (green dot if online, "il y a 3h" / "yesterday" / "21 mai 2026" depending on staleness, OR "en partie · room XXXX" with a join-link when they're in a public room)
+    * Followers list rows show: avatar + username + a follow-back button if not yet mutual
+- **No notification on follow** (defer to [[G27]] — for now it's silent; mutual-follow could trigger one later)
+- **Privacy: defer.** No private profiles in v1.
+
+**Acceptance:**
+- Sierra clicks « Suivre » on June's profile → row appears in `Follow` table → June's profile shows updated follower count
+- Sierra opens her « Following » list → sees June with a green online dot (if June is connected) or "vu(e) il y a 2h" if offline
+- June is currently in public room `ABC123` → Sierra's following list shows « June · en partie » with a clickable join link
+
+**Dependencies:** [[G88]] (presence tracking — provides the online/last_seen/in-game data this UI renders).
 
 ### G31. 3D dice animation + organized combo banner + sound
 **Why:** The current dice are flat 2D images that snap to a new value with no animation, and the player has to scan the values and remember the hierarchy table to know what they rolled (was 1-1-3 worth 3 chips? a basic? 11x?). User wants a more immersive feel — visible dice tumble, a sorted result banner that names the combo, and a "shake" sound before the throw so it feels like real dice in a hand.
 **Scope:**
-- **3D dice rendering.** Two options to weigh during research:
-  - CSS 3D transforms (lightweight, no extra deps; ~12 keyframes per face): faster to ship, narrow visual ceiling.
-  - Three.js or react-three-fiber (~150 KB gzip): richer physics, more polish, larger bundle.
-  - Decision criterion: visual quality vs. bundle size budget. Default lean: CSS 3D first; promote to Three.js only if the look falls short.
+- **3D dice rendering — library choice locked: three.js + cannon-es** (per user research; she has a reference GitHub project to crib from).
+  - **three.js** for rendering — the dice meshes, the table surface (felt-textured plane), camera, lights.
+  - **cannon-es** for physics — the maintained ES-modules fork of cannon.js. Handles the throw arc, dice tumbling, collision damping, settle detection.
+  - **react-three-fiber** as the React wrapper (~50 KB gzip on top of three.js) — declarative scene graph, plays nicely with our existing component model.
+  - Bundle impact: ~200 KB gzip total (three + cannon-es + r3f). Acceptable for a feature this central to the game's feel; lazy-load the bundle behind a dynamic import so the SPA's initial paint isn't affected.
+  - Mobile perf: cap physics at 60fps, drop to 30fps when battery saver detected. Pre-bake the dice geometry (no real-time mesh generation).
+  - **Reference repo: paste the URL into this section when you next touch G31** so future-Sierra has a clear starting point.
 - **Adaptive sizing.** On mount of `Game.jsx`, measure the piste container via a `ResizeObserver` and pass dimensions down to the dice area so the throw fills the available space instead of being capped at 600×600 (this also helps G14). Re-measure on viewport resize.
 - **Animation flow per throw:**
   1. **Shake** (~1 s): kept dice slide to a side panel inside the piste; remaining dice cluster centre, shake in place with audio loop.
@@ -231,7 +252,9 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 - **Accessibility:** keep `<Die>` keyboard-focus + Enter/Space behaviour intact even when 3D. Animation skipped entirely when `prefers-reduced-motion: reduce`.
 - **Performance:** all animation runs on `transform` + `opacity` (GPU-composited). No layout thrashing. Pause animation when the tab is hidden (`document.visibilityState`).
 
-**Research first.** This item carries enough unknowns (3D library choice, audio asset sourcing, mobile perf) that the first PR should be a research note + tiny prototype, not the production drop. Split it: G31a (research + prototype) → G31b (production implementation).
+**Research first.** Library is now chosen (three.js + cannon-es); remaining unknowns are audio asset sourcing + mobile perf budget. First PR should be a tiny prototype landing the bundle + a static "shake then throw three dice" demo on a `/devtools/dice-lab` route, not the production drop. Split it: **G31a** (prototype + bundle measurement + audio asset selection) → **G31b** (production integration into Game.jsx).
+
+**Adjacent ship benefit:** Once G31a is live, [[G94]] (homepage interactive dice) becomes nearly-free — same 3D dice component, just a different scene + interaction trigger.
 
 **Dependencies:** ideally lands alongside G14 (piste sizing) since both touch the piste container measurement. G16 (hint text) and G15 (rhythm indicator) won't fight with the new dice but their placement might need tweaking once the dice area grows.
 
@@ -318,27 +341,35 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 **Acceptance:** Two-player game; player A reaches 11 (manché) while player B reaches 0 in the same cycle. The journal shows the manché entry and a fresh-match start, but no "sits out" line for player B.
 **Dependencies:** None. Pure bug fix.
 
-### G45. Host: edit room rules mid-game (apply after current match)
-**Why:** The room owner today only has a « View room rules » affordance during play — the rules panel is read-only. Reported as a gap: the host should be able to *adjust* the room rules (e.g. bank rule, max throws, AFK timeout, spectators on/off) while a match is in progress, with the change taking effect after the current match/round finishes so live play isn't disrupted mid-cycle.
+### G45. (DONE — pending PR merge) Host: edit room rules mid-game (apply after current partie)
+**Why:** The room owner today only has a « View room rules » affordance during play — the rules panel is read-only. Reported as a gap: the host should be able to *adjust* the room rules (e.g. bank rule, max throws, AFK timeout, spectators on/off) while a partie is in progress, with the change taking effect after the current partie finishes so live play isn't disrupted mid-cycle. Reported again as critical for tables with 5+ players: at that size everyone rolling 3 throws per cycle slows the bank distribution dramatically — the host should be able to switch to `sec` mid-partie to speed things up for the next partie.
 **Scope:**
 - Backend: new WS action `update_room_rules {bank_rule?, max_throws?, afk_seconds?, afk_bot?, spectators?}` — host-only. Validates the partial payload against the room-config schema, stores the diff in a `Game.pending_room_rules` dict, broadcasts the pending changes so the UI can preview them.
-- Apply on match-end: in `_finalize_cycle` (or wherever a new match is bootstrapped after a manché → round-point reset), if `pending_room_rules` is non-empty, merge it into the live `Game.room` and clear the pending dict. Emit a `log_room_rules_updated` event so players see what changed.
-- Frontend: in `RoomSettingsPanel`, when the viewer is the host AND the game is in-progress, switch the read-only fields to editable; a « Sauvegarder pour la prochaine manche » CTA fires the new WS action. Visual badge on the panel — « En attente : prendra effet à la prochaine manche » — when `pending_room_rules` is set.
-- i18n keys: `room_rules_edit_cta`, `room_rules_pending_banner`, `log_room_rules_updated`.
-- Tests: host can update; non-host rejected; changes don't take effect until match-end; multiple consecutive edits stack into the same pending diff (last write wins per field).
-**Acceptance:** Host opens room settings mid-match, flips libre → sec, saves. A banner shows « Prendra effet à la prochaine manche ». When the current manché resolves and a new match starts, the rhythm cap moves to 1 and the log entry confirms the change.
+- Apply on partie-end: in `_finalize_cycle` (or wherever a new partie is bootstrapped after a manché → round-point reset), if `pending_room_rules` is non-empty, merge it into the live `Game.room` and clear the pending dict. Emit a `log_room_rules_updated` event so players see what changed.
+- **Journal (Ardoise) announcement, per-field:** the `log_room_rules_updated` event payload includes the diff (e.g. `{bank_rule: "free" → "sec"}`) and the journal renders a human-readable line per change: « L'hôte a changé la distribution : Libre → Sec » / « Inactivité : 45s → 20s ». This is critical so other players see *what* was changed and *when* the change took effect.
+- Frontend: in `RoomSettingsPanel`, when the viewer is the host AND the game is in-progress, switch the read-only fields to editable; a « Sauvegarder pour la prochaine partie » CTA fires the new WS action. Visual badge on the panel — « En attente : prendra effet à la prochaine partie » — when `pending_room_rules` is set.
+- i18n keys: `room_rules_edit_cta`, `room_rules_pending_banner`, `log_room_rules_updated_*` (one per changed field for the journal entries).
+- Tests: host can update; non-host rejected; changes don't take effect until partie-end; multiple consecutive edits stack into the same pending diff (last write wins per field); journal logs each changed field separately.
+**Acceptance:** Host opens room settings mid-partie, flips libre → sec, saves. A banner shows « Prendra effet à la prochaine partie ». When the current partie resolves and a new partie starts, the rhythm cap moves to 1 and the Ardoise shows a journal line confirming the change. Other players see the same Ardoise entry.
 **Dependencies:** None. Builds on the existing `RoomSettingsPanel`. Pairs naturally with [[G15]].
 
-### G46. In-game language toggle (FR ↔ EN inside the game room)
-**Why:** Reported during playtest. The TopBar carries the FR/EN switcher on every other page, but the game room hides the TopBar (intentional — the action bar takes precedence), and there's no in-room equivalent. A player who landed on the wrong language can't switch mid-game without leaving the room.
+### G46. (DONE — pending PR merge) In-game presentation settings (FR/EN + light/dark + room defaults)
+**Why:** Reported during playtest. The TopBar carries the FR/EN switcher and theme toggle on every other page, but the game room hides the TopBar (intentional — the action bar takes precedence), and there's no in-room equivalent. A player who landed on the wrong language or finds the contrast unreadable can't switch mid-game without leaving the room. Compounded by the user's separate observation: as host they want to set *room defaults* for these presentation choices (so the table opens consistently), with each player able to override locally if they want.
 **Scope:**
-- Add a compact `LangSwitch` to the game-room action bar (or the room settings panel header) — a 2-state toggle showing « FR » / « EN ». Reuses `useLang().setLang` and the existing localStorage persistence.
-- Placement: prefer the bottom action bar so it's adjacent to the player's other controls (Quitter, ⚙ Room rules). Keep it small so it doesn't compete with primary CTAs.
-- If the user is logged in, mirror the existing `updateMe({lang_pref})` background write that the TopBar toggle does — so the per-account preference stays in sync. See [[G26]] for the broader login-time sync.
-**Acceptance:** A player in any game room can flip FR ↔ EN; all UI strings + log events re-render in the chosen language; the choice persists across reloads. Logged-in users see their account's `lang_pref` update.
-**Dependencies:** None. Light-touch UI change.
+- **Per-player overrides (always available):** a compact « ⚙ Affichage » popover accessible from the game-room action bar (or the room settings panel header) exposes:
+    * Language: FR ↔ EN toggle. Reuses `useLang().setLang` + the existing localStorage persistence.
+    * Theme: light ↔ dark toggle. Reuses `useTheme().setTheme` + localStorage. (Existing dark theme already defined in `styles.css:42-61`.)
+    * Sound toggle (placeholder for [[G31]] — keep the popover slot here so future audio prefs slot in cleanly).
+  Available to every player at every viewport, including mobile (drawer-accessible there).
+- **Room defaults (host only, set during room creation):** extend `CreateRoom.jsx` with two new fields:
+    * Default language for the room (FR / EN)
+    * Default theme for the room (light / dark)
+  Persist on `Game.room_defaults` (or as part of the existing `Game.room` config). New players entering the room adopt these defaults UNLESS they have a per-player override saved in localStorage from a previous session, in which case the override wins.
+- **Logged-in sync (FR/EN only):** mirror the existing `updateMe({lang_pref})` background write the TopBar toggle does — so a user's account `lang_pref` syncs across rooms. See [[G26]]. Theme pref similarly hooked to `User.theme_pref` (new column or extend an existing JSON field).
+**Acceptance:** A player in any game room can flip FR ↔ EN and light ↔ dark via the in-room settings popover; choices persist across reloads. Host creating a room can set defaults that new joiners adopt unless they have a personal override saved. Logged-in users see their account's `lang_pref` and `theme_pref` stay in sync across rooms.
+**Dependencies:** None for the per-player overrides (light-touch UI change). The host-default + account-sync paths need a small backend schema bump (`Game.room.default_lang`, `Game.room.default_theme`, plus `User.theme_pref` migration).
 
-### G47. Local player anchored at the bottom of the piste — and visually emphasized
+### G47. (DONE — pending PR merge) Local player anchored at the bottom of the piste — and visually emphasized
 **Why:** Reported during playtest. The piste shows all players' seats arranged around the table, but the *viewer's* seat isn't anchored — it can land anywhere on the ring depending on turn order. The user wants the local player to always sit at the bottom (closest to the action bar) so they can identify themselves at a glance, like every poker / card-game UI does. Compounding it: today every seat renders at the same size, so even once anchored, the viewer's seat can be hard to spot at first glance — the user wants their own avatar *larger* than the competitors'.
 **Scope:**
 - Frontend: in `Game.jsx`'s `PisteSeat` rendering loop, compute the player order so the local `playerId` is always at index 0 of the visual ring; other players fill the remaining seats in their original turn-order. The bottom slot in the piste maps to index 0.
@@ -420,7 +451,7 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 **Acceptance:** On a 1440-wide screen, every in-game label (action bar, ticker, log, dice hint, rhythm indicator) is comfortably readable without leaning in. The piste still dominates the layout but doesn't drown out the surrounding UI.
 **Dependencies:** None, but should ship after (or alongside) [[G16]] so the dice-hint changes aren't undone.
 
-### G53. Animate the current player's seat to signal whose turn it is
+### G53. (DONE — pending PR merge) Animate the current player's seat to signal whose turn it is
 **Why:** Reported during playtest. The piste shows whose turn it is via a subtle highlight on the active seat, but the cue is weak — a player who looks away for a moment can come back unsure whether it's their turn or someone else's. The user wants a clearer animation (pulse, glow, blink) on the active *non-local* player's seat so the table reads at a glance: "their turn." For the local player's own active turn, the existing CTAs (« Lancer », « Valider ») already shout the answer — the animation matters most for *spectating* other players.
 **Scope:**
 - Frontend: in `PisteSeat`, when `active === true` AND `isSelf === false`, apply a CSS keyframe animation. Candidate: a soft brass pulse (`box-shadow` 0 → 12px brass-soft → 0, period ~1.4 s, infinite). Avoid full-brightness or color-shift effects — the piste is already a busy surface; this needs to read as "alive" without screaming.
@@ -444,7 +475,7 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 **Acceptance:** A sec room's RhythmIndicator displays « SEC · 1 max » during CHARGE only; the moment the bank empties and DECHARGE begins, it switches to « LIBRE » with the actual throw cap.
 **Dependencies:** None — small follow-up to [[G15]].
 
-### G55. Bot strategy upgrade — probability-aware + decision-log
+### G55. (partially DONE — pending PR merge) Bot strategy upgrade — probability-aware + decision-log
 **Why:** Reported during playtest. The current bot accepts very low first-throw combos (e.g., `5-3-2`, a basic figure rank ≈ 5) when it's the round starter, because `_bot_take_turn`'s win check fires `turn.rank > target_rank and turn.rank > 0`. As the starter, `target_rank == 0`, so any non-zero rank trips the break and the bot commits its first throw without ever considering re-rolls — even when `_bot_pick_keepers` would have correctly identified the `3-2` as a consecutive pair worth keeping (rule 5) and re-rolled the 5 toward a suite. The user wants the bot to play like a human: factor in **probability** (more throws given to opponents = more chance they beat me), **strategy** (a starter should set the bar high so others can't easily match in their own throw allowance), and **luck** (still accept a great first roll instead of throwing it away).
 **Scope:**
 - **Starter-aware floor.** When `target_rank == 0` AND the bot is the round starter, replace the win-check with a *floor check*: only stop on a "respectable" rank. Candidate floor: a pair (rule-3 territory, rank ≥ 2200), or any suite / 11x / 421 / 111. Below that, keep iterating until throws run out. This single change fixes the `5-3-2` case directly.
@@ -508,30 +539,1007 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 **Acceptance:** A player goes AFK, the bot plays several turns, the player returns and clicks roll. A « ↩ {name} est de retour à la table. » card appears in the ticker. The G2 in-grace path still emits `log_bot_handback` for its narrower case.
 **Dependencies:** None.
 
-### G59. Restructure in-game info surfaces — gameplay feed left, chat right
-**Why:** Captured for future. Today the in-game UI has two information panels: a **right-side journal** with every log event (useful for debugging, but visually heavy) and a **left-side ticker** (the « En Direct » feed, currently showing only filtered headlines). When chat ships ([[item 8]] + [[G34]] + [[G36]] + [[G37]]), it needs a permanent home, and the right-side journal is the most natural slot — it's already a scrolling text column. But losing the journal means the left ticker must absorb *all* essential gameplay information, becoming the single source of truth for what's happening at the table.
-**Vision (target end-state):**
-- **Left ticker = full gameplay feed.** Replaces the current minimal headline filter with a richer per-cycle stream:
-  - Round start: « Tour 4 · Sierra donne le rythme »
-  - Each player's submitted play, in turn order starting with the rhythm-setter:
-    - « Sierra a joué un **421 en 3 lancers** » (the rhythm-setter; explicit throw count)
-    - « June a joué **1-1-4 (114)** · 114 to beat for 8 fiches » (a follower, with the "score to beat / chips in play" rolled in)
-  - Tie detection: « Égalité entre Sierra et June à 114 — départage en cours »
-  - Tiebreak throws as they land: « June (départage) : 632 → 1f »
-  - Cycle resolution: « June prend 8 fiches · Banque : 3 » / « Sierra donne 2 fiches à June »
-  - Phase transitions, sit-outs, manchés, round points — all surfaced here.
-  - "Score to beat" line auto-updates as new plays push the bar.
-- **Right column = chat (future).** Replaces the current right-side journal once chat ships. Same width, same scroll behavior; users gain real-time chat with their tablemates. Moderation (G34 / G36 / G37) gates message visibility.
-- **Debug/dev access to the raw log.** The user values the raw event log for debugging — preserve it via a `/devtools` route or a host-only "Show event log" toggle that opens an overlay. Not in the default play layout.
-**Scope (sketch only — not for immediate implementation):**
-- Backend: expand HEADLINE_KEYS in `CommentaryTicker.jsx` toward "include everything that matters" rather than "include only the highlights." Likely additions: `log_turn`, `log_charge_takes`, `log_decharge_gives`, `log_round_start`. Drop the dedup-collapse for non-AFK events (each play is its own announcement).
-- Backend: emit a new `log_score_to_beat` event whenever a play raises the highest rank in `current_round_plays`, so the ticker can render the "X to beat for Y fiches" line without re-computing client-side.
-- Frontend: a new card variant in `TickerCard` for player plays — more visual presence (small dice glyph + combo name + chip outcome). The "headline" cards (manché, pool empty, tiebreak start) keep their existing accent treatment.
-- Frontend: right-side `<aside>` swaps `<LogPanel>` → `<ChatPanel>` once chat ships. Until then, leave the journal in place as the dev/debug view (or add the host-only toggle).
-- Grid: today is `260px 1fr 320px`. With chat ascending to first-class status, may need to widen to `320px 1fr 380px` so both side rails have breathing room.
-- **Coordinate with [[G50]]:** the ticker dedup logic stays for AFK events (one card per session) but doesn't apply to plays — each play is unique by design.
-**Acceptance:** A player can follow the entire game without ever looking at the right column. The ticker tells them whose turn it is, what each played, the running score-to-beat, and the cycle outcome. When chat ships, the right column becomes the chat surface.
-**Dependencies:** [[item 8]] (chat), [[G34]] (AI moderation), [[G36]] (rate-limiter), [[G37]] (peer reporting) — all need to land before the right-column flip. The ticker enrichment can ship first, independent of chat, as a pure UX upgrade.
+### G59. Restructure in-game info surfaces — gameplay feed left, chat as additional right-rail panel
+**Why:** The in-game UI today has two information surfaces: a **right-side journal** logging every event (useful for debugging + neat for following the game) and a **left-side ticker** (the « En Direct » feed showing filtered headlines). The journal stays — it's where everyone follows the game cleanly. Chat ([[G89]]) adds **as a third panel** in the right rail alongside the journal and the combo hierarchy, surfaced via [[G61]]'s collapsible tabs so the page doesn't get heavier — users open and close panels independently. The left ticker is also enriched independently as a pure UX upgrade so the play-by-play is more legible at a glance.
+
+**Two independent improvements, can ship separately:**
+
+#### 59a — Left ticker enrichment (no dependency on chat)
+
+Today the ticker shows only filtered "headline" events. Expand it to the full gameplay feed:
+- Round start: « Tour 4 · Sierra donne le rythme »
+- Each player's submitted play, in turn order:
+    * « Sierra a joué un **421 en 3 lancers** » (the rhythm-setter; explicit throw count)
+    * « June a joué **1-1-4 (114)** · 114 to beat for 8 fiches » (a follower, with score-to-beat rolled in)
+- Tie detection: « Égalité entre Sierra et June à 114 — départage en cours »
+- Tiebreak throws: « June (départage) : 632 → 1f »
+- Cycle resolution: « June prend 8 fiches · Banque : 3 »
+- Phase transitions, sit-outs, manchés, round points — all surfaced here.
+- "Score to beat" auto-updates as new plays push the bar.
+
+**Scope:**
+- Backend: expand `HEADLINE_KEYS` in `CommentaryTicker.jsx` consumer logic. Add: `log_turn`, `log_charge_takes`, `log_decharge_gives`, `log_round_start`. Drop dedup-collapse for non-AFK events (each play is its own announcement).
+- Backend: emit a new `log_score_to_beat` event whenever a play raises the rank in `current_round_plays`, so the ticker renders the "X to beat for Y fiches" line without client-side recomputation.
+- Frontend: new card variant in `TickerCard` for player plays — small dice glyph + combo name + chip outcome. Headline cards (manché, pool empty, tiebreak start) keep their accent treatment.
+- **Coordinate with [[G50]]:** ticker dedup stays for AFK events (one card per session) but doesn't apply to plays — each play is unique by design.
+
+**Acceptance:** A player can follow the entire game from the ticker alone, without looking at the journal. The ticker tells them whose turn it is, what each played, the running score-to-beat, and the cycle outcome.
+
+#### 59b — Right rail becomes a three-panel surface (depends on [[G61]] + [[G89]])
+
+The right `<aside>` currently has Journal + Combo Hierarchy. Add Chat as a third collapsible panel via [[G61]]'s tab pattern.
+
+**Scope:**
+- Right rail panels (after [[G61]] tabs): **Journal** (existing, collapsible), **Hiérarchie** (existing, becomes collapsible via G61), **Chat** (new — surface of [[G89]]).
+- Each panel can be open or collapsed independently; only-open panels take vertical space. User picks what's visible per their preference (persisted to localStorage).
+- Default state per user: Journal **collapsed** on mount (since the ticker now carries most of the info per 59a); Hiérarchie + Chat **expanded** by default.
+- Grid: today is `260px 1fr 320px`. With chat first-class, widen to `320px 1fr 380px` so both rails have breathing room.
+- Mobile (< 768px): right rail collapses to a bottom drawer with tab chips at the top — same Journal / Hiérarchie / Chat options. Tap a chip → drawer slides up.
+- Notification cue: when chat is collapsed and a new message arrives, the chat tab chip pulses + shows an unread count.
+
+**Acceptance:**
+- A player can have only Hiérarchie open and follow the game purely via the left ticker (59a).
+- A player can have Journal + Chat both open, hidden Hiérarchie, and chat with tablemates while still seeing the full event log.
+- Mobile: tap chat chip → drawer slides up with full chat history → tap away → drawer closes.
+
+**Dependencies:** [[G61]] collapsible tabs (must land first — provides the panel host); [[G89]] chat backend (provides the data the panel shows); [[G34]] + [[G36]] + [[G37]] (moderation — content gating).
+
+### G60. Persist the game session across page refreshes
+**Why:** Reported during playtest. Refreshing the page mid-game drops the player back to an empty home/lobby instead of resuming their seat at the table. The backend already keeps the `Game` in-memory (it survives any single client refresh; the WS just closes and the player's `connected` flips False until reconnect), so the gap is purely client-side: the frontend doesn't remember which game it was just in, so after refresh it has nowhere to navigate.
+**Scope:**
+- **localStorage handshake.** When `Game.jsx` mounts with a valid `gameId` + `playerId` from the URL, write `{gameId, playerId, name, token}` to `localStorage.last_session` (TTL via a `created_at` timestamp; clear if older than ~6 h since rooms don't usually outlive that). When a `leave` action fires (or the game's `FINISHED` phase is reached), clear `last_session`.
+- **Home / Lobby rehydration.** On `/` (home) mount, check `localStorage.last_session`. If present + not stale, ping `GET /api/games/{gameId}` (a new lightweight endpoint that returns 200 with the game's phase + the player's `connected` flag, or 404 if the room is gone). If the room still exists AND the player is still in `game.players`, render a banner: « Reprendre votre partie en cours · {room_code} · {N} joueurs » with a primary CTA to navigate to `/game/{gameId}?pid={pid}` and a secondary "Quitter cette partie" that clears the session + posts an explicit leave.
+- **Direct-URL refresh** (already works partially): `/game/:gameId?pid=...` does preserve the pid through refresh, but the WS reconnect path must handle the case where the player's `connected` was False and re-engage them cleanly. Verify against current code; if there's a gap, the `websocket_endpoint` already calls `_abort_bot_handback` + broadcasts state on reconnect, which should be sufficient.
+- **Stale-session UX.** If the GET returns 404 (room dissolved) or the player isn't in the roster anymore, surface a one-time toast on home: « Votre dernière partie n'est plus active. » Clear localStorage.
+- **Guest token handling.** Guest sessions store the random `playerId` only — no JWT. Registered users also store the JWT, which can refresh-validate via `/auth/me` on mount; if the token is expired, clear the session.
+- **Tests:**
+  - Backend: new `GET /api/games/{game_id}/info` returns phase + connected map for valid game, 404 for missing.
+  - Frontend (manual): refresh during CHARGE → land back in the same game; refresh after `leave` → no rehydration banner; refresh after the room is dissolved → stale-session toast.
+**Acceptance:** A player in an active game refreshes their browser tab and returns to the same game state — same seat, same dice in front of them, same turn order. If the room ended/dissolved during their absence, they see a one-time explanatory toast and a clean home page.
+**Dependencies:** None for the v1 flow. Pairs with [[G11]] (single-player searching modal) — both target session continuity. Could later be extended to "reconnect across devices" but that needs proper auth-token-as-session-key.
+
+### G66. (DONE — pending PR merge) Default bank rule should be « Libre » (au choix du donneur)
+**Why:** Reported during playtest. The room-creation form currently defaults the bank rule to « Sec jusqu'à banque vide » (single throw for everyone during charge). The user expects « Au choix du donneur » (libre / free) as the default — it's the standard 421 experience where the round starter sets the rhythm and others match. Sec is a special-case shortcut for fast play with many players, not the canonical rule.
+**Scope:**
+- Backend: `Game.bank_rule` default is already `"free"` (`app/game/logic.py:131`), so the backend is correct.
+- Frontend: `CreateRoom.jsx` — wherever the form initializes `bankRule` state (look for `useState('sec')` or similar; needs verification), flip the default to `'free'`. The two-option toggle still presents both choices; just the *pre-selected* default changes.
+- Verify: opening the create-room page → « Au choix du donneur » is the radio that's checked by default.
+**Acceptance:** Creating a new room without changing the distribution option produces a libre room (`bank_rule === 'free'`).
+**Dependencies:** None. One-line fix.
+
+### G67. (DONE — pending PR merge) Numeric inputs accept keyboard entry (not just up/down arrows)
+**Why:** Reported during playtest. The AFK timeout `<Stepper>` (and likely the max-players stepper too) requires tapping the up/down arrows to change the value. The user wants to type a value directly via keyboard — much faster than clicking from 15 to 60 in 5-second increments.
+**Scope:**
+- Find the shared `Stepper` component (or wherever AFK timeout + max-players are rendered as numeric inputs).
+- Replace the arrow-only stepper with an `<input type="number" min={...} max={...} step={...}>` that also accepts typed values. Keep the visual increment buttons for tap users (good mobile UX) but make the central field editable.
+- Validate on blur: clamp to `[min, max]` (AFK: 15 ↔ 60s; max-players: 2 ↔ 5). If the typed value is out of range, snap to the nearest bound and flash a brief tooltip.
+- Keep keyboard arrow keys working when the input is focused (up/down adjusts by `step`).
+- Apply to: AFK timeout, max-players, anywhere else a stepper appears (search for the component / pattern).
+**Acceptance:** On the create-room and (future [[G45]]) edit-room-rules forms, the user can either tap up/down OR click the number and type a value. Out-of-range typed values clamp on blur with a visual cue.
+**Dependencies:** None. Light-touch frontend change.
+
+### G68. (DONE) RGPD consent — Contact form checkbox + Register links Privacy too
+**Why:** The Privacy.jsx page already covers all 7 RGPD-required sections (data controller, collected data, purposes, retention, your rights, cookies/storage, DPO contact). Two gaps remained: (1) the Contact form had no consent checkbox, so users were submitting personal data (name, email, free-text message) without an explicit data-processing opt-in; (2) the Register form's consent checkbox only linked to `/terms`, so users weren't being told they were also agreeing to the Privacy/RGPD policy.
+**Scope shipped:**
+- `Contact.jsx`: new required consent checkbox linking to both `/privacy` and `/terms`. Submit button gated until checked + JS belt-and-suspenders check before POST. Error message in FR/EN if the user manages to bypass the `required` flag.
+- `Login.jsx` (RegisterForm): existing `accept-cgu` checkbox text expanded to link to both `/terms` AND `/privacy` via new `accept_terms_and` + `accept_privacy_link` i18n keys.
+- New FR/EN i18n keys: `contact_consent_pre`, `contact_consent_privacy_link`, `contact_consent_and`, `contact_consent_terms_link`, `err_accept_consent`, `accept_terms_and`, `accept_privacy_link`.
+**Acceptance:** Sending a contact message without checking the consent box → error + no POST fires. Registering → checkbox text mentions both Terms AND Privacy with both links working.
+**Dependencies:** None.
+
+### G69. (DONE) Privacy & Terms content expansion + EN translation
+**Why:** Reported during the G68 verification. Privacy.jsx was hard-coded French and never switched to English — the visible page stayed in French even when the user's language was set to EN. Terms covered the basics but had no explicit conduct rule list, no mention of host moderation discretion (G24 kick), and no description of the strike-escalation flow (G38 schema). The user wanted the legal pages to actually reflect what's implemented.
+**Scope shipped:**
+- `Privacy.jsx` rewritten with i18n keys; new full EN translation. New section 7 « Modération et journalisation » documenting the audit log (host kicks, warnings, suspensions, bans, IP retention).
+- `TermsAndConditions.jsx` expanded:
+    * Section 2 now lists explicit prohibited behaviors (harassment, hate speech, sexual content, spam, impersonation, doxxing, cheating).
+    * New section 5 « Modération par les hôtes de salle » documents the host's kick + report powers and the misuse policy.
+    * New section 6 « Application des règles & échelle des sanctions » spells out the 3-strike progression (warning → temp suspension → long ban) and the immediate-permanent path for severe offenses (French law violations).
+    * Existing sections renumbered.
+- New FR/EN i18n keys (~50): all `privacy_s*_*` + `terms_community_rule_*` + `terms_host_*` + `terms_enforcement_strike*` keys.
+**Acceptance:** Switching language flips both Privacy and Terms between FR and EN. Terms accurately describes the kick/report flow + strike progression that's actually live in the codebase. Privacy mentions the moderation audit log.
+**Dependencies:** None. Content is grounded in what's actually built (G24 kick, G38 strike schema, GdprAuditLog) — no aspirational features described.
+
+### G70. Inactive-account auto-deletion pipeline (RGPD compliance)
+**Why:** RGPD's data-minimisation principle requires that we don't keep personal data longer than necessary. Indefinitely retaining dormant accounts both violates this principle and increases blast radius if the database is ever compromised. The Privacy policy (section 8) commits to a 2-year inactivity + 30-day grace deletion flow; this entry tracks the actual implementation.
+**Scope:**
+- **Schema**: add `User.last_login_at: datetime` column (already implicit via `last_login_ip` if it exists — check). Update on every successful auth: `/auth/login`, Google SSO callback, and remember-me refresh.
+- **Inactivity sweep**: nightly cron (Celery beat or a plain cron + management command) that finds users where `last_login_at < now - 2y` AND `deleted_at IS NULL` AND `inactivity_warned_at IS NULL`. For each match:
+    * Send a templated email (« Votre compte 421 Bistro va être supprimé dans 30 jours ») via the existing Resend pipeline. Subject + body in the user's `lang_pref`.
+    * Stamp `inactivity_warned_at = now` so we don't spam them.
+- **Deletion sweep**: same cron, finds users where `inactivity_warned_at < now - 30d` AND no login since then → run the existing soft-delete pipeline (`/auth/me DELETE` flow). Hard-delete from `users` table after the standard 30-day grace window, drop their `GdprAuditLog` rows older than 365d, anonymise game history.
+- **Recovery path**: a login between `inactivity_warned_at` and the deletion sweep clears `inactivity_warned_at` and resets the clock. Add a banner on `/profile` if the user is currently in the warning window.
+- **Admin override**: G73's admin dashboard exposes a list of "users in warning window" so I can spot-check the queue before the deletion fires.
+- **Tests**: unit for the sweep selectors; integration for the end-to-end warned → login resets → deletion-skipped flow.
+**Acceptance:** A test account with `last_login_at = 2y+1d` ago receives the warning email, has its `inactivity_warned_at` stamped. 30 days later (or simulated with frozen time) the account is soft-deleted; 30 days after that, hard-deleted.
+**Dependencies:** Existing Resend pipeline (already wired for password resets). Backend cron infrastructure decision (Celery vs. simple cron + management command — pick the simplest that handles failure restart).
+
+### G71. Data breach detection + user notification pipeline (RGPD Art. 33-34)
+**Why:** RGPD Article 33 requires reporting confirmed personal-data breaches to the CNIL within 72 hours; Article 34 requires notifying affected users without undue delay if the breach is likely to result in high risk to their rights. Privacy section 9 commits to both; this entry tracks the actual response playbook + tooling.
+**Scope (two halves: detection and response):**
+- **Detection** (signal sources):
+    * Sentry alerts on unauthorised access patterns (existing Sentry SDK wiring captures errors; needs a rule for "auth events with anomalous IPs/UAs").
+    * Failed-login spike detector (cron-aggregated count over a sliding window) — if >100 failures from <10 IPs in 1h, raise an incident.
+    * Database access audit (Postgres `pg_stat_activity` snapshot, log diff against expected app connections).
+    * Manual incident trigger via admin endpoint `POST /api/admin/incidents/declare` for cases we hear about externally.
+- **Response playbook** (documented in `docs/INCIDENT_RESPONSE.md`, not just code):
+    * Incident table `Incident(id, detected_at, declared_at, declared_by, scope_estimate, affected_users_count, status, cnil_reported_at, users_notified_at, resolution_summary)`.
+    * Affected users list scoped per-incident (could be all users, all users with passwords created before date X, all users from a specific IP range, etc.).
+    * Automated email to affected users using a templated message (subject, scope, recommended actions). Body assembled from the incident's `scope_estimate` field, the data fields known to be exposed, and the standard "change password, review activity, enable 2FA when available" recommendations. Email rendered in the user's `lang_pref`.
+    * CNIL reporting endpoint stub — actual filing happens via their portal; the system stores the filing reference number.
+- **Tests**: incident creation, notification rendering with each scope flavor, idempotency (re-running shouldn't double-email anyone).
+**Acceptance:** Admin declares an incident with scope "all users registered before 2026-01-01". The system enumerates affected users, queues the notification emails (templated, localised), records the timestamps, and exposes a status page at `/admin/incidents/{id}`.
+**Dependencies:** Existing Resend pipeline. Sentry SDK already wired. New `Incident` table + Alembic migration. Pairs with [[G73]] (admin UI surfaces the incident state).
+
+### G71b. Security hardening + intrusion detection (defensive baseline)
+**Why:** Even with G71's incident response, the goal is to never need it. Today the codebase has light protections: H1 caps WS message size, the `limiter` slowapi middleware rate-limits some endpoints, FastAPI's Pydantic validation blocks most injection patterns. Gaps to close before opening to a wider audience.
+**Scope:**
+- **OWASP audit checklist** (`docs/SECURITY_AUDIT.md`): walk the OWASP Top 10 and document where each protection lives.
+- **SQL injection**: SQLAlchemy parameterised queries are the default everywhere — confirm with a `grep -r "f\".*WHERE.*{" app/` audit. No raw string interpolation into SQL.
+- **XSS**: React's JSX auto-escapes; confirm no `dangerouslySetInnerHTML` in components. Any new chat / user-content surface must use a sanitiser.
+- **CSRF**: the API is bearer-token based, not cookie-session, so CSRF is structurally moot for `/api/*`. Document this so future cookie-session work doesn't reintroduce it.
+- **Rate limiting**: extend `limiter` to cover `/auth/login`, `/auth/register`, `/auth/forgot-password`, `/api/contact`. Per-IP + per-account. Current state — check what's actually limited.
+- **Brute-force protection**: lockout after 10 failed logins / 15 min / IP. Track in Redis once we have it, in-memory dict before.
+- **Header hardening**: CSP, X-Frame-Options DENY, X-Content-Type-Options nosniff, Referrer-Policy strict-origin-when-cross-origin, HSTS in production. Add a Starlette middleware.
+- **Dependency scanning**: GitHub Dependabot or Snyk on the repo; track + remediate vulnerabilities monthly.
+- **Audit logging**: every admin action via `GdprAuditLog`-style row. Already exists for role changes; extend to G73's user-edit actions.
+- **Secrets hygiene**: confirm no secrets in commit history (`git log -p --all | grep -i "secret\|key\|password" | head`). All env-driven (`.env` already in `.gitignore`).
+**Acceptance:** SECURITY_AUDIT.md documents the protection per OWASP item with code references. CSP + security headers visible in browser dev-tools network response.
+**Dependencies:** None for the audit doc; some items (Redis, Dependabot) need infrastructure decisions.
+
+### G72. Admin user management UI
+**Why:** I'm the sole admin today (`role="admin"`); when a real user runs into trouble, an issue I need to fix, or a request comes in via the contact form, I need a UI to find that user, see their full record, and act. Today the admin dashboard exposes only the dashboard-summary + role-change endpoints — no list, no search, no detail view.
+**Scope:**
+- **Backend**: new admin endpoints, all gated by `require_admin`:
+    * `GET /api/admin/users` — paginated list with filters (`?q=username|email`, `?role`, `?banned=true`, `?inactive=true`, `?page=1`). Returns `{items, total, page, page_size}`.
+    * `GET /api/admin/users/{id}` — full record: account fields, role, strike_count, ban state, last_login, recent games, recent moderation actions, ip history.
+    * `PATCH /api/admin/users/{id}` — multi-field update: username, email, lang_pref, theme_pref, role (already exists separately, fold in here), strike_count reset, ban_until clear, chat_ban_until clear. Audited via `GdprAuditLog`.
+    * `DELETE /api/admin/users/{id}` — hard delete with confirmation token (admin must type the username to confirm).
+- **Frontend**: extend `AdminDashboard.jsx`:
+    * New tab « Utilisateurs » with the paginated table + filter chips.
+    * Detail panel (drawer or sub-route `/admin/users/{id}`) with all fields editable inline + a danger-zone footer for delete.
+    * Audit-trail strip at the bottom of the detail panel: "12 May 2026 — strike +1 (G34 hate_speech, auto)".
+- **A11y**: filter inputs labelled, table rows keyboard-navigable, destructive actions require explicit confirmation.
+**Acceptance:** I can search "sierra", see my own account row, click in, see all my fields + a list of any moderation actions, edit my username, and (theoretically) delete a test account with the username-typed confirmation.
+**Dependencies:** [[G38]] (admin role + dashboard surface) — extends it.
+
+### G73. Admin moderation review UI
+**Why:** When a sanction is applied automatically by G34/G37 (or manually via G24/G32), I need to see *what triggered it* — the original message, the report context, the AI verdict + confidence, the dice of similar incidents — so I can confirm the system is acting reasonably and overturn false positives. Bans without context are unauditable.
+**Scope:**
+- **Backend** (some of this overlaps with G39 "moderation inbox" — reuse those tables):
+    * `GET /api/admin/moderation/sanctions` — list of all sanctions ever issued, paginated, filterable by user / kind (warn/temp/perm) / source (auto/manual) / status (active/expired/overturned).
+    * `GET /api/admin/moderation/sanctions/{id}` — full context: the `ModerationReport` that triggered it, the `ChatModerationLog` rows or `MessageReport` row, the AI verdict + confidence + rationale, the user's strike history, the IP at offense.
+    * `POST /api/admin/moderation/sanctions/{id}/overturn` — admin can clear the sanction; cascades to clear strike_count increment, unban, restore chat access. Audited.
+- **Frontend**:
+    * New tab « Modération » with two sub-panels:
+        - **Active sanctions** — current bans, mutes, warnings. Each row clickable into the detail view.
+        - **Recent decisions** — last 100 sanctions (any status), so I can spot-check trends.
+    * Detail view shows the full context (above) + an « Annuler la sanction » button (with confirmation modal).
+    * Threading: if a sanction stems from multiple reports, show all of them.
+- **Tests**: list endpoint pagination, detail enriches with linked records, overturn cascades correctly + audits.
+**Acceptance:** A sanction created (auto or manual) is visible in the list within a few seconds; clicking it shows the original triggering content; I can overturn it and the strike_count + ban state revert.
+**Dependencies:** [[G34]] / [[G37]] / [[G39]] supply the underlying schema. Some of this lives in G39 already; this entry is the user-facing surface.
+
+### G74. AI chat moderation with delayed-send pattern
+**Why:** [[G34]] already plans an AI classifier that runs in the request path. The user explicitly asked for a *delayed-send* variant: the chat message doesn't appear immediately; it's held for ~1-2s while the classifier runs, and only relayed if clean. This prevents the "send → flash → ban" race where harmful content briefly appears.
+**Scope (refinement of G34):**
+- WS chat action `chat_send` queues the message in a per-room delay buffer instead of broadcasting immediately.
+- Background task calls the Claude Haiku classifier; on safe → broadcast; on block → drop + notify sender.
+- Latency budget: classifier p50 should be < 800ms so the delay is felt as "thinking" not "broken". If the classifier times out (>1.5s), fall back to the regex deny-list AND mark the room as "moderation degraded" for ops.
+- The delay applies only when the room has chat enabled AND moderation isn't bypassed (e.g., admin-room).
+- UI: the sender sees their message immediately in a "pending" state (italic, grey, with a small clock icon). When clean, it transitions to normal; on block, replaced with a strikethrough placeholder + the rule-violation toast.
+- Trade-off acknowledged: the small latency hurts conversation flow but eliminates the "harm window". Default ON; future flag to disable per-room if a friends-only private room wants raw chat.
+**Acceptance:** A clean message round-trips in <1.5s with a brief pending state; a slur is held, dropped, and never relayed to other clients.
+**Dependencies:** [[G34]] is the parent; this entry is the delayed-send variant the user asked for specifically.
+
+### G75. Buy + verify the production domain (Cloudflare Registrar, ~€8/yr)
+**Why:** Email sending through Resend (and the upcoming Brevo migration in [[G76]]) requires a verified sender domain — DNS records (SPF, DKIM, DMARC) must be set before any transactional email reliably lands in inboxes. Same domain becomes the canonical site URL once deployment lands. Currently `noreply@421bistro.fr` is hard-coded in the email-sender default but the domain isn't owned, so every contact-form submission currently 502s with `email_sender_not_configured`.
+**Scope:**
+- Pick a domain name. Shortlist worth considering:
+    * `421bistro.fr` — matches the existing branding, French TLD makes legal/GDPR positioning obvious.
+    * `421bistro.com` — international fallback; slightly pricier per year.
+    * `aubistro421.fr` / `le421.fr` — alternatives if the primary is taken.
+- Register via **Cloudflare Registrar**: at-cost pricing (no markup, no upsells), 1-year minimum, free WHOIS privacy. ~€8/year for `.fr`, ~€10 for `.com`. No multi-year lock-in.
+- Once registered, point DNS at Cloudflare (free tier) — built-in DDoS protection, CDN, and Workers slot becomes available for future edge work.
+- Add SPF, DKIM, DMARC records (Brevo / Resend provides them during sender verification).
+- Update `SENDER_EMAIL` in `.env` + production env: `noreply@<domain>`.
+**Acceptance:** Domain owned, DNS at Cloudflare, sender verified in the chosen email service, `/api/contact` POST succeeds end-to-end with a real email landing in `CONTACT_EMAIL`'s inbox.
+**Dependencies:** None — pure ops decision. Unblocks [[G76]] (Brevo migration) and is a prerequisite for [[G77]] (production deployment).
+
+### G76. Migrate transactional email from Resend to Brevo
+**Why:** Brevo (formerly Sendinblue) has a free tier of 300 emails/day forever vs. Resend's 100/day free tier capped at 3000/month. Brevo's template editor is also nicer for the password-reset / inactive-account-warning / breach-notification templates that G70 + G71 will need. EU-based (Paris HQ) which simplifies GDPR processing-agreement paperwork.
+**Scope:**
+- Sign up at Brevo, verify the domain from [[G75]] (DKIM + SPF records).
+- Replace the `resend` package with Brevo's Python SDK (`sib-api-v3-sdk`) or just `httpx` against their REST API — REST is cleaner and avoids the heavy SDK.
+- Update `app/services/email.py`: rename `_send` to point at Brevo's `POST /v3/smtp/email`. Keep the same `(to, subject, html)` signature so callers don't change.
+- Migrate the existing password-reset template + add stubs for the 3 templates G70/G71 will need (`inactive_warning`, `account_deletion_confirmed`, `data_breach_notice`).
+- New env vars: `BREVO_API_KEY`, `BREVO_TEMPLATE_*` for each transactional. Drop `RESEND_API_KEY`.
+- Tests: mock the HTTP call (no live Brevo dependency in CI).
+**Acceptance:** Password-reset email + contact-form forwarding work via Brevo. Old Resend code removed.
+**Dependencies:** [[G75]] (domain ownership).
+
+### G77. Production deployment — Fly.io + Neon Postgres + monitoring
+**Why:** All the policy work and config plumbing assumes a real deployed surface. Picking a host with WebSocket support (the game's lifeblood), EU region availability (RGPD comfort), and pay-as-you-go pricing keeps the early-stage bill low while leaving room to scale.
+**Scope:**
+- **Hosting**: **Fly.io** (`cdg`/`fra` regions = Paris/Frankfurt). Free tier covers 3 small VMs + 3 GB persistent volumes — enough for dev + staging + early prod. Native WebSocket support, no proxy quirks. `fly launch` reads the existing Dockerfile.
+- **Database**: **Neon** (serverless Postgres). Free tier: 3 GB storage + 191.9 compute-hours/mo (more than enough for low-traffic early prod). EU region available. Branching (DB-per-PR) is a nice future-G63-audit follow-up. Alternative: Fly.io's managed Postgres ($15/mo for the smallest instance) if we want everything in one provider.
+- **CDN / WAF**: **Cloudflare** (free tier already in [[G75]]) — DDoS protection, edge caching for the frontend bundle, rate limiting that complements G71b's app-layer brute-force protection.
+- **Monitoring stack**:
+    * **Sentry** (already wired) — errors + performance traces.
+    * **Logfire** (Pydantic team's observability product) — structured Python logs, free tier covers our volume.
+    * **UptimeRobot** or **BetterStack** — uptime monitoring, free tier covers 1 monitor at 5-minute interval.
+    * **Plausible** or **Umami** — privacy-friendly analytics, both have free tiers. Plausible is paid-hosted (~€9/mo); Umami self-hosts free.
+- **Deploy workflow**: extend the existing GitHub Actions CI to a `deploy` job that runs on push to `main` (already partially wired — the Docker build step exists). Add `flyctl deploy` on success.
+- **Secrets management**: Fly.io's `fly secrets set` for production env vars; never check `.env` files into git (already gitignored).
+- **Cost estimate** for the early-stage stack:
+    * Fly.io: $0–15/mo depending on traffic
+    * Neon: $0 (free tier)
+    * Cloudflare: $0 (free tier)
+    * Sentry: $0 (developer plan, 5K errors/mo)
+    * Logfire: $0 (free tier)
+    * UptimeRobot: $0 (free tier)
+    * Domain: ~€8/yr
+    * **Total: ~€0.70/mo + €8/yr = ~€1.40/mo** at the very early stage. Scales linearly past the free tiers.
+- **Stretch goal**: write a `docs/RUNBOOK.md` covering deploy, rollback, scale-up, common incidents.
+**Acceptance:** `git push` to `main` triggers a build + deploy; the deployed app is reachable at `https://<domain>`; monitoring dashboards show errors/uptime/latency in real time.
+**Dependencies:** [[G75]] (domain), [[G76]] (Brevo for email-sending from the deployed surface). [[G71b]] (security hardening) is logical to land before opening the URL to the public.
+
+### G78. Redis-backed shared game state (multi-container HA)
+**Why:** Game state today lives in `app/game/state.py:games` as an in-process dict. Two consequences: (1) a container crash loses every active room on it, and (2) you can't run more than one container because each would have its own isolated `games` dict — players in the "same" game id but routed to different containers would see different state. Sticky sessions ([[G77]] Phase 2) mitigates this but doesn't solve the crash-loss case. The real fix is moving state to a shared store so any container can resume any game.
+**Scope (Phase 3 of [[G77]]):**
+- **Redis** as the state store (managed Upstash or Fly.io's Redis add-on, ~$5/mo at small scale).
+- Refactor `state.games` to a Redis-backed proxy: `Game` instances serialised as JSON, fetched/written per WS message. Keep an in-process cache with TTL for hot paths.
+- AFK timers + bot handback tasks become Redis sorted-set scheduled jobs OR move to a small Celery worker tier.
+- Connection manager (`manager` in `app/game/ws.py`) broadcasts via Redis pub/sub so a player on container A can receive a broadcast triggered by a player's WS write on container B.
+- Tests: a 2-container integration test (compose) verifying game state survives a container restart.
+- Cost trigger: do this when concurrent rooms exceed ~20 OR when a real user reports a crash-induced lost game.
+**Acceptance:** Kill the container hosting a live game → players see a momentary disconnect, then the same game resumes when their WS reconnects (to any container). Zero lost state.
+**Dependencies:** [[G77]] (production deploy first; can't validate without a real multi-container setup).
+
+### G79. Multi-game architecture refactor (when adding game #2)
+**Why:** The codebase today assumes one game type. `app/game/` is hard-coded singular; `Game` dataclass, WS actions (`roll`, `keep`, `done`, `tiebreak_roll`), `/api/create` schema params (`bank_rule`, `afk_seconds`), `app/schemas/rankings.py` combined stats, and the frontend dice/piste rendering all bake in 421-specific concepts. Adding a second game (Belote, Tarot, Yams, etc.) without restructuring means duplicating room/player/persistence logic — a maintenance trap.
+**Scope (executed in the same PR as the first commit of game #2, not preemptively):**
+- Restructure the backend to a per-game-type namespace:
+    ```
+    app/games/
+    ├── _common/        # Player, Room, PhaseEnum, matchmaking, persistence shell
+    ├── _421/           # 421 logic moved here
+    │   ├── logic.py
+    │   ├── ws_actions.py
+    │   ├── classify.py
+    │   └── room_config.py
+    ├── <game2>/
+    └── registry.py     # game_type → module mapping
+    ```
+- DB schema: add `Game.game_type: str` column (default "421" for existing rows), migrate `bank_rule` / `afk_seconds` / etc. into a polymorphic `room_config: jsonb` field.
+- WS routes: `/ws/{game_type}/{game_id}/{player_id}` — game type discriminates which `ws_actions` module handles incoming messages.
+- HTTP routes: `/api/games/{game_type}/create` similarly.
+- Frontend: split `Game.jsx` per game type, with a thin `<GameRouter>` that switches on `state.game_type`. Shared primitives (`PisteSeat`, `ChipStack`) move to `frontend/src/components/games/_common/`.
+- Migration plan: ship game #2 + the refactor as one PR with a feature flag. Old `/api/create` keeps working for back-compat for at least one release.
+**Acceptance:** A second game type ships with its own `app/games/<game2>/` namespace. Adding a third game from there requires no further restructuring — just create the new directory + register it.
+**Dependencies:** None — defer until game #2 is decided. Premature execution = wrong abstraction. Three soft triggers for opening this item:
+- (a) Game #2 is concretely scoped, not just "maybe later".
+- (b) The "Now" roadmap section is < 5 open items (so the refactor doesn't stall feature work).
+- (c) 421 has been stable in production for ≥ 3 months — i.e. the patterns we're abstracting are battle-tested.
+
+### G80. Native mobile apps — iOS + Android via React Native + Expo
+**Why:** A web-only game leaves Apple/Android store discovery, push notifications, and the "permanent home screen icon" trust signal on the table. For a casual real-time dice game the "buddy pings you for a round" workflow is much smoother with native push notifications than with web push. App-store presence also confers legitimacy that helps onboarding (« is this a real app? » → app-store listing answers yes).
+
+**Why React Native + Expo specifically:**
+- **Stack continuity** — same React mental model + JS as the existing SPA. Custom hooks (`useGame`, `useAuth`, `useLang`, `useTheme`) can mostly transfer with minimal changes. i18n dictionaries port 1:1.
+- **Single codebase for iOS + Android** — Flutter would also do this but requires learning Dart from scratch. Native Swift + Kotlin doubles the work for a solo dev.
+- **Expo Application Services (EAS) handles deploy/sign/distribute** — Apple signing certificates, Android keystores, store-submission CLI. Without it, iOS deployment alone is ~2 weeks of Apple-specific yak-shaving.
+- **WebSocket support is first-class** — `react-native` ships a `WebSocket` global identical to the browser's.
+- **Sentry + Anthropic/Brevo SDKs all have RN packages** — the monitoring stack from [[G77]] carries over.
+
+**Why NOT Capacitor (wrap the existing SPA):**
+- Apple's "minimum functionality" guideline (4.2.3) rejects bare website wrappers. We'd need to add native features anyway — at which point we're already off the wrapper path.
+- WebView performance on the piste animation + dice rendering would noticeably lag native.
+- Push notifications via web are weaker than native (background reliability, action buttons).
+- Listed for completeness but not the recommendation.
+
+**Scope (phased):**
+
+- **Phase A — minimum viable native app (~3-4 weeks of focused work):**
+    * `mobile/` directory in the monorepo, scaffolded with `npx create-expo-app`.
+    * Port the auth flow first (login, register, /auth/me) — uses the existing `/auth/*` endpoints unchanged. Authenticated screens reuse the JWT.
+    * Port the lobby flow (list public rooms via existing `/api/rooms`, join via `/api/join/{game_id}`).
+    * Game screen: re-implement the piste + dice + action bar in RN-native components (no WebView). Reuse the WS message protocol exactly — `useGame` hook ports with `import { WebSocket } from 'react-native'`.
+    * Drop the heavier desktop features for v1 — admin dashboard, the full Privacy/Terms pages link out to the web URL.
+    * Persistent storage via `@react-native-async-storage/async-storage` (mirrors web `localStorage`).
+
+- **Phase B — push notifications + deep links (~1 week):**
+    * Apple Push Notification service (APNs) + Firebase Cloud Messaging (FCM) registration. Expo's `expo-notifications` wraps both.
+    * Backend: `POST /api/me/push-token` to register a device token; persist in a new `UserPushToken(user_id, token, platform, last_seen_at)` table.
+    * Send notifications on:
+        - Your turn in a game where you're AFK (already wired to G2/G50 events backend-side).
+        - Game invite from a friend ([[G29]] dependency).
+        - Moderation verdict ([[G33]] dependency).
+    * Deep links: `421bistro://join?code=ABC123` opens the app on the room-join screen pre-filled.
+
+- **Phase C — polish + store submission (~1 week per platform):**
+    * App icons + splash screens (Expo handles the size matrix).
+    * Privacy nutrition labels (Apple) + data safety form (Google Play) — both stores require declaring what data is collected. We're already RGPD-compliant so the answers are honest and short.
+    * Apple Developer Program enrolment ($99/yr). Google Play one-time $25.
+    * « Sign in with Apple » — Apple guideline 4.8 *requires* it if the app offers any third-party SSO (we offer Google). Implementation via `expo-auth-session` is straightforward.
+    * EAS Build → EAS Submit pushes to TestFlight + Play Store internal testing.
+    * Beta with a small group (10–20 testers via TestFlight + Play Internal Testing) for 1–2 weeks before public release.
+
+**Backend changes needed (small):**
+- `UserPushToken` table + migration.
+- `POST /api/me/push-token` endpoint.
+- Push-send service alongside the email service (`app/services/push.py`). Triggers from existing event-emission points in `app/game/ws.py`.
+- « Sign in with Apple » OAuth route mirroring the existing `/auth/google` path.
+
+**Cost estimate:**
+- Apple Developer: **$99/yr** (mandatory)
+- Google Play: **$25 one-time** (mandatory)
+- EAS Build: free for hobby tier; **$19/mo** when you need parallel builds
+- Push notification volume: free up to large scale on both APNs and FCM
+- Total ongoing: **~$11/mo** equivalent ($99/yr Apple)
+
+**Acceptance:** A user can:
+- Download "421 Bistro" from the App Store / Google Play
+- Sign in with their existing web account, or create a new one
+- Join a public room and play a full match end-to-end
+- Receive a push notification when it's their turn in a game they backgrounded
+- The mobile app's RGPD privacy disclosures match the web app's Privacy page
+
+**Dependencies:**
+- [[G75]] (domain owned — for deep-link domains + share-link generation)
+- [[G77]] (production deployment — beta users need a stable backend to point at)
+- [[G29]] / [[G30]] (friend invites + external invite delivery) — they're more compelling on mobile where push delivery is native; the mobile entry could land first and these become higher-priority follow-ups.
+- Optional but recommended: [[G79]] (multi-game refactor) before Phase A if a second game is on the horizon — the mobile codebase would inherit whatever shape the web codebase has.
+
+**Skip-for-now alternatives if Phase A feels too big right now:**
+- **PWA polish** — make the web app installable via "Add to Home Screen" (manifest.json, service worker, web-push). Zero new stack, gets ~70% of the UX benefit. Captured separately as G80b if you want me to spin it out.
+- **TestFlight-only release** (no Play Store) — Apple side first, Android later. Halves the store-submission work but limits beta audience to iPhone users.
+
+### G81. Ban-notice + appeal flow — email + endpoint
+**Why:** Moderation can already temp-ban accounts ([[G42]]), but the user is told *nothing* — they hit a 403 on login with `account_temporarily_suspended` and have to guess what happened. The `ban_notice` email template is already in repo (shipped with G76); this item wires the actual sender + the appeal-form backend so a banned user can contest the decision without emailing support manually.
+**Scope:**
+- New `send_ban_notice()` function in `app/services/email.py` — renders the existing `ban_notice.{fr,en}.{html,txt}` templates and POSTs via Brevo. Same pattern as `send_welcome_email()`.
+- Fired from wherever moderation enforces a ban (currently the admin router + auto-mod path). Pass `case_id` (UUID), `reason_label`, `duration_label` (`24h`, `7 jours`, `permanent`), `expires_at_label` (localized date), `evidence_summary` (text excerpt or none), `appeal_url`.
+- **Appeal form backend:**
+    - `POST /api/moderation/appeals` — body: `{case_id, message}`. Stores in a new `ModerationAppeal(id, user_id, case_id, message, status='pending', created_at, reviewed_by, reviewed_at, verdict, verdict_message)` table.
+    - `GET /admin/appeals?status=pending` — admin-only list, paginated. Already-banned users can see their open appeal.
+    - `POST /admin/appeals/{id}/verdict` — body: `{outcome: 'upheld' | 'overturned', message}`. On `overturned`, clears `User.banned_until` + `User.ban_reason`. Fires the (also-template-ready) `appeal_verdict` email (template needs to be added — small follow-up).
+- **Appeal page in SPA:** `/appeal?case=<case_id>` — minimal form (textarea + submit), accessible without being logged in (since banned users can't auth). Submitter identifies themselves by providing their account email + the `case_id` from the email; backend matches against `GdprAuditLog` to confirm the email matches the ban record.
+**Acceptance:**
+- Admin temp-bans a user → user receives a French/English email with case ID, duration, appeal button.
+- User clicks the appeal button → fills form → sees confirmation.
+- Admin sees pending appeal in the admin dashboard.
+- Admin overturns the verdict → ban is lifted + user receives `appeal_verdict` email.
+**Dependencies:** [[G42]] moderation enforcement ✅, [[G76]] email migration ✅, [[G33]] moderation dashboard (for the admin-side appeal list — currently partial).
+
+### G82. Lifecycle emails — rank_up + friend invites + achievements
+**Why:** The email infrastructure ([[G76]]) is built but only welcome + password reset currently send. Lifecycle emails (« hey, you ranked up to Confirmé », « X invited you to a game ») are high-ROI — they pull users back without notifications infrastructure on mobile yet ([[G80]]). Each ships alongside the feature that triggers it; this roadmap entry tracks the *pattern* and groups them.
+**Scope per email (all gated by `email_opt_in=True`):**
+- **rank_up** — triggered when `PlayerStats.elo` crosses a rank threshold (`badge_beginner` → `badge_amateur` etc.). Variables: `username`, `new_rank_label`, `previous_rank_label`, `current_elo`, `profile_url`, `unsubscribe_url`. New `app/services/ranks.py` exposes `rank_for(elo) → str` (single source of truth for backend + email render). Hook: end-of-game ELO write in `app/services/elo.py`.
+- **friend_invite_received** — depends on [[G29]] shipping. Variables: `username`, `inviter_name`, `game_code`, `accept_url`, `unsubscribe_url`.
+- **achievement_unlocked** — depends on an achievements system existing (not yet captured; would be a new item). Punted to later — *not in this iteration*.
+**Templates:** Already use the established Jinja pattern. Site colors inlined, FR + EN + plain-text, footer unsubscribe link.
+**Backend additions:**
+- `app/services/email.py`: `send_rank_up_email()`, `send_friend_invite_email()`.
+- Hook into ELO write (`app/services/elo.py`) → only fire on threshold crossing, not every game.
+- Rate limit: max 1 rank_up email per user per 24h (avoid spamming during a hot streak).
+**Acceptance:** A user opted into emails plays a game that promotes them from 1195 → 1210 ELO (crosses 1200 = `badge_confirmed` threshold) → within 60s they receive the rank_up email with the new badge label, FR or EN per their `lang_pref`.
+**Dependencies:** [[G76]] ✅, [[G29]] (friend invites — for friend_invite_received), ELO rank-name mapping refactor.
+
+### G83. Wire account-deletion emails into the G70 cron
+**Why:** The `account_deletion_warning` + `account_deleted` templates ship with [[G76]], but nothing fires them yet. [[G70]] is the cron that scans for users inactive ≥ N years and queues them for deletion. This item connects the two: each step of the lifecycle emits the right email.
+**Scope:**
+- **Step 1 — warning email** (T-{INACTIVE_ACCOUNT_DELETION_DAYS} before deletion). Triggered when the cron flags a user. Uses existing `account_deletion_warning` template. Variables: `username`, `inactive_years` (from settings), `deletion_date_label` (computed), `keep_active_url` (`{app_url}/login?reason=keep_active`).
+- **Step 2 — final notice** (T-7 days). New template `account_deletion_final.{fr,en}.{html,txt}` — shorter, more urgent tone. Same variables.
+- **Step 3 — confirmation of deletion** (T+0). New template `account_deleted.{fr,en}.{html,txt}` — confirms deletion, no action buttons, mentions backups/retention windows for moderation/audit logs ([[MODERATION_LOG_RETENTION_DAYS]]). Sent to the email on file *before* the row is wiped.
+- New senders in `app/services/email.py`: `send_deletion_warning()`, `send_deletion_final()`, `send_deleted_confirmation()`.
+- Cron itself ([[G70]]) gains scheduling flags so each row tracks "last_warning_sent_at" to prevent re-firing.
+**Acceptance:** A user inactive for `INACTIVE_ACCOUNT_WARNING_YEARS` receives email 1 → email 2 (T-7d) → email 3 (T+0) → row is deleted with cascades. All three emails are transactional (RGPD: legally required, no opt-out).
+**Dependencies:** [[G70]] inactive-account pipeline (currently dry-run mode), [[G76]] ✅.
+
+### G84. Contact-form ticket pipeline + auto-acknowledgements
+**Why:** Today the contact form forwards to your inbox and that's it. No SLA tracking, no acknowledgement to the submitter, no record of what's been resolved. For a real product you need: (a) the submitter gets immediate « thanks, we received your request » so they're not in the dark, (b) you have a list of open tickets sorted by urgency, (c) you know when an SLA is about to be breached so you can act before customer trust erodes. This is the smallest-credible-ticket-system — not Zendesk, just enough for a solo operator.
+
+**This item splits naturally into two phases. Ship G84a first; defer G84b unless contact volume warrants it.**
+
+#### G84a — Auto-acknowledgement emails (smallest viable scope, ~half day)
+
+Today the contact form's only outbound is to the site owner. Add an immediate ack-email to the submitter so they know we received their message + what SLA we're committing to.
+
+**Scope:**
+- 4 new email templates (16 files = 4 × {fr, en} × {html, txt}):
+    * `contact_ack_export` — RGPD data export request. Body: "request received, you'll get your data within 30 days per RGPD Art. 12." Includes ticket reference.
+    * `contact_ack_delete` — Account deletion request. Body: "request received, processed within 30 days." Mentions [[G70]] auto-deletion is also an option if they just want to cool down.
+    * `contact_ack_bug` — Bug report. Body: "thanks for the report, we'll investigate and respond within 48h." Sets expectations.
+    * `contact_ack_other` — General question. Body: "message received, response within 5 working days."
+- All extend the existing `_base.html` shell — bistro palette, plain-text fallbacks, lang-aware.
+- New `app/services/email.py` function: `send_contact_ack(category, to_email, name, ticket_ref, lang)`.
+- A `_CATEGORY_TO_ACK_TEMPLATE` mapping in `app/routers/contact.py` looks up the right template per `body.subject`.
+- Ticket reference = random 8-char URL-safe slug (e.g. `T-K8N3WQA2`) generated per-request. **No DB table yet** — just generated, embedded in both the admin email and the ack, helps thread conversations.
+- Fired AFTER `send_admin_contact_form` succeeds (don't ack if forwarding failed — would be misleading).
+- Failure is logged but never raises — the user already got their 202 acceptance from the API.
+
+**Acceptance:** Submit a contact form with subject=`bug`. Within 30 seconds: (a) admin email arrives at `CONTACT_EMAIL` with ticket ref TXX-XXX, (b) submitter receives the bistro-branded ack email saying "thanks, we'll respond within 48h, ref TXX-XXX", both in their lang (`Accept-Language` header).
+
+**Dependencies:** [[G76]] ✅.
+
+#### G84b — Manual reply masking (deferred from G76)
+
+The current "Send mail as" gap: when you manually reply to a contact-form submitter from Gmail, your reply leaks `421bistro.contact@gmail.com`. This was deferred during G76 because Brevo's free-tier SMTP IP whitelisting can't be disabled, and Gmail's relay rotates IPs constantly.
+
+**Fix options when revisiting:**
+- **Option 1 (recommended):** Upgrade Brevo to a paid tier (~€19/mo) that exposes the IP-blocking toggle. Disable blocking, then Gmail's SMTP relay works permanently.
+- **Option 2:** Switch outbound SMTP relay to Mailgun or Postmark — they don't have IP whitelisting on free tiers.
+- **Option 3:** Use Gmail's "Send through Gmail" mode — recipients see a small "via gmail.com" suffix in some clients. Cosmetic only, no IP issues.
+
+**Triggers to open this item:**
+- Inbound contact form volume ≥ 5 per week (reply burden makes manual masking matter)
+- Or you're embarrassed to show a colleague the "from gmail address" leak
+- Until then: not worth the time
+
+#### G84c — Full ticket dashboard (later, ~1 day)
+
+Promote tickets from "random slugs in email" to a real `ContactTicket(id, ref, from_email, category, status, sla_due_at, created_at, resolved_at, resolution_note)` table.
+
+**Scope:**
+- Migration + model.
+- POST `/api/contact` writes a row in addition to firing emails.
+- Admin route `GET /admin/tickets` — list sorted by `sla_due_at`, color-coded by urgency (green > 24h left, amber 1-24h, red overdue).
+- Admin route `POST /admin/tickets/{id}/resolve` — sets `resolved_at`, optionally sends a follow-up email to the submitter.
+- Lives in [[G33]] admin dashboard.
+
+**Trigger to open this item:** When you've had ≥ 20 contact submissions and feel like you're losing track. Until then, email + the `T-XXXXX` reference in the subject line is enough.
+
+### G85. AI bug-triage agent — automated investigation + draft PR
+**Why:** This is the long-game piece: when a user reports a bug via the contact form, an AI agent reads the report, pulls relevant Sentry events, greps the codebase for affected files, drafts a proposed fix as a unified diff, and opens a draft PR for human review. You stay in the loop (approve / reject / iterate), but the agent does the discovery + draft work that currently eats your evenings.
+
+**Why this is genuinely useful (not hype):** Bug triage is mostly a context-gathering exercise. *« Which file does this affect? What was the last commit there? Are there related Sentry events I should know about? What's the simplest patch that doesn't break tests? »* — those are deterministic enough for an LLM to do credibly when given the right context. The risky part (deciding whether the fix is correct) stays with you.
+
+**Architecture:**
+- **Trigger:** When a `bug` ticket lands ([[G84a]] dependency), webhook fires the agent.
+- **Context-gathering phase** (no LLM yet, just instrumentation):
+    * Pull the last 50 Sentry events via Sentry API, filtered to the last 24h.
+    * `grep -rn` the repo for any function/route names mentioned in the bug report.
+    * Read the user's last few WebSocket messages from logs (PII-scrubbed via the existing G46 pipeline).
+    * Pull `git log --oneline -20` on files matching the symbols.
+- **Reasoning phase** (the Claude API call):
+    * Build a prompt with: bug description + gathered Sentry events + grep hits + recent commits.
+    * Ask Claude to return: likely root cause, affected files + lines, proposed unified diff, confidence (low/med/high).
+    * Use `claude-opus` (the slow-thinker) — bug triage is exactly the kind of task where reasoning quality matters more than latency.
+- **Output phase:**
+    * Create a new branch: `bot/triage-{ticket_ref}-{slug}`.
+    * Apply the diff if confidence ≥ med.
+    * Open a **draft** GitHub PR (never auto-merge). Title: `[auto-triage] T-XXXXX: <bug summary>`.
+    * PR body contains: original bug description, links to relevant Sentry events, the agent's analysis, the diff, **explicit "this is AI-generated, review carefully" warning**.
+    * Add label `auto-triage` so you can filter.
+- **Human-in-the-loop:** You see the draft PR in your usual flow, run tests locally if needed, approve / reject / hand-edit / close. The agent never merges. Ever.
+
+**Failure modes + safeguards:**
+- Confidence below threshold → agent opens an *issue* with its findings but no draft PR (you decide if it's worth fixing).
+- Diff doesn't apply cleanly → fall back to issue mode.
+- Diff applies but tests fail in CI → PR is auto-closed, comment posted explaining.
+- Rate limit: max 5 auto-triage PRs per day; further bug reports queue.
+
+**Skeleton implementation path:**
+- Phase 1: standalone Python script you run manually (`python -m agents.triage <ticket_ref>`) — no webhook, just to validate the prompting works on real reports. ~3-5 days.
+- Phase 2: webhook integration with [[G84a]] tickets, runs in background worker. ~2-3 days.
+- Phase 3: confidence scoring + automatic mode selection (PR vs issue vs ignore). ~1 week of tuning.
+
+**Cost:** ~$0.30-1.00 per triage run (opus tokens, big context). Even at 50 bug reports a month, ~$25-50/mo. Tolerable.
+
+**Dependencies:**
+- [[G77]] deployed in production (need real Sentry events to triage against).
+- [[G84a]] auto-ack tickets (the agent needs the structured ticket data).
+- A GitHub fine-grained personal access token with `pull_request:write` scope, stored in env (NOT committed).
+- Sentry API token with read scope.
+
+**Triggers to open this item:**
+- 421 stable in production ≥ 3 months
+- Real Sentry event volume (≥ 100/week — otherwise there's nothing to triage)
+- ≥ 5 bug reports per month manually triaged (so AI-triage actually saves time)
+
+**My honest take on timing:** Genuinely useful but easy to over-engineer. Don't build until your bug-report cadence makes triage feel like a chore. Until then, manual triage is faster than babying a half-working agent.
+
+### G86. In-project Claude Code skills for dev workflow
+**Why:** Different from [[G85]] — these are tools *YOU* invoke locally during development, not customer-facing automation. They make YOU faster at the same triage / investigation work, without the architectural complexity of a production pipeline.
+
+**The pattern:** A skill is a markdown file in `.claude/skills/<name>.md` that you invoke via `/skill-name <args>` in Claude Code. The agent reads the skill's instructions + has access to repo files + bash, then executes the workflow. Cheap to write, easy to iterate, never reach production.
+
+**Skills worth building (in order of expected ROI):**
+
+1. **`/triage-from-email`** — Paste a contact-form bug-report email. Agent: greps the repo for symbols mentioned, reads the last 20 commits, pulls relevant Sentry events via the Sentry CLI/API, writes an investigation report (root cause hypothesis + suggested fix area + 3 questions to clarify with the user). Output: markdown report in `tmp/triage-{date}.md` you skim before responding to the user.
+
+2. **`/analyze-sentry`** — Pull last N Sentry events via Sentry API, group by issue, summarise hottest issue, suggest fix area. Output: top 5 issues with one-line summaries + which file(s) likely involved + how many users affected. Run this weekly to catch fires before they spread.
+
+3. **`/draft-fix <file:line> <description>`** — Given a target location + brief description of the desired fix, agent: reads surrounding context (~50 lines), checks existing test coverage for the affected function, drafts a patch on a new branch (`fix/auto-{slug}`), opens a PR for review. Different from G85 in that it's invoked by you (not by user bug reports) and you supply the diagnosis.
+
+4. **`/roadmap-status`** — Reads `docs/ROADMAP.md`, summarises what's in Now / Next / Future / Deferred, flags items with stale dependencies (e.g. depends on `[[G42]]` but `[[G42]]` was completed 6 months ago), suggests what to pick up next based on existing PRs + open issues + your recent commit pattern.
+
+5. **`/post-deploy-check`** (after [[G77]]) — Hits production health endpoints, checks Sentry for new error spikes in the last hour, queries DB for unusual row counts (e.g. is signup velocity dropping?), reports a sanity-check summary. Run after every prod deploy.
+
+**Why these are different from G85:**
+- You invoke them; they don't trigger on customer activity.
+- They write reports/PRs you review; they don't take production actions.
+- Each is ≤ 1 day to build, vs. G85's multi-week effort.
+- They make YOU faster; G85 makes the system self-healing.
+
+**Triggers to open this item:**
+- Anytime. Skills are evergreen — even before [[G77]] deploy, `/roadmap-status` is useful right now.
+- Build one skill per slow-evening, ship continuously.
+
+**Effort:** ~half-day to 1 day per skill. Build the highest-ROI ones first (`/triage-from-email`, `/analyze-sentry`).
+
+**Dependencies:** None — these run locally against your dev environment. Sentry-using skills need the Sentry API token in `.env`.
+
+### G87. Spectator mode in game rooms
+**Why:** Today a game room only knows "players" — anyone connecting either takes a seat or fails. The user wants followers (G28) to be able to watch their friend's game without taking a seat. Also useful for: spectating a match before deciding to join the next one, tournament-style audiences for a competitive room, learning the game by watching others. Requires careful information-hiding so spectators see the public game state (whose turn, dice on piste, score-to-beat, journal) but **not** private info (other players' kept dice mid-throw, anyone's strategy hints).
+
+**Scope:**
+- **WS handler refactor (`app/game/ws.py`):**
+    * Connection identifies itself with a `role` param on connect: `player` (default, must be in `game.players`) or `spectator` (joins read-only).
+    * Spectator connections are tracked in a separate `game.spectators: list[WSConnection]` set, not in `game.players`.
+    * Per-game cap: `MAX_SPECTATORS_PER_ROOM = 10` (configurable via env `MAX_SPECTATORS_PER_ROOM`). New spectators beyond the cap get rejected with `{error: "room_spectator_full"}`.
+    * Broadcast logic gains a `to: 'all' | 'players' | 'spectators'` parameter. Most game-state broadcasts go to `'all'`. Per-player private state (your dice, your turn options) goes to `'players'` (filtered by player_id).
+    * Spectators can NOT send game actions (`roll`, `keep`, `validate`, etc.) — server rejects with `{error: "spectator_no_action"}`.
+    * Spectators CAN send chat messages once [[G89]] ships (chat is public to the room).
+- **Game state filter for spectators:**
+    * Spectator-view payload omits: any player's `kept` dice during their turn (until validation), private rhythm-setter hints, AFK timer countdowns for OTHER players.
+    * Spectator-view includes: all players' validated combos, the running score-to-beat, the journal feed, current turn / current cycle, all phase transitions.
+- **Frontend:**
+    * `/game/:gameId?role=spectator` route (existing `/game/:gameId` defaults to `?role=player` if pid present).
+    * Lobby + Waiting room: « Regarder cette partie » button on rooms that are in-progress (PLAYING phase, not waiting).
+    * Game view in spectator mode: action bar hidden, "spectating" badge in top bar, ability to chat (if [[G89]] shipped), ability to leave / convert-to-player-if-room-has-empty-seat.
+    * **Convert to player:** if a player leaves mid-game and a seat opens, spectators see a « Prendre une place » button. Click → backend swaps `role: 'spectator' → 'player'`, assigns them to the empty seat. Requires room to allow mid-game joins (existing `allow_late_join` setting).
+- **Privacy / fair-play guard:** if a spectator is in the same room as players from a friend-group ranking competition, log it in the audit feed so cheating-by-coaching can be retroactively detected. (Tracking only — no enforcement.)
+
+**Acceptance:**
+- Sierra is playing in room `ABC123`. June (follower) clicks « Regarder » on Sierra's profile → joins as spectator → sees all of Sierra's validated plays + the score-to-beat + the journal, but NOT what dice Sierra has kept on her current turn before validating.
+- June tries to send a `roll` action → backend returns `{error: "spectator_no_action"}`.
+- Sierra's table has a player drop out → June sees « Prendre une place » → click → June is now seated as a player in the next cycle.
+
+**Dependencies:** [[G88]] (presence — to know who's currently in which room and surface the « Regarder » CTA); [[G89]] (optional — spectator chat).
+
+### G88. User presence tracking — online status + last-seen + in-game
+**Why:** Foundation infrastructure for [[G28]] (online dots on follow list), [[G90]] (admin "players online" filter), [[G87]] (spectator « Regarder » CTAs), [[G29]] (don't email-invite someone who's already online — DM them instead). All these features ask "is user X currently online, and if so where?" — better to build one presence layer than scatter the logic across four features.
+
+**Scope:**
+- **Schema additions to `User`:**
+    * `last_seen_at TIMESTAMPTZ` — updated on any authenticated request (auth WS connect, REST hits with valid JWT). Indexed for the "last seen" query pattern.
+- **In-memory presence store (single-instance):**
+    * `app/services/presence.py` exports a `PresenceTracker` singleton.
+    * Keys: `user_id → {status: 'online' | 'offline', current_room_id: str | None, last_seen_at}`.
+    * Updated on: WS connect (status → online), WS disconnect (status → offline, persist `last_seen_at` to DB), room join (current_room_id), room leave (current_room_id → None).
+    * Exposes: `get_presence(user_id)`, `is_online(user_id)`, `users_in_room(room_id)`, `online_users()`, `subscribe(user_id, callback)` — for WS push.
+- **WS push channel:** when a watched user's presence changes, push to followers' open auth WS connections. Subscribers are gated (you can only subscribe to users you follow). Avoids broadcasting presence globally; only interested parties get updates.
+- **REST endpoints (used by G28 / G90):**
+    * `GET /api/presence/{user_id}` — returns `{status, current_room_id, last_seen_at}` if you follow them OR if you're admin.
+    * `GET /api/admin/presence/online` (admin-only) — paginated list of currently-online users.
+- **Production note:** in-process map works for single-backend ([[G77]] phase 1). When scaling to multiple instances ([[G78]] Redis), replace the in-memory map with a Redis-backed presence store. Same interface, different backend. Captured here so the abstraction is clean from day 1.
+- **Privacy:** `last_seen_at` precision rounded to the nearest 5 minutes when shown to non-mutual-followers to reduce stalking signal. Admin sees exact timestamp.
+
+**Acceptance:**
+- Sierra opens her browser → backend marks her `presence.status='online'`.
+- June (who follows Sierra) has her browser open → her followers list updates Sierra's row to show the green dot in real-time (via WS push, no polling).
+- Sierra closes her browser → after a 30s grace window (handles refresh / brief disconnect), `last_seen_at` is persisted to DB and her presence flips to offline → June sees the row update to "vu(e) à l'instant".
+- Admin opens `/admin` → "Players online" panel shows count + clickable list of current online users.
+
+**Dependencies:** [[G77]] eventually (auth WS infrastructure exists; in-memory map is fine for single-instance). [[G28]] consumes this. [[G87]] + [[G90]] consume this.
+
+### G89. Chat backend implementation
+**Why:** [[G59]] sets up the *UI* for chat (right-rail panel via [[G61]] tabs). This item is the *backend*: the WS message protocol, the per-room chat message stream, rate-limiting hooks, the persistence policy decision. Independent of moderation ([[G34]] / [[G36]] / [[G37]]) which add safety layers on top.
+
+**Scope:**
+- **WS message type:** new payload kind `{type: 'chat', text: string, ts: iso8601}` sent from client. Server broadcasts `{type: 'chat', sender_id, sender_name, text, ts, message_id (uuid)}` to all room members + spectators ([[G87]]).
+- **Per-message validation:**
+    * Length ≤ 280 chars (Twitter-style); reject longer with `{error: "chat_message_too_long"}`.
+    * Strip leading/trailing whitespace; reject empty after strip.
+    * No URLs in v1 (regex-blocked) — anti-phishing for early users. Revisit after [[G34]] AI moderation can score links.
+    * Server attaches `sender_id`, `sender_name` from authenticated WS context; client cannot spoof.
+- **Persistence policy: ephemeral.** Messages live in `game.chat_history: list[dict]` (in-memory, cap 200 messages per room). When the room dissolves, history is gone. Rationale: reduces RGPD surface area (no chat retention), simplifies moderation, matches the « bistro conversation » feel — what's said at the table stays at the table. Moderation audit log ([[G34]]) does persist message + verdict if a message gets flagged (audit only, not searchable history).
+- **Late-joiner / spectator history:** spectators + late-joining players receive the most recent 50 messages from `chat_history` on join (so they catch up without seeing a wall of empty chat).
+- **Per-room rate limit (hook for [[G36]]):** stub in v1. Default: `MAX_CHAT_MESSAGES_PER_MINUTE_PER_USER = 10` (env var). Exceeding → `{error: "chat_rate_limited"}` + short cooldown. [[G36]] replaces this with the proper rate-limiter later.
+- **Moderation hooks (placeholders, no enforcement yet):**
+    * Before broadcast: call `await moderate_chat(sender_id, text)` — stub returns `("allow", None)`. [[G34]] replaces stub with AI classifier returning `("allow" | "block" | "flag", reason)`.
+    * Blocked messages: not broadcast; sender gets `{error: "chat_message_blocked", reason}`; written to audit log.
+    * Flagged messages: broadcast but logged to moderation inbox ([[G39]]).
+- **Banned users:** existing `User.chat_banned_until` blocks send (already wired in [[G38]]); enforcement check in WS handler before broadcast.
+- **Frontend (the data layer — UI is [[G59b]]):**
+    * New hook `useChat(roomId, ws)` returns `{messages, send, status}`.
+    * Composes onto existing WS connection — no separate socket.
+    * Optimistic send (show locally before server ack); rollback if server rejects.
+
+**Acceptance:**
+- Two players in a room. Player A types « bien joué » → presses Enter → message appears in their own chat panel instantly (optimistic) → server ack → message appears in Player B's chat panel.
+- A spectator joins → sees last 50 messages from the room → can send a message.
+- A player sends 11 messages in 60 seconds → 11th gets `chat_rate_limited` toast.
+- A chat-banned user attempts to send → server rejects, banned-message toast shown.
+- Room dissolves → next room opened with same code has empty chat history (ephemeral).
+
+**Dependencies:** [[G87]] (spectator broadcast paths). Hooks for [[G34]] [[G36]] [[G37]] [[G39]] (moderation surfaces).
+
+### G90. Admin dashboard full build — pre-launch must-ship
+**Why:** Today `frontend/src/pages/AdminDashboard.jsx` is a skeleton with `PanelStub` placeholders. To launch, the user needs working admin tools: search users, ban/unban, change roles, delete accounts (RGPD right-to-be-forgotten + admin-initiated), see who's online, review the audit feed. Solo operator — needs to be ergonomic, not a 20-click maze.
+
+**Scope:**
+- **User list view (default landing):**
+    * Paginated (20 per page), sortable by `created_at`, `username`, `email`, `parties_played` ([[G91]]), `role`, `last_seen_at` ([[G88]]).
+    * Filters (URL-encoded so admin views are bookmarkable):
+        * Free-text search on `username` OR `email` (case-insensitive partial match).
+        * Role filter: all / player / moderator / admin.
+        * Status filter: all / active / banned / chat-banned / deleted.
+        * **Online filter** (NEW): show only users with `presence.status='online'` ([[G88]] dependency). When active, shows count: « 12 joueurs en ligne ».
+- **User detail panel (click row → side panel or full-page):**
+    * Profile data: avatar, username, email, birthdate, lang_pref, role, created_at.
+    * Stats ([[G91]]): parties_played, parties_lost, parties_survived, survival_rate, manches_lost / manches_played, current_streak, longest_streak, current ELO + badge.
+    * Moderation history: strike_count, current ban (banned_until + ban_reason), current chat-ban, role history from `GdprAuditLog`.
+    * Recent activity: last 5 game sessions (from `GamePlayer`), last 10 audit-log events.
+- **Action buttons (with confirmations):**
+    * **Change role** → dropdown (player / moderator / admin), confirm modal. Uses existing `PATCH /api/admin/users/{user_id}/role`. Fires audit event.
+    * **Ban** → modal: duration radio (1d / 7d / 30d / permanent), optional reason text. Sets `banned_until` + `ban_reason`. Fires `ban_notice` email ([[G81]] sender, template from G76). Records audit event.
+    * **Unban** → confirm modal. Clears `banned_until` + `ban_reason`. Fires « ban lifted » email (new template, similar shape to ban_notice). Audit event.
+    * **Chat-ban** → modal: duration radio (1h / 24h / 7d), reason. Sets `chat_banned_until`. Audit event.
+    * **Delete account** → **type-username-to-confirm modal** (GitHub-style — prevents accidents). On confirm: soft-delete (`User.deleted_at = now()`), fires `account_deleted` email (template from G76 stub). Anonymizes `username` to `deleted_user_<uuid>` and clears email field after the email sends. Cron hard-deletes after 30-day grace ([[G70]] pipeline).
+- **Summary widgets at top of dashboard:**
+    * Total users (active / banned / deleted breakdown)
+    * Online now ([[G88]])
+    * Pending moderation appeals ([[G81]] once shipped)
+    * Recent admin actions (last 5 — who banned whom, who deleted whom, etc.)
+- **Mode toggle in TopBar:**
+    * When user has `role` in (admin, moderator) AND is on an `/admin/*` route, TopBar shows « Quitter le mode admin » button → navigates to `/profile`.
+    * When admin user is on any non-admin route, TopBar shows « Mode admin » button → navigates to `/admin`.
+    * Removes the trap of "I clicked admin and now I'm stuck here".
+- **Moderation audit feed page** (`/admin/audit`):
+    * Reverse-chrono list of `GdprAuditLog` events with admin actions.
+    * Filter by event type, actor, target user, date range.
+- **Permissions:**
+    * Moderators see most of this but cannot delete accounts or change roles (admin-only).
+    * Backend already enforces via `require_admin` / `require_moderator`; frontend hides buttons when not allowed.
+
+**Acceptance:**
+- Admin opens `/admin` → sees user list, total counts, online count.
+- Admin types « ripoche » in search → sees the one matching row.
+- Admin clicks row → sees full profile + stats + history.
+- Admin clicks « Bannir » → modal → picks 7 days + reason "spam" → confirms → user's `banned_until` is set, audit row written, ban_notice email arrives in user's inbox within 30s.
+- Admin clicks « Supprimer le compte » → modal demands typing username exactly → confirms → user soft-deleted, account_deleted email fires, row visible in deleted-status filter for 30 days.
+- Admin clicks « Mode admin » → on player view → click « Quitter le mode admin » → back to player profile.
+
+**Dependencies:** [[G88]] (online filter + counts); [[G91]] (the stats fields rendered); [[G76]] ✅ (ban_notice + account_deleted templates exist as stubs).
+
+**Effort:** ~5 days. **Launch-blocker.**
+
+### G91. Stats redesign — partie / manche semantics + survival-based ELO
+**Why:** Current PlayerStats columns are `wins` / `losses` — wrong vocabulary for 421. The game's objective isn't to "win" but to NOT lose: the one who ends up with all the fiches (or 0, depending on phase) is the loser; everyone else is a survivor. The current Profile.jsx also references fields that don't exist (`streak`, `top_combos`, `recent_games`) — they always render as 0/empty. And ELO never moves in practice (TheWitch has played 9 games, ELO still 1200) — either the write path is broken or the calc only runs in code paths that don't fire. Pre-launch this needs to be made coherent so users see meaningful stats from day one.
+
+**Scope (in execution order — never breaks the API):**
+
+**Phase A — Schema (Alembic migration):**
+- Rename `PlayerStats.wins` → `parties_survived`
+- Rename `PlayerStats.losses` → `parties_lost`
+- (Keep `games_played` as-is; label updates in UI to « parties »)
+- Add:
+    * `manches_played INT DEFAULT 0`
+    * `manches_lost INT DEFAULT 0`
+    * `current_streak INT DEFAULT 0` (parties survived in a row)
+    * `longest_streak INT DEFAULT 0`
+- Migration also resets all existing rows to zero (since current data is muddy — see "Reset" below).
+
+**Phase B — Write paths (`app/services/game_persistence.py` + `app/services/elo.py`):**
+- On partie completion:
+    * Increment `parties_played` for everyone.
+    * For the loser: `parties_lost += 1`, `current_streak = 0`.
+    * For survivors: `parties_survived += 1`, `current_streak += 1`, `longest_streak = max(longest_streak, current_streak)`.
+- On every manche resolution:
+    * Increment `manches_played` for active participants.
+    * For the player who took fiches in CHARGE / who had to redistribute in DECHARGE: `manches_lost += 1`.
+- **ELO rewrite** in `app/services/elo.py`:
+    * Survival-based, weighted by table size. Surviving a 5-player game > surviving a 2-player game (more competition).
+    * Use a standard K-factor formula adapted: each player's *expected survival rate* = `(N-1)/N` where N = table size. If you survive, gain = K × (1 - expected). If you lose, loss = K × expected. K = 32 for ≤ 30 parties, K = 24 for 30+ parties (slower drift once established).
+    * Loser's ELO loss = sum of survivors' ELO gains × 0.95 (slight system drain to prevent inflation).
+    * Keep badge thresholds: `< 800 Débutant`, `800-1200 Amateur`, `1200-1600 Confirmé`, `1600-2000 Expert`, `2000+ Maître`.
+
+**Phase C — Reset existing data:**
+- Migration step resets all PlayerStats to defaults (`elo=1200`, all counts=0, streaks=0).
+- All historical GamePlayer rows stay (game history preserved), but the *aggregated* PlayerStats start clean from launch.
+- Rationale: existing rows have wrong semantics (wins=9 / losses=0 was actually "completions=9, finals-as-non-loser=9 only by accident"). Reset gives users a clean « new ranking system » story at launch.
+
+**Phase D — Read APIs:**
+- Update `/api/me/stats` to return the new shape:
+    * `{parties_played, parties_lost, parties_survived, survival_rate, manches_played, manches_lost, manche_resilience, current_streak, longest_streak, elo, badge}`
+- Compute derived fields on the server: `survival_rate = parties_survived / max(parties_played, 1)`, `manche_resilience = 1 - (manches_lost / max(manches_played, 1))`.
+- Update `/api/rankings` to sort by ELO (default), with secondary sort options for survival_rate or manche_resilience.
+
+**Phase E — UI:**
+- **`Profile.jsx`:**
+    * Replace `wins` / `losses` UI cards with: « Parties survécues », « Parties perdues », « Taux de survie ».
+    * Add « Résistance par manche » card (manche_resilience as percentage).
+    * Keep streak cards (now backed by real data).
+    * Remove the placeholder `top_combos` and `recent_games` sections for v1 (these need a separate aggregation pass — capture as G91 follow-up if you want them).
+- **`Rankings.jsx`:** Update column headers. Add sort-by-survival-rate option.
+- **i18n strings:** new keys for « partie », « manche », « survie », « résistance », badge labels stay (already exist).
+
+**Acceptance:**
+- After migration: all users have `parties_played=0, parties_survived=0, parties_lost=0, manches_played=0, manches_lost=0, current_streak=0, longest_streak=0, elo=1200`.
+- A player plays one partie in a 3-player table and survives. After: `parties_played=1, parties_survived=1, current_streak=1, longest_streak=1, elo ≈ 1211` (gained ~11 from a 33% expected survival rate).
+- Profile shows the new fields with correct values, no `top_combos` / `recent_games` placeholders.
+- A different player loses that same partie → `parties_played=1, parties_lost=1, current_streak=0, elo ≈ 1178`.
+
+**Dependencies:** None — pure backend + DB work. UI work follows once API is updated.
+
+**Effort:** ~5 days. **Launch-blocker.**
+
+### G92. Pre-launch security audit
+**Why:** Before exposing this to public traffic, the user wants a structured audit pass against common web-app vulnerabilities + a written punch list of fixes. Not a "we ran a scanner once" — a deliberate review of authentication, authorization, dependency hygiene, secrets management, rate-limit coverage, header hardening, RGPD posture, and incident-response preparedness.
+
+**Scope (audit + fix):**
+
+#### Dependency hygiene
+- `pip-audit` against `requirements.txt` → review every CVE, upgrade or document risk.
+- `npm audit` against `frontend/package-lock.json` → same.
+- Add both to CI as a non-blocking job (alerts but doesn't fail builds).
+
+#### Secrets management
+- Audit `.env.example` vs `.env` to ensure no secret has been accidentally committed historically (run `git log -p -S "xkeysib"` etc. for each secret prefix).
+- Confirm Sentry doesn't capture request bodies / Authorization headers (review `sentry_sdk.init` config).
+- Rotate `SECRET_KEY` for prod (different from dev) — must invalidate all existing JWTs cleanly.
+- Document secret-rotation runbook in `docs/SECURITY.md` (new file).
+
+#### Auth + session
+- Verify JWT signature algorithm is HS256 (no `alg: none` acceptance bug).
+- Verify JWT expiry is enforced server-side (not just claimed).
+- Confirm password storage is bcrypt with cost factor ≥ 12.
+- Test: replay an expired token → rejected with 401.
+- Test: forge a token with the wrong secret → rejected.
+- Confirm `/auth/reset-password` invalidates all existing sessions for the user (not implemented yet — add).
+- Confirm OAuth (Google) path validates the audience claim against `GOOGLE_CLIENT_ID`.
+- Session timeout: 30 min default, 30 days with remember_me — verify both enforced.
+
+#### Authorization
+- Every endpoint reviewed for proper `Depends(get_current_user)` / `require_admin` / `require_moderator` gating.
+- Confirm `/api/admin/*` endpoints return 403 (not 404) for non-admins — current behavior may be 404 from FastAPI's routing, which can leak existence.
+- Confirm WS connections re-validate JWT on every action (not just on connect).
+
+#### Rate limiting
+- Verify slowapi limits on: `/auth/register` (5/min), `/auth/login` (10/min), `/auth/forgot-password` (3/min), `/api/contact` (3/hr).
+- Verify limits are per-IP, with X-Forwarded-For trust configured for Fly.io proxy.
+- Add limit on `POST /api/follow/{user_id}` ([[G28]]) — 30/min to prevent follow-bombing.
+- Add limit on WS `chat` messages ([[G89]]) — already in scope.
+
+#### Input validation
+- XSS audit: every place that renders user-supplied data (username, profile bio if any, chat messages once shipped) — confirm React's default escaping is doing the work + no `dangerouslySetInnerHTML` slipped in.
+- SQL injection: SQLAlchemy ORM mostly safe by construction — confirm no raw-string concatenation in any `text()` call.
+- HTML email injection: confirm Jinja autoescape is ON for all email templates (re-verify after G76 — it was set in `Environment(autoescape=...)`).
+- CSV injection: if any admin export ([[G90]]) writes CSV, prefix `=`/`+`/`-`/`@` cells with `'`.
+
+#### Headers + transport
+- HSTS: `Strict-Transport-Security: max-age=31536000; includeSubDomains` — verify Cloudflare sets at proxy edge (probably yes).
+- CSP: write a `Content-Security-Policy` that blocks `'unsafe-inline'` script (audit any inline `<script>` first); allow `'self'` + google fonts + Sentry CDN.
+- X-Frame-Options: `DENY` (prevents clickjacking).
+- X-Content-Type-Options: `nosniff`.
+- Referrer-Policy: `strict-origin-when-cross-origin`.
+- Permissions-Policy: minimal (no camera, mic, geolocation requested).
+- Add a `app/middleware/security_headers.py` that sets all of these on every response.
+
+#### CORS
+- Confirm `Access-Control-Allow-Origin` is locked to known frontends (`https://421bistro.com` + localhost for dev) — not `*`.
+- No `Access-Control-Allow-Credentials: true` with wildcard.
+
+#### Data
+- Audit DB: any table without `ON DELETE CASCADE` / `SET NULL` that should have it? (Verified during G76 work but re-confirm.)
+- Confirm avatars (`User.avatar_data` LargeBinary) are size-limited at upload (already done in [[G46]]) and content-type validated (already done).
+
+#### RGPD posture
+- Confirm `/api/me/export` exists and returns the user's data (not currently implemented — add as part of G92 fixes).
+- Confirm `/api/me/delete` exists and triggers the deletion flow (currently only contact-form path — add direct endpoint).
+- Confirm the inactive-account cron ([[G70]]) is actually wired to run in prod (currently dry-run).
+
+#### Incident response
+- Write `docs/SECURITY.md` with: how to rotate secrets, how to revoke a leaked JWT (set new `SECRET_KEY`), how to ban a user from the command line, contact info for security disclosures (`security@421bistro.com` — add to Cloudflare routing).
+- Verify Sentry alerts you on a fresh high-severity error (test by raising one deliberately).
+
+**Acceptance:** A `docs/SECURITY_AUDIT_2026-06.md` punch list document is committed, every item either fixed or explicitly documented as accepted-risk. Mandatory items (auth, secrets, headers, RGPD endpoints) all fixed before launch.
+
+**Effort:** ~3 days (1 day audit + 2 days fixes). **Launch-blocker.**
+
+### G96. Username + profile-content moderation
+**Why:** Discovered during G90 manual smoke testing: a user registered with username `BigBite420` and the signup endpoint accepted it. Same gap exists anywhere else free-form user content surfaces (display names, future profile bios, future chat). The avatar upload path is already gated by [[G46]]'s AI moderation — text inputs need parallel coverage. Without this, day-one public traffic could pollute the leaderboard with offensive handles that are then visible everywhere a user is mentioned.
+
+**Two-layer defense (industry standard for username gates):**
+
+#### Layer 1 — Allowlist regex (cheap, catches noise)
+
+In `app/schemas/auth.py:username_valid`, replace the length-only check with:
+- Pattern: `^[a-zA-Z0-9_.-]{3,20}$` (letters, digits, underscore, dot, hyphen; 3-20 chars)
+- No spaces, no special chars, no unicode confusables
+- No leading/trailing dot or hyphen
+- No consecutive special chars (`__`, `..`, `--`)
+
+This alone eliminates `BigBite 420`, `B!gBite420`, emoji-spam, etc. without touching the blocklist.
+
+#### Layer 2 — Profanity blocklist (substring + l33t variants)
+
+- New module `app/services/content_moderation.py` exposing `is_clean_username(s: str) -> tuple[bool, str | None]` → returns `(False, reason)` for rejected handles.
+- Curated bilingual blocklist (FR + EN core terms, ~200 entries) stored in `app/data/username_blocklist.txt`. Loaded once at module import.
+- Before matching, normalize: lowercase, strip dots/hyphens/underscores, apply l33t → letter substitutions (`0→o, 1→i/l, 3→e, 4→a, 5→s, 7→t, 8→b, @→a, $→s`).
+- Substring match against the normalized form. Reject if any blocklist term appears.
+- Examples that should reject: `BigBite420`, `B1gB1te420`, `b.i.g.b.i.t.e`, `c0nnard`, `f4ck_y0u`, `m3rde`, every common slur in either language.
+- Edge: don't false-positive innocuous handles. `Assassin` should pass even though `ass` is a substring — the blocklist is for *complete words* and known compound bad-words, not raw substring sniffing on common letter sequences. Use a dedicated `BAD_SUBSTRINGS` list (matched anywhere) vs. `BAD_WORDS` list (matched only as whole token after normalization).
+
+#### Layer 3 — Optional AI moderation (DEFERRED — confirmed during G97)
+
+For edge cases ([[G46]] pattern), pass borderline usernames through Claude with a simple "is this username inappropriate, yes/no + reason" prompt. ~$0.0001 per check.
+
+**When to actually build this:** ONLY after a real false-positive complaint surfaces in production. The static blocklist is conservative enough that we have zero documented false positives so far (`Assassin`, `compassion`, `robotanist` all pass). Adding the AI call before any actual complaint is premature optimization — adds latency, cost, and a new failure mode for marginal coverage gain.
+
+**Trigger to open:** Sentry shows ≥ 3 legitimate handles rejected by Layer 2 OR contact-form receives ≥ 2 "your gate rejected my actual name" tickets.
+
+**Implementation sketch when triggered:**
+- Only invoke on handles that pass layers 1 + 2 (free) OR on handles that fail layer 2 + the rejected user contacts support
+- Use the existing Anthropic API client + key from [[G46]]
+- Strict 2-second timeout; on timeout/failure fall through to the static-blocklist verdict (fail closed — never block based on AI alone, never let AI override a static reject)
+- Prompt: « Username: "{handle}". In French OR English, is this handle inappropriate (profanity, slur, impersonation, sexual content)? Answer yes or no. »
+- Cache verdicts in Redis 90 days keyed by normalized handle (most checks are duplicates)
+- ~$0.0001 per check × ~50 borderline calls/day at meaningful traffic = ~$0.15/month
+- Fail-open semantics: AI says "no" → accept (combined with strict static layer); AI says "yes" → reject. AI unavailable → fall back to static layer's verdict.
+
+#### Where to enforce
+
+- **`POST /auth/register`** — fail with 422 `{detail: "Username contains inappropriate content"}` (don't reveal which term matched — prevents bypass-iteration).
+- **`POST /auth/complete-profile`** (Google SSO path) — same validation.
+- **`PATCH /auth/me`** (username rename, if/when added) — same.
+- **Admin override** — admin can set any username via `PATCH /api/admin/users/{id}/username` (new endpoint) to e.g. force-rename a violator. Bypasses the gate; audit logged as `username_forced_change`.
+
+#### Other free-form user content
+
+Same module gates:
+- Display names if/when separated from username
+- Profile bio (when [[G28]] lands or before)
+- Chat messages (delegated to [[G34]] AI moderation, but `is_clean_username` is the fast pre-filter)
+- Room names if/when custom-named rooms ship
+
+**Tests:**
+- Positive cases: `Sierra`, `marcel_dupont`, `user.42`, `bot-3` all pass
+- Layer 1 rejections: `Big Bite`, `b!t`, `..bad`, `verylongusernameindeedmuchlongerthan20`
+- Layer 2 rejections: `BigBite420`, `b1gb1te`, `c0nnard`, `m3rde`, every entry from a 20-name sample of the blocklist
+- Admin override: admin can rename a violator; audit row written
+
+**Acceptance:**
+- Registering with `BigBite420` returns 422
+- Registering with `Sierra` succeeds
+- Renaming an existing offensive account from admin works end-to-end
+
+**Effort:** ~1 day (regex + blocklist module + endpoint wiring + tests). **Launch-blocker.** Public-facing site cannot ship with this gap.
+
+**Dependencies:** None — pure backend + schema work. Could be its own small PR after G92.
+
+### G93. Bot-takeover hard timeout — evict AFK player after N minutes
+**Why:** Today when a player goes AFK, the bot ([[G9]]) takes over and plays in their stead — indefinitely. Result: an AFK human keeps their seat forever, blocking new joiners and forcing a bot-vs-human dynamic for everyone else. The fix: after a configurable timeout (default 10 min, env-driven), the human is fully removed from the game so the seat frees up. If the slot has joinable replacements (the room is set to allow late-joins), the seat opens for spectators ([[G87]]) or for the lobby. If not, the bot continues but the row stays — closer to the existing flow.
+
+**Scope:**
+- **New env var:** `BOT_TAKEOVER_MAX_MINUTES=10` (default 10, configurable 5-30). Validated at startup; out-of-range falls back to 10.
+- **Per-player AFK clock:** `game.players[i].afk_started_at: datetime | None`. Set when bot takes over ([[G9]]). Cleared on handback ([[G2]]).
+- **Eviction check** runs on every cycle advance (and on a 60s periodic timer for edge cases):
+    * If `now() - afk_started_at > BOT_TAKEOVER_MAX_MINUTES`:
+        * Broadcast `{type: 'player_evicted_afk', player_id, reason: 'afk_timeout'}`.
+        * Mark player as `evicted` in game state (different from `disconnected` — they can't reconnect; the slot is gone).
+        * If the room is mid-partie: the bot continues finishing the cycle, but on next cycle start, the player is removed from `game.players`.
+        * If the room is between parties: player is removed immediately.
+        * If they had `email_opt_in`: send them an « Your session was ended » email (new template `session_ended_afk.{fr,en}.{html,txt}` extending `_base.html`). RGPD: transactional, no opt-out.
+        * Audit log: `event_type='afk_eviction'` with metadata `{game_id, room_code, afk_duration_minutes}`.
+- **Slot freeing:**
+    * If room allows late-joins ([[Game.allow_late_join]] flag, already in scope), the evicted slot becomes available in the lobby's join flow.
+    * Spectator-to-player conversion ([[G87]]) treats this slot as a candidate seat.
+- **Anti-grief safeguard:** if a player has been evicted from 3+ rooms in 24h, lock their account for 24h with `chat_banned_until = ban_reason = 'repeated_afk'`. Discourages users who deliberately abuse the AFK / bot to grief tablemates.
+- **UI affordances:**
+    * The to-be-evicted player gets a warning toast at T-2min: « Vous serez retiré(e) de la partie dans 2 minutes pour inactivité ». Each subsequent minute updates the toast.
+    * If they come back (any WS action), the toast clears + bot hands back ([[G2]] flow).
+    * Other players see a journal entry: « June a été retirée pour inactivité » with the elapsed time.
+
+**Acceptance:**
+- Sierra is AFK; bot takes over. After 8 min, Sierra sees a "2 minutes until eviction" toast (if her tab is still open).
+- 2 more minutes pass with no input. Sierra is removed from the game. Journal logs the eviction. Other players see « Sierra a été retirée pour inactivité ». Sierra's seat is now joinable.
+- Sierra reopens the app → sees a banner « Vous avez été retirée d'une partie pour inactivité — code: ABC123 ». If she had `email_opt_in`, she also has an email.
+- Sierra repeats this in 3 different rooms within 24h → her account gets a 24h chat-ban + audit log row.
+
+**Dependencies:** [[G2]] ✅ + [[G9]] ✅ + [[G87]] (spectator-to-player slot fill).
+
+**Effort:** ~2-3 days.
+
+### G94. Interactive dice on the homepage — tap to roll
+**Why:** The homepage hero currently displays three static dice (locked at « 4-2-1 » with a gentle ambient animation). Visitors get the brand visual but no sense of the game's *feel* — what does a roll look like, what combos exist beyond the iconic 421? Making the dice tappable transforms passive decoration into interactive demo. One tap, three dice shake + tumble, settle on a random combo, the combo name appears below. Zero commitment, immediate « ooh this looks fun ». Strong cheap conversion win at the top of the funnel.
+
+**Two implementation paths depending on [[G31]] timing:**
+
+#### G94a — Lightweight 2D variant (ships first, no dependencies)
+
+Use the existing 2D dice rendering. A click/tap triggers:
+1. Brief shake animation (~600ms): CSS keyframes rotating each die randomly ±15°.
+2. Roll animation (~400ms): dice flicker through 8-10 random faces (fast cycling).
+3. Settle: each die lands on a uniformly-random face 1-6.
+4. Combo banner appears below for ~3s: « 4-2-1 · **421** » or « 1-1-3 · **113** · 3 fiches ».
+
+**Scope:**
+- New `HomepageDiceRoller.jsx` component replacing the static hero dice.
+- Click handler on the dice container (also fires on `Enter`/`Space` for keyboard accessibility).
+- Random face generation client-side (`Math.floor(Math.random()*6)+1` × 3 — no backend hit, demo only).
+- Combo classification: port `classify()` from `app/game/logic.py` to JS as `frontend/src/utils/classify.js`. Returns the same `{name, fiches}` shape so the banner copy matches what players see in-game.
+- Combo banner: small ribbon below the dice, fades in/out with the bistro accent (rouge for 421 / 111 / 11x, brass for triples + suites, ink-mute for basics).
+- Throttle: max one roll per ~600ms (ignore repeated taps mid-animation).
+- Accessibility: dice container gets `role="button"` + `tabIndex=0` + `aria-label="Lancer les dés (cliquez ou appuyez)"`. Respects `prefers-reduced-motion`: skip the shake + roll animations, just instant-swap values + fade in the banner.
+
+**Acceptance:**
+- Visitor lands on `/` → sees the three dice with a subtle « tap me » affordance (small pulse animation on first viewport entry).
+- Click anywhere on the dice area → shake → tumble → settle → combo banner appears.
+- Different combos render with appropriate styling (421 gets the rouge accent + chip count; basic figures get the muted ink color).
+- Mobile tap works identically to desktop click.
+- `prefers-reduced-motion`: dice swap instantly without animation; banner still appears.
+
+**Effort:** ~half day. Pure frontend, no backend, no schema changes.
+
+#### G94b — Upgrade to 3D once [[G31]] ships
+
+After [[G31a]] lands (three.js + cannon-es 3D dice prototype), replace the homepage 2D dice with the same component. The 3D physics + sound effects make the homepage demo even more impressive. Same interaction contract (tap → roll → settle → banner), different rendering.
+
+**Scope:**
+- Reuse the `<Dice3D>` component from G31's prototype, configure with a smaller "showcase" camera + table surface.
+- Trigger uses the same physics throw — random initial velocity + spin, settles via cannon-es.
+- Bundle: lazy-load three.js chunk on first interaction (don't pay the bundle cost for users who never scroll to the dice). For users who DO tap, the small loading delay (~200-400ms first time) is masked behind the shake animation.
+
+**Acceptance:** Same UX as G94a but with the 3D dice rendering, optional sound (respecting user mute preference).
+
+**Effort:** ~half day on top of G31a.
+
+**Dependencies:**
+- G94a: none — can ship anytime as a polish item.
+- G94b: [[G31a]] (three.js + cannon-es prototype must exist).
+
+**Recommendation:** Ship G94a after [[G77]] launch as a polish PR (1 evening of work, immediate visible value to new visitors). Upgrade to G94b whenever G31 lands.
+
+### G61. Right-rail panels become collapsible "tabs"
+**Why:** Reported during playtest. The right `<aside>` today is a fixed layout: collapsible **Journal** on top, *always-visible* **Combo hierarchy** at the bottom. The user wants the hierarchy to collapse the same way the journal does — and more broadly, they want the right rail to behave like a small set of *stackable tabs* (Journal · Hierarchy · later: Chat) that each open/close independently. This sets up the eventual chat slot ([[G59]]) without ripping out the existing panels.
+**Scope:**
+- **Component:** new `CollapsiblePanel.jsx` in `frontend/src/components/shared/` taking `{ title, subtitle?, defaultOpen, children, onToggle }`. Renders a sticky header with the panel title + collapse button (▲ / ▼), then the children when open. Mirrors the existing journal header treatment so the visual language stays consistent.
+- **Refactor `Game.jsx`'s right `<aside>`:**
+  - Wrap the journal content in a `<CollapsiblePanel title={t('log')} subtitle={t('log_subtitle')} defaultOpen>`. Lift the existing `logOpen` state in or move it into the new component (lift up if other components need to know).
+  - Wrap the hierarchy in a second `<CollapsiblePanel title={t('combo_hier')} defaultOpen={false}>`. Default-closed so it doesn't compete with the journal for vertical space.
+  - When [[G59]] / chat ships, add a third `<CollapsiblePanel title={t('chat')} />` panel in the same rail.
+- **Vertical layout:** the rail uses `display: flex; flex-direction: column`. Each panel collapses to just its header when closed; the open panel claims the remaining `flex: 1` so users can read it comfortably. Two open panels share the space proportionally.
+- **State persistence:** localStorage `panel_state: { log: bool, hierarchy: bool, chat: bool }` so a user's open/closed choices stick across refreshes / G60 rehydration.
+- **A11y:** each header acts as a button with `aria-expanded` reflecting state; `aria-controls` pointing to the body region; keyboard Enter / Space toggles.
+- **Tests:** none required for this MVP (pure UI state). Manual playtest validates the visual flow.
+**Acceptance:** The hierarchy section now has its own collapse button identical to the journal's. Closing both panels collapses the rail to just two headers + a thin spacer. Reopening either expands smoothly. The toggle states persist across page reloads.
+**Dependencies:** Pairs cleanly with [[G59]] (chat-prep) and [[G60]] (session persistence — the panel_state localStorage key is part of the same persistence layer).
+
+### G62. (DONE) Game-room layout overflow / overlap fix at 100% browser zoom
+**Why:** Reported during playtest. The user was running at 80 % browser zoom, which masked layout issues. At 100 % zoom the room breaks: the piste is too large for the viewport, text feels oversized, the bottom action bar gets pushed off-screen and forces a page scroll, and the top bar elements overlap (the last-throw dice on a `PlayerStrip` collide with the player's name pill). The host's « ⚙ Room rules » pill in the top-right adds a chunk of width that compounds the overlap.
+**Scope:** Viewport-fit piste via CSS grid `auto 1fr auto` rows in the middle column + container queries on the piste-stage. Action bar 3-column grid (info · secondary · primary) so play buttons stay flush right when wrapping. Per-strip dice hidden ≤ 1280 px. Host « ⚙ Room rules » button icon-only at all widths. Top-bar moved from PlayerStrips to a vertical PlayerRail in the left aside (was squishing badly at 3+ players). Pool stack `1.45×` scaled in the centre. Bandage/skull pip system with always-on counters in the rail card. « ❦ LA PISTE ❦ » decorative label removed (overlapped G47 top seat).
+**Acceptance:** At 100 % zoom on any laptop-or-larger viewport, the game room fits without a page scroll. Top-bar elements never overlap. The host's room-rules button doesn't push other controls off-screen. The action bar (Lancer / Valider / Quitter) is always visible at the bottom without the user having to scroll.
+**Dependencies:** Bundled with [[G14]] and [[G52]] in spirit. Shipped via the same PR as [[G64]] and [[G47]] rotation.
+
+### G63. (DONE) Cross-page responsive UX audit + breakpoint discipline
+**Why:** The user wanted assurance that *every* page (home, lobby, waiting room, game room, profile, rankings, login/register, reset, contact, how-to-play, terms, privacy) renders cleanly across **mobile (375 px) / tablet (768 px) / laptop (1280 px) / desktop (1920 px)**. [[G19]] hit the TopBar's 641–835 px band, [[G62]] fixed the game room, but no end-to-end pass had run.
+**Scope:** Code-level audit of every page in `frontend/src/pages/` plus shared layout components. Documented findings in `docs/RESPONSIVE_AUDIT.md` (4-breakpoint contract; per-page punch list). Top 10 follow-up fixes prioritised; each becomes its own roadmap entry (G68+) when picked up.
+**Acceptance:** Audit doc committed. Future fix work has a clear punch list.
+**Dependencies:** None. Investigation work; shipped via PR #40 (chore/g63-responsive-audit).
+
+### G64. (DONE) Mobile / tablet gameplay layout — rewrite from scratch
+**Why:** Reported during playtest. The desktop layout (3-column grid + top-bar PlayerStrip row + bottom action bar) was unusable on < 1024 px viewports. Existing breakpoints only stripped components down — the underlying structure still tried to assert itself.
+**Scope shipped:**
+- `useMediaQuery('(max-width: 959px)')` switches `Game.jsx` to render `<GameMobile />` below 960 px. Desktop branch untouched.
+- New `GameMobile.jsx` shell: slim top header (phase · round · turn · top-right 🚪 Quit), full-bleed piste, 2-row bottom dock (Roll/Validate primary; Journal/Live/Hierarchy/Settings secondary).
+- New `BottomSheet.jsx` drawer component — slide-up panel, backdrop, drag-handle, `prefers-reduced-motion` aware. Journal + Live live in drawers; Hierarchy reuses the existing lightbox.
+- `MobilePisteSeat` trimmed variant with G47 rotation reused (viewer at the bottom).
+- Manche/partie pip system (🩹/💀) with always-on counters per player card.
+**Acceptance:** A player can play a complete match on a 375 px phone using only thumb gestures. Mobile/tablet/laptop verified across the matrix.
+**Dependencies:** Built on [[G47]] (viewer at bottom) + [[G62]] (piste sizing) + [[G60]] (drawer state). Shipped together via PR #46.
+
+### G65. (DONE) Dice scale responsive to viewport
+**Why:** Dice were CSS-fixed at 4.5 rem regardless of viewport. On phones that's a third of screen width per die; the cluster overflowed the piste's bottom slot. On 960–1180 px laptop band the corners clipped against the curved piste boundary.
+**Scope shipped:**
+- `--die-size` CSS custom property scoped to `.gameroom-piste-stage` via container queries: `clamp(2.4rem, 12cqi, 4.2rem)`. Dice now scale relative to the piste container, not the viewport.
+- `--die-pip-size: clamp(0.38rem, 1.85cqi, 0.65rem)` follows proportionally.
+- Mini dice (`.die-mini`) unchanged.
+**Acceptance:** Dice fit comfortably in the piste at every viewport width.
+**Dependencies:** None. Shipped alongside [[G64]] via PR #46.
 
 ---
 

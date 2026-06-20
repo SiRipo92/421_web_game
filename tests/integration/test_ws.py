@@ -372,3 +372,120 @@ def test_kick_missing_target_id_is_noop(tc):
     # Both players still present
     assert any(p.id == host for p in games[gid].players)
     assert any(p.id == other for p in games[gid].players)
+
+
+# ── G45: host edits room rules mid-partie ─────────────────────────────────
+
+
+def test_update_room_rules_stages_pending_for_host(tc):
+    """Host's `update_room_rules` stacks valid changes into pending_room_rules
+    without applying them mid-partie."""
+    gid = _create_room(tc)
+    host = _join(tc, gid, "Alice")
+    _join(tc, gid, "Bob")
+
+    with tc.websocket_connect(f"/ws/{gid}/{host}") as ws:
+        _recv(ws)
+        ws.send_text(
+            json.dumps(
+                {
+                    "action": "update_room_rules",
+                    "rules": {"bank_rule": "sec", "afk_seconds": 30},
+                }
+            )
+        )
+        state = _recv(ws)
+
+    # Live room config untouched (still has the defaults from /api/create).
+    game = games[gid]
+    assert game.bank_rule != "sec" or game.afk_seconds != 30, (
+        "Live rules shouldn't change yet — they apply at the next partie."
+    )
+    # Pending dict carries the changes.
+    assert game.pending_room_rules.get("bank_rule") == "sec"
+    assert game.pending_room_rules.get("afk_seconds") == 30
+    # Broadcast surfaces pending_room_rules in the room payload.
+    assert state["room"]["pending_room_rules"]["bank_rule"] == "sec"
+
+
+def test_update_room_rules_rejects_non_host(tc):
+    """A non-host player's `update_room_rules` is silently ignored."""
+    gid = _create_room(tc)
+    _host = _join(tc, gid, "Alice")
+    other = _join(tc, gid, "Bob")
+
+    with tc.websocket_connect(f"/ws/{gid}/{other}") as ws:
+        _recv(ws)
+        ws.send_text(
+            json.dumps(
+                {
+                    "action": "update_room_rules",
+                    "rules": {"bank_rule": "sec"},
+                }
+            )
+        )
+
+    assert games[gid].pending_room_rules == {}
+
+
+def test_update_room_rules_ignores_invalid_values(tc):
+    """Out-of-range or wrong-type values stay out of the pending dict."""
+    gid = _create_room(tc)
+    host = _join(tc, gid, "Alice")
+    _join(tc, gid, "Bob")
+
+    with tc.websocket_connect(f"/ws/{gid}/{host}") as ws:
+        _recv(ws)
+        ws.send_text(
+            json.dumps(
+                {
+                    "action": "update_room_rules",
+                    "rules": {
+                        "bank_rule": "invalid-mode",  # not in ("sec", "free")
+                        "afk_seconds": 999,  # > 120
+                        "max_players": "not-an-int",  # wrong type
+                        "afk_bot": False,  # valid — only this should land
+                    },
+                }
+            )
+        )
+
+    pending = games[gid].pending_room_rules
+    assert pending == {"afk_bot": False}
+
+
+def test_update_room_rules_editing_back_drops_pending(tc):
+    """Setting a field back to its current value removes the pending entry
+    (avoids leaving a noop in the dict)."""
+    gid = _create_room(tc)
+    host = _join(tc, gid, "Alice")
+    _join(tc, gid, "Bob")
+    game = games[gid]
+    # Snapshot the current allow_spectators value, then queue the flip and
+    # immediately queue the flip-back.
+    current_spectators = game.allow_spectators
+
+    with tc.websocket_connect(f"/ws/{gid}/{host}") as ws:
+        _recv(ws)
+        ws.send_text(
+            json.dumps(
+                {
+                    "action": "update_room_rules",
+                    "rules": {"allow_spectators": not current_spectators},
+                }
+            )
+        )
+        _recv(ws)
+        # Now flip back to the original.
+        ws.send_text(
+            json.dumps(
+                {
+                    "action": "update_room_rules",
+                    "rules": {"allow_spectators": current_spectators},
+                }
+            )
+        )
+        state = _recv(ws)
+
+    assert games[gid].pending_room_rules == {}
+    assert state["room"]["pending_room_rules"] == {}

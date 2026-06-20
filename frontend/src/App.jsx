@@ -18,7 +18,11 @@ import { Privacy } from './pages/Privacy.jsx'
 import { TermsAndConditions } from './pages/TermsAndConditions.jsx'
 import { CompleteProfile } from './pages/CompleteProfile.jsx'
 import { Contact } from './pages/Contact.jsx'
+import { Unsubscribed } from './pages/Unsubscribed.jsx'
 import { AdminDashboard } from './pages/AdminDashboard.jsx'
+import { AdminUsers } from './pages/AdminUsers.jsx'
+import { AdminUserDetail } from './pages/AdminUserDetail.jsx'
+import { AdminAudit } from './pages/AdminAudit.jsx'
 
 export default function App() {
   const { user, token, loading, login, register, googleLogin, refreshUser, logout } = useAuth()
@@ -56,7 +60,11 @@ export default function App() {
             <Route path="/terms" element={<TermsAndConditions />} />
             <Route path="/complete-profile" element={<CompleteProfile user={user} token={token} onRefreshUser={refreshUser} />} />
             <Route path="/contact" element={<Contact />} />
+            <Route path="/unsubscribed" element={<Unsubscribed />} />
             <Route path="/admin" element={<AdminDashboard user={user} token={token} />} />
+            <Route path="/admin/users" element={<AdminUsers user={user} token={token} />} />
+            <Route path="/admin/users/:userId" element={<AdminUserDetail user={user} token={token} />} />
+            <Route path="/admin/audit" element={<AdminAudit user={user} token={token} />} />
           </Routes>
         </PageLayout>
       } />

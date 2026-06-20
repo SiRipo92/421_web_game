@@ -1,0 +1,22 @@
+{% extends "_base.txt" %}
+{% block body %}
+Hi {{ username }},
+
+In accordance with GDPR Article 34, we are notifying you of a security
+incident that may have affected your personal data.
+
+Incident date : {{ breach_date_label }}
+Detection date: {{ detection_date_label }}
+Data affected : {{ affected_data }}
+
+Actions taken:
+{{ actions_taken }}
+
+Recommendations:
+{{ user_recommendations }}
+
+The incident has been reported to the CNIL (French data protection
+authority).
+
+For questions: {{ app_url }}/contact
+{% endblock %}

@@ -66,7 +66,7 @@ export function Rankings({ user }) {
             <div className="eyebrow">{t('player_col')}</div>
             <div className="eyebrow">Elo</div>
             <div className="eyebrow">{t('games_col')}</div>
-            <div className="eyebrow">{t('wins_col')}</div>
+            <div className="eyebrow">{t('survival_col')}</div>
           </div>
           {players.map((p, i) => {
             const isSelf = user && p.user_id === user.id
@@ -92,7 +92,9 @@ export function Rankings({ user }) {
                 </div>
                 <div className="mono" style={{ fontWeight: 700, fontSize: '1.05rem' }}>{p.elo}</div>
                 <div className="mono" style={{ color: 'var(--ink-mute)', textAlign: 'right' }}>{p.games_played}</div>
-                <div className="mono" style={{ color: 'var(--felt-deep)', fontWeight: 600, textAlign: 'right' }}>{p.wins}</div>
+                <div className="mono" style={{ color: 'var(--felt-deep)', fontWeight: 600, textAlign: 'right' }}>
+                  {p.games_played > 0 ? `${Math.round(p.survival_rate * 100)}%` : '—'}
+                </div>
               </div>
             )
           })}

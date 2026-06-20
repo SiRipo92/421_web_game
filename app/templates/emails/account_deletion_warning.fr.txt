@@ -1,0 +1,14 @@
+{% extends "_base.txt" %}
+{% block body %}
+Bonjour {{ username }},
+
+Votre compte 421 Bistro est inactif depuis {{ inactive_years }} ans.
+Conformément à notre politique de minimisation des données (RGPD), il
+sera automatiquement supprimé le {{ deletion_date_label }}.
+
+Pour garder votre compte, reconnectez-vous :
+{{ keep_active_url }}
+
+À la suppression, votre profil, vos statistiques et vos messages publics
+seront effacés. Cette opération est irréversible.
+{% endblock %}

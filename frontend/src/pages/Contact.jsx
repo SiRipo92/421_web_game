@@ -1,19 +1,74 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useLang } from '../context/useLang.js'
+
+const VALID_SUBJECTS = new Set(['other', 'bug', 'export', 'delete', 'appeal'])
+
+const Required = () => (
+  <span style={{ color: 'var(--rouge)', marginLeft: 4 }} aria-hidden="true">*</span>
+)
 
 export function Contact() {
   const { t } = useLang()
+  const [searchParams] = useSearchParams()
+  // G90 follow-up: ban_notice email links to /contact?subject=appeal.
+  // Preselect the matching <select> option + seed a polite message stub so
+  // the recipient isn't staring at an empty textarea.
+  const initialSubject = (() => {
+    const s = searchParams.get('subject')
+    return s && VALID_SUBJECTS.has(s) ? s : 'other'
+  })()
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
-  const [subject, setSubject] = useState('other')
-  const [message, setMessage] = useState('')
+  const [subject, setSubject] = useState(initialSubject)
+  const [message, setMessage] = useState(initialSubject === 'appeal' ? '' : '')
+
+  // Seed the message textarea on mount when arriving with ?subject=appeal.
+  // Done once on mount via the ref pattern so user edits don't get
+  // clobbered if they navigate within the page.
+  const seededRef = useRef(false)
+  useEffect(() => {
+    if (seededRef.current) return
+    seededRef.current = true
+    if (initialSubject === 'appeal') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setMessage(t('contact_appeal_stub'))
+    }
+  // initialSubject is computed once; t is stable per language.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  // G68: explicit consent for processing the contact data is required
+  // before sending. `required` on the checkbox blocks submit at the
+  // browser level; the JS check is a belt-and-suspenders for screen
+  // readers / form auto-fillers that might bypass the required flag.
+  const [acceptConsent, setAcceptConsent] = useState(false)
   const [loading, setLoading] = useState(false)
   const [sent, setSent] = useState(false)
   const [error, setError] = useState('')
+  // Synchronous re-entry guard. React's batched `setLoading(true)` flushes
+  // on the next render, so a fast double-tap could fire handleSubmit
+  // twice before the disabled prop applies. The ref is set + checked in
+  // the same tick, so click #2 always sees the guard set.
+  const submittingRef = useRef(false)
 
+  // G68 follow-up: surface specific messages instead of a generic
+  // "An error occurred". Each return path maps to a distinct i18n key
+  // so the user knows what to do — re-check inputs, accept the
+  // checkbox, wait out the rate limit, or wait for email-service
+  // recovery.
   const handleSubmit = async (e) => {
     e.preventDefault()
+    if (submittingRef.current) return // double-tap guard
     setError('')
+    if (!name.trim() || !email.trim() || !message.trim()) {
+      setError(t('err_contact_missing_fields'))
+      return
+    }
+    if (!acceptConsent) {
+      setError(t('err_accept_consent'))
+      return
+    }
+    submittingRef.current = true
     setLoading(true)
     try {
       const res = await fetch('/api/contact', {
@@ -21,18 +76,32 @@ export function Contact() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, email, subject, message }),
       })
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        if (res.status === 429) { setError(t('err_rate_limit')); return }
-        throw new Error(body.detail || 'error')
+      if (res.ok) { setSent(true); return }
+      if (res.status === 429) { setError(t('err_rate_limit')); return }
+      if (res.status === 422) { setError(t('err_contact_missing_fields')); return }
+      // 502: the backend caught the email-service failure and tagged it.
+      // detail can be a string (legacy) or { code, message } (G68 fu).
+      let code = ''
+      try {
+        const body = await res.json()
+        const detail = body.detail
+        code = typeof detail === 'object' && detail ? detail.code : ''
+      } catch { /* non-JSON body — fall through */ }
+      if (code === 'email_sender_not_configured') {
+        setError(t('err_contact_email_sender_not_configured'))
+      } else if (code === 'email_service_unavailable') {
+        setError(t('err_contact_email_service_unavailable'))
+      } else {
+        setError(t('err_generic'))
       }
-      setSent(true)
     } catch {
       setError(t('err_generic'))
     } finally {
       setLoading(false)
+      submittingRef.current = false
     }
   }
+
 
   return (
     <div style={{ maxWidth: 680, margin: '4rem auto', padding: '0 1.5rem' }}>
@@ -53,15 +122,18 @@ export function Contact() {
         </div>
       ) : (
         <div className="ticket" style={{ padding: '2rem' }}>
+          <p className="serif" style={{ fontSize: '0.82rem', color: 'var(--ink-mute)', fontStyle: 'italic', margin: '0 0 1.2rem' }}>
+            {t('contact_required_legend')}
+          </p>
           <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.2rem' }}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }} className="contact-row">
               <div>
-                <label className="field-label" htmlFor="c-name">{t('contact_name')}</label>
+                <label className="field-label" htmlFor="c-name">{t('contact_name')}<Required /></label>
                 <input id="c-name" className="input" required value={name}
                   onChange={e => setName(e.target.value)} autoComplete="name" />
               </div>
               <div>
-                <label className="field-label" htmlFor="c-email">{t('email')}</label>
+                <label className="field-label" htmlFor="c-email">{t('email')}<Required /></label>
                 <input id="c-email" className="input" type="email" required value={email}
                   onChange={e => setEmail(e.target.value)} autoComplete="email" />
               </div>
@@ -73,16 +145,45 @@ export function Contact() {
                 <option value="bug">{t('contact_subject_bug')}</option>
                 <option value="export">{t('contact_subject_export')}</option>
                 <option value="delete">{t('contact_subject_delete')}</option>
+                <option value="appeal">{t('contact_subject_appeal')}</option>
               </select>
             </div>
             <div>
-              <label className="field-label" htmlFor="c-message">{t('contact_message')}</label>
+              <label className="field-label" htmlFor="c-message">{t('contact_message')}<Required /></label>
               <textarea id="c-message" className="input" required rows={5}
                 value={message} onChange={e => setMessage(e.target.value)}
                 style={{ resize: 'vertical', fontFamily: 'var(--body)' }} />
             </div>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+              <input
+                id="c-consent"
+                type="checkbox"
+                checked={acceptConsent}
+                onChange={e => setAcceptConsent(e.target.checked)}
+                style={{ marginTop: 3, flexShrink: 0 }}
+              />
+              <label htmlFor="c-consent" className="serif" style={{ fontSize: '0.9rem', cursor: 'pointer', lineHeight: 1.4 }}>
+                {t('contact_consent_pre')}{' '}
+                <Link to="/privacy" target="_blank" style={{ color: 'var(--rouge)' }}>
+                  {t('contact_consent_privacy_link')}
+                </Link>
+                {' '}{t('contact_consent_and')}{' '}
+                <Link to="/terms" target="_blank" style={{ color: 'var(--rouge)' }}>
+                  {t('contact_consent_terms_link')}
+                </Link>
+                {'. '}
+                <span style={{ color: 'var(--rouge)' }}>*</span>
+              </label>
+            </div>
             {error && <p style={{ color: 'var(--rouge)', fontSize: '0.9rem', margin: 0 }}>{error}</p>}
-            <button type="submit" disabled={loading} className="btn btn-primary" style={{ justifyContent: 'center' }}>
+            {/* G68 follow-up: button only disables during in-flight POST.
+                Previously also disabled when !acceptConsent, but that
+                hid the "please consent" error — a click went nowhere
+                and the user couldn't tell what was blocking them. Now
+                they can click; the JS check in handleSubmit surfaces
+                the specific consent error. Dimmed opacity still signals
+                the form isn't quite ready. */}
+            <button type="submit" disabled={loading} className="btn btn-primary" style={{ justifyContent: 'center', opacity: acceptConsent ? 1 : 0.6 }}>
               {loading ? '…' : t('contact_send')}
             </button>
           </form>

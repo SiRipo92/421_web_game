@@ -40,7 +40,16 @@ class User(Base):
     avatar_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     avatar_content_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
     lang_pref: Mapped[str] = mapped_column(String(2), nullable=False, server_default="fr")
+    # G46: per-account theme preference (light/dark). Synced with the
+    # in-game presentation popover toggle when the user is logged in.
+    theme_pref: Mapped[str] = mapped_column(String(8), nullable=False, server_default="light")
     email_opt_in: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    # G96: True when admin auto-sanitized this user's handle. The user
+    # sees an in-app banner prompting them to choose a new one. Cleared
+    # by PATCH /auth/me on successful rename.
+    username_pending_change: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false", default=False
+    )
     # Moderation foundation (G38). Role is a plain string column rather than a
     # Postgres ENUM so promoting/demoting in tests + migrations stays a single
     # UPDATE instead of an ALTER TYPE dance.
@@ -59,6 +68,12 @@ class User(Base):
         DateTime(timezone=True), nullable=True
     )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # G90: refreshed by `get_current_user` on every authenticated request
+    # (5-min throttle). Powers the admin "online" filter as a proxy for
+    # real WS presence until [[G88]] ships.
+    last_seen_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
 
     stats: Mapped["PlayerStats"] = relationship(
         back_populates="user", uselist=False, cascade="all, delete-orphan"
@@ -75,7 +90,12 @@ class Game(Base):
     __tablename__ = "games"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
-    game_code: Mapped[str] = mapped_column(String(8), unique=True, nullable=False)
+    # G91: not unique anymore — a single room hosts multiple sequential
+    # parties. (game_code, partie_number) is the unique pair.
+    game_code: Mapped[str] = mapped_column(String(8), nullable=False)
+    partie_number: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="1", default=1
+    )
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     finished_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -112,7 +132,14 @@ class GamePlayer(Base):
 
 
 class PlayerStats(Base):
-    """Aggregated stats and ELO for a user; one row per user."""
+    """Aggregated stats + ELO for a user. One row per user.
+
+    G91: column names use 421 vocabulary. The objective isn't to "win" but
+    to NOT lose — `parties_lost` is the rare-and-bad outcome,
+    `parties_survived` is everyone else's outcome. Per-cycle (manche)
+    counters surface "how often this player took fiches" independent of
+    final-game outcomes.
+    """
 
     __tablename__ = "player_stats"
 
@@ -121,8 +148,20 @@ class PlayerStats(Base):
     )
     elo: Mapped[int] = mapped_column(Integer, default=1200)
     games_played: Mapped[int] = mapped_column(Integer, default=0)
-    wins: Mapped[int] = mapped_column(Integer, default=0)
-    losses: Mapped[int] = mapped_column(Integer, default=0)
+    parties_survived: Mapped[int] = mapped_column(Integer, default=0)
+    parties_lost: Mapped[int] = mapped_column(Integer, default=0)
+    manches_played: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0", default=0
+    )
+    manches_lost: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0", default=0
+    )
+    current_streak: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0", default=0
+    )
+    longest_streak: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0", default=0
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

@@ -1,0 +1,23 @@
+{% extends "_base.txt" %}
+{% block body %}
+Hi {{ username }},
+
+We are confirming your account deletion request. We're sorry to see
+you go.
+
+Your personal data will be permanently erased in 24 hours.
+During this window:
+  - Your account is deactivated.
+  - Your statistics and game history are queued for erasure.
+  - If you change your mind, you can restore your account by logging
+    in before the deadline expires.
+
+To restore your account:
+{{ app_url }}/login
+
+After this window, erasure is irreversible (GDPR Art. 17 - right to
+be forgotten).
+
+Thank you for playing 421 Bistro. If you'd like to tell us what made
+you leave, contact us: {{ app_url }}/contact
+{% endblock %}

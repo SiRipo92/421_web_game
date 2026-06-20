@@ -111,11 +111,37 @@ make build-frontend  # outputs to static/dist/
 
 ### 4. Run tests locally
 
+The test suite **must not** run against your production database — integration tests create users via `/auth/register` and would otherwise pollute the live `users` table.
+
+**One-time setup** (per dev machine):
+
+1. Connect to your local Postgres in **pgAdmin 4** (or `psql`).
+2. Right-click your server → **Create → Database…** with:
+   - **Database**: `fourtwentyone_test`
+   - **Owner**: `app` (or whichever role owns the production DB)
+3. Add the connection string to your `.env`:
+   ```
+   TEST_DATABASE_URL=postgresql+asyncpg://app:<password>@localhost:5432/fourtwentyone_test
+   ```
+4. Apply the schema to the new database:
+   ```bash
+   make test-db-migrate
+   ```
+
+**Run tests:**
+
 ```bash
 .venv/bin/pytest tests/ -v
+# or
+make test
 ```
 
-Integration tests require a running PostgreSQL instance. Set `DATABASE_URL` in your `.env` to point at it.
+`tests/conftest.py` swaps `DATABASE_URL` → `TEST_DATABASE_URL` before any app module loads. Two safety guards refuse to run:
+
+- if `TEST_DATABASE_URL` isn't set in `.env`
+- if its value doesn't contain the substring `test`
+
+That way an accidentally-misconfigured `.env` can never wipe your production users.
 
 ## Branching & contributing
 
@@ -159,24 +185,55 @@ See `.env.example` for a full template.
 
 Interactive docs available at `/docs` when `DEBUG=true`.
 
+### Auth (`app/routers/auth.py`)
+
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| POST | `/auth/register` | — | Create account (birthdate required, min age 15), returns JWT |
-| POST | `/auth/login` | — | Login with email + password; `remember_me` extends TTL to 30 days |
-| GET | `/auth/me` | JWT | Current user info |
-| POST | `/auth/forgot-password` | — | Send password reset email |
-| POST | `/auth/reset-password` | — | Set new password using reset token |
-| POST | `/api/create` | optional JWT | Create a game room (accepts `is_public`, `max_players`, `bank_rule`, `afk_seconds`, `afk_bot`, `allow_spectators`) |
-| GET | `/api/join/{game_id}` | optional JWT | Join a game room by ID |
-| GET | `/api/rooms` | — | List open public rooms |
-| WS | `/ws/{game_id}/{player_id}` | optional JWT | Real-time player game connection |
-| WS | `/ws/{game_id}/spectate` | optional JWT | Read-only spectator connection |
-| GET | `/api/rankings` | — | Top 50 players by ELO |
-| GET | `/api/profile/{username}` | — | Player profile + recent game history |
-| GET | `/api/gdpr/export` | JWT | Download your data (GDPR Art. 15) |
-| POST | `/api/gdpr/delete` | JWT | Request account deletion (30-day grace) |
-| GET | `/api/gdpr/status` | JWT | Deletion request status |
-| GET/PUT | `/api/profile` | JWT | View / update your profile |
+| POST | `/auth/register` | — | Create account (birthdate required, min age 15). Returns JWT + `theme_pref`/`lang_pref`. |
+| POST | `/auth/login` | — | Email + password. `remember_me` extends token TTL to 30 days. |
+| POST | `/auth/google` | — | Google SSO callback (ID token). New users may need `/auth/google/complete`. |
+| POST | `/auth/google/complete` | JWT (provisional) | Finish profile after SSO (username + birthdate). |
+| POST | `/auth/forgot-password` | — | Email a one-time reset link. |
+| POST | `/auth/reset-password` | — | Set new password using reset token. |
+| GET | `/auth/me` | JWT | Current user — role, strikes, ban state, `lang_pref`, `theme_pref`. |
+| PATCH | `/auth/me` | JWT | Update username / `lang_pref` / `theme_pref`. |
+| DELETE | `/auth/me` | JWT | Soft-delete account (RGPD; hard-delete `DELETION_GRACE_DAYS` later). |
+| GET | `/auth/export` | JWT | RGPD Art. 15 data export — account, stats, games, audit log. |
+
+### Game rooms (`app/game/ws.py`)
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| POST | `/api/create` | optional JWT | Create a room. Body params: `is_public`, `max_players`, `bank_rule`, `afk_seconds`, `afk_bot`, `allow_spectators`, `default_lang`, `default_theme`. |
+| GET | `/api/join/{game_id}` | optional JWT | Join a room as player or join `waiting_players` if past WAITING. |
+| GET | `/api/rooms` | — | List currently open public rooms. |
+| WS | `/ws/{game_id}/{player_id}` | optional JWT (query param) | Real-time player connection. Send `{action, ...}` JSON frames. |
+| WS | `/ws/{game_id}/spectate` | optional JWT (query param) | Read-only spectator stream of game state. |
+
+WebSocket actions (sent by client over the player WS): `start`, `leave`, `kick`, `initial_roll`, `roll`, `keep`, `done`, `tiebreak_roll`, `update_room_rules` (host-only — G45 partie-boundary rule edits).
+
+### Rankings & profile
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/rankings` | — | Top 50 players by Elo. |
+| GET | `/api/profile/{username}` | — | Public profile + recent game history. |
+
+### Admin (`app/routers/admin.py`, gated by `require_moderator` / `require_admin`)
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/admin/dashboard-summary` | moderator | Counts: total users, active bans, chat bans, strikes, inbox stubs. |
+| PATCH | `/api/admin/users/{id}/role` | admin | Promote / demote a user. Audited in `gdpr_audit_log`. |
+| GET | `/api/admin/games/{id}/bot-decisions` | moderator | Per-throw AFK-bot decision trace for offline review (G55). |
+
+### Public utility
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| POST | `/api/contact` | — | Contact form (rate-limited 3/hour). Returns `{detail: {code, message}}` on 502 so the frontend can map specific errors. |
+| GET | `/api/policy-config` | — | Env-driven legal/policy timings (inactivity, deletion grace, breach window, audit retention). Rendered into the Privacy + Terms pages. |
+| GET | `/healthz` | — | Liveness probe. |
 
 ## License
 

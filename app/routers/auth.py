@@ -28,20 +28,73 @@ from app.schemas.auth import (
     TokenResponse,
     UpdateMeRequest,
 )
-from app.services.email import send_reset_email
+from app.services.email import send_reset_email, send_welcome_email
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+@router.get("/username-available")
+@limiter.limit("10/minute")
+async def username_available(request: Request, u: str, db: AsyncSession = Depends(get_db)):
+    """G97: pre-submission username check.
+
+    Runs the G96 format check + blocklist + a DB uniqueness lookup so the
+    register form can show inline feedback before the user wastes time
+    filling in the rest of the form. Public + rate-limited 10/min/IP so
+    it can't be used for username enumeration at scale.
+
+    Response shape:
+        {available: bool, error_code: str | None, error_message: str | None}
+
+    error_code values:
+        - "format"  → G96 layer-1 format rule violated
+        - "content" → G96 layer-2 blocklist matched
+        - "taken"   → username exists in DB
+        - None      → handle is clean + free
+    """
+    from app.services.username_moderation import is_clean_username, validate_format
+
+    u_stripped = u.strip()
+    fmt_ok, fmt_err = validate_format(u_stripped)
+    if not fmt_ok:
+        return {"available": False, "error_code": "format", "error_message": fmt_err}
+    block_ok, block_err = is_clean_username(u_stripped)
+    if not block_ok:
+        return {"available": False, "error_code": "content", "error_message": block_err}
+    # G97: ignore soft-deleted rows. Self-delete + admin-delete both
+    # anonymize the username column now, but historical non-anonymized
+    # rows could still block a re-registration. Belt-and-suspenders.
+    existing = await db.execute(
+        select(User).where(User.username == u_stripped, User.deleted_at.is_(None))
+    )
+    if existing.scalar_one_or_none():
+        return {
+            "available": False,
+            "error_code": "taken",
+            "error_message": "Username already taken",
+        }
+    return {"available": True, "error_code": None, "error_message": None}
 
 
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 @limiter.limit("5/minute")
 async def register(request: Request, body: RegisterRequest, db: AsyncSession = Depends(get_db)):
     """Create a new user account and return a JWT."""
-    existing = await db.execute(
-        select(User).where((User.username == body.username) | (User.email == body.email))
+    # G97: split conflict detection so the frontend can highlight the
+    # specific field that's taken. Backend ordering: username first
+    # (cheapest signal — most likely cause of conflict). Both queries
+    # filter out soft-deleted rows so freed handles + emails are
+    # re-usable immediately.
+    by_username = await db.execute(
+        select(User).where(User.username == body.username, User.deleted_at.is_(None))
     )
-    if existing.scalar_one_or_none():
-        raise HTTPException(status_code=409, detail="Username or email already taken")
+    if by_username.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Username already taken")
+    by_email = await db.execute(
+        select(User).where(User.email == body.email, User.deleted_at.is_(None))
+    )
+    if by_email.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Email already taken")
 
     user = User(
         username=body.username,
@@ -64,6 +117,16 @@ async def register(request: Request, body: RegisterRequest, db: AsyncSession = D
     )
     await db.commit()
     await db.refresh(user)
+
+    # G76: fire welcome email only when the user opted in at signup.
+    # Failure is logged inside send_welcome_email — never blocks signup.
+    if user.email_opt_in:
+        await send_welcome_email(
+            to_email=user.email,
+            username=user.username,
+            user_id=str(user.id),
+            lang=user.lang_pref,
+        )
 
     return TokenResponse(access_token=create_access_token(str(user.id)))
 
@@ -103,7 +166,9 @@ def _me_response(user: User) -> MeResponse:
         username=user.username,
         email=user.email,
         lang_pref=user.lang_pref,
+        theme_pref=user.theme_pref,
         email_opt_in=user.email_opt_in,
+        username_pending_change=user.username_pending_change,
         profile_complete=user.birthdate is not None,
         has_avatar=user.avatar_data is not None,
         role=user.role,
@@ -138,7 +203,7 @@ async def forgot_password(body: ForgotPasswordRequest, db: AsyncSession = Depend
     db.add(PasswordResetToken(user_id=user.id, token_hash=token_hash, expires_at=expires_at))
     await db.commit()
 
-    await send_reset_email(user.email, raw_token, lang=user.lang_pref)
+    await send_reset_email(user.email, raw_token, lang=user.lang_pref, username=user.username)
     return {"detail": "If that email exists, a reset link has been sent"}
 
 
@@ -275,8 +340,12 @@ async def update_me(
         if existing.scalar_one_or_none():
             raise HTTPException(status_code=409, detail="Username already taken")
         current_user.username = body.username
+        # G96: a successful rename clears the auto-sanitize banner trigger.
+        current_user.username_pending_change = False
     if body.lang_pref is not None:
         current_user.lang_pref = body.lang_pref
+    if body.theme_pref is not None:
+        current_user.theme_pref = body.theme_pref
     await db.commit()
     await db.refresh(current_user)
     return _me_response(current_user)
@@ -287,10 +356,24 @@ async def delete_account(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Soft-delete the account immediately; data is purged after the grace period."""
+    """Soft-delete the account immediately; data is purged after the grace period.
+
+    G97: mirror the admin-delete anonymization so the username + email
+    are freed up for new registrations immediately. Previously the
+    handle stayed reserved in the DB until the G70 cron hard-deleted —
+    meaning « Sierra » couldn't be re-registered for 30 days after
+    their self-delete.
+    """
     now = datetime.now(UTC)
+    anon_suffix = str(current_user.id)[:8]
     current_user.deletion_requested_at = now
     current_user.deleted_at = now
+    current_user.username = f"deleted_user_{anon_suffix}"
+    current_user.email = f"deleted_{anon_suffix}@deleted.invalid"
+    current_user.hashed_password = None
+    current_user.google_id = None
+    current_user.avatar_data = None
+    current_user.avatar_content_type = None
     db.add(
         GdprAuditLog(
             user_id=current_user.id,
@@ -314,14 +397,19 @@ async def export_data(
             "username": current_user.username,
             "email": current_user.email,
             "lang_pref": current_user.lang_pref,
+            "theme_pref": current_user.theme_pref,
             "email_opt_in": current_user.email_opt_in,
             "created_at": current_user.created_at.isoformat(),
         },
         "stats": {
             "elo": stats.elo,
             "games_played": stats.games_played,
-            "wins": stats.wins,
-            "losses": stats.losses,
+            "parties_survived": stats.parties_survived,
+            "parties_lost": stats.parties_lost,
+            "manches_played": stats.manches_played,
+            "manches_lost": stats.manches_lost,
+            "current_streak": stats.current_streak,
+            "longest_streak": stats.longest_streak,
         }
         if stats
         else None,

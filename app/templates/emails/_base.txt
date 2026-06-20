@@ -1,0 +1,18 @@
+{{ title|default('421 Bistro') }}
+========================================
+
+{% block body %}{% endblock %}
+
+--
+{% if lang == 'en' -%}
+421 Bistro — a traditional French dice game, online.
+Privacy: {{ app_url }}/privacy
+Terms:   {{ app_url }}/terms
+{% if unsubscribe_url %}Unsubscribe: {{ unsubscribe_url }}{% endif %}
+{%- else -%}
+421 Bistro — un jeu de dés traditionnel français, en ligne.
+Confidentialité : {{ app_url }}/privacy
+Conditions      : {{ app_url }}/terms
+{% if unsubscribe_url %}Se désinscrire : {{ unsubscribe_url }}{% endif %}
+{%- endif %}
+&copy; {{ current_year }} 421 Bistro

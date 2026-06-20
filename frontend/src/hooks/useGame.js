@@ -70,6 +70,12 @@ export function useGame(gameId, playerId, token) {
     (targetId, reason = 'afk') => send({ action: 'kick', target_id: targetId, reason }),
     [send],
   )
+  // G45: host queues a partial room-rules update. Applies at the next
+  // partie boundary on the server; nothing changes live mid-cycle.
+  const updateRoomRules = useCallback(
+    (rules) => send({ action: 'update_room_rules', rules }),
+    [send],
+  )
 
-  return { state, roll, keep, done, initialRoll, tiebreakRoll, start, leave, kick }
+  return { state, roll, keep, done, initialRoll, tiebreakRoll, start, leave, kick, updateRoomRules }
 }

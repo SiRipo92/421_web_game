@@ -67,9 +67,39 @@ class TestBotPickKeepers:
         """[3, 3, 5] → keep the pair of 3s, reroll the 5 (chase triple)."""
         assert _bot_pick_keepers([3, 3, 5]) == [False, False, True]
 
-    def test_pair_with_lone_ace_keeps_ace_too(self):
-        """[5, 5, 1] → keep both 5s AND the 1 (free shot at 11x/421 upgrade)."""
-        assert _bot_pick_keepers([5, 5, 1]) == [False, False, False]
+    def test_pair_with_lone_ace_chases_11x(self):
+        """G55 follow-up: [5, 5, 1] → keep 1 + ONE 5, reroll the other 5.
+
+        The previous heuristic kept all three (`[False, False, False]`),
+        committing the bot to a basic 551 (rank 551 < starter floor 1000).
+        Reported in playtest: bot was stopping at 4-4-1, 6-6-1, nénette
+        (2-2-1) with throws remaining. Chasing 11x (~1/6 chance per
+        reroll, rank 7200+) is strictly higher EV than locking in the
+        basic.
+        """
+        # First 5 is kept, second 5 is rerolled, lone 1 is kept.
+        assert _bot_pick_keepers([5, 5, 1]) == [False, True, False]
+
+    def test_pair_22_with_lone_ace_chases_11x(self):
+        """[2, 2, 1] (nénette) → keep 1 + ONE 2, reroll the other 2.
+
+        The user's specific complaint: bot committed to nénette as starter.
+        After the fix it tries to escape via the 11x path.
+        """
+        assert _bot_pick_keepers([2, 2, 1]) == [False, True, False]
+
+    def test_pair_66_with_lone_ace_chases_11x(self):
+        """[6, 6, 1] → keep 1 + ONE 6, reroll the other 6.
+
+        Same pair-plus-lone-1 pattern at the top of the range.
+        """
+        assert _bot_pick_keepers([6, 6, 1]) == [False, True, False]
+
+    def test_pair_44_with_lone_ace_chases_11x(self):
+        """[4, 4, 1] → keep 1 + ONE 4, reroll the other 4. (4-4-1 doesn't
+        trigger Rule 2's 4+2 chase since there's no 2.)
+        """
+        assert _bot_pick_keepers([4, 4, 1]) == [False, True, False]
 
     def test_lone_ace_keeps_ace_and_highest(self):
         """[1, 3, 6] → keep the 1 (path to 11x/421) and the 6 (highest), reroll the 3."""
@@ -185,6 +215,264 @@ class TestBotTakeTurnGameAware:
         assert starter.turn.done is True
         # Sec/charge means 1 throw max → rolls_left must be exactly 2 after.
         assert starter.turn.rolls_left == 2
+
+
+class TestBotStarterFloor:
+    """G55: a starter bot must not commit on a basic figure when it has throws
+    available. Reported in playtest: the bot accepted 5-3-2 as starter because
+    `rank > target_rank (0)` evaluated true for any non-zero rank — handing
+    the rhythm at a basic and forcing followers to merely tie or exceed it.
+    """
+
+    def _make_starter_only_game(self) -> tuple[Game, Player]:
+        """Build a 1-player CHARGE game where the bot is the round starter
+        and no other player has played (target_rank == 0)."""
+        bot = Player(id="s1", name="BotStarter")
+        bot.turn = PlayerTurn()  # fresh, rolls_left=3
+        game = Game(
+            id="GAME5555",
+            players=[bot],
+            phase=GamePhase.CHARGE,
+            round_starter_id="s1",
+            current_index=0,
+            max_throws_this_round=3,
+            afk_bot=False,
+            bank_rule="free",
+        )
+        return game, bot
+
+    def test_starter_does_not_commit_on_basic_5_3_2(self, monkeypatch):
+        """The exact case the user reported: first throw lands on 5-3-2
+        (basic, rank 532). Bot should re-roll instead of accepting.
+        """
+        # Sequence: first roll fills [5, 3, 2]; _bot_pick_keepers rule 5
+        # (consecutive 3 & 2) returns reroll mask [True, False, False] so
+        # the next call refills only position 0. We seed enough values to
+        # cover up to 3 throws.
+        values = iter([5, 3, 2, 4, 6, 1, 2, 3, 4])
+        monkeypatch.setattr("app.game.ws.random.randint", lambda a, b: next(values))
+
+        game, bot = self._make_starter_only_game()
+        _bot_take_turn(bot, game)
+
+        # Used at least 2 throws — didn't commit on the basic first roll.
+        assert (3 - bot.turn.rolls_left) >= 2
+
+    def test_starter_commits_on_suite(self, monkeypatch):
+        """First throw lands on 4-3-2 (suite, rank 1200, above floor 1000).
+        Bot should stop — committing to a suite is reasonable as starter."""
+        values = iter([4, 3, 2])
+        monkeypatch.setattr("app.game.ws.random.randint", lambda a, b: next(values))
+
+        game, bot = self._make_starter_only_game()
+        _bot_take_turn(bot, game)
+
+        # Used exactly 1 throw — stopped at the suite.
+        assert bot.turn.rolls_left == 2
+        assert bot.turn.combo == "234"
+
+    def test_starter_commits_on_421_ceiling(self, monkeypatch):
+        """First throw is 4-2-1 — the absolute ceiling. Bot stops immediately
+        (ceiling check fires before any other branch)."""
+        values = iter([4, 2, 1])
+        monkeypatch.setattr("app.game.ws.random.randint", lambda a, b: next(values))
+
+        game, bot = self._make_starter_only_game()
+        _bot_take_turn(bot, game)
+
+        assert bot.turn.combo == "421"
+        assert bot.turn.rolls_left == 2
+
+    def test_starter_basic_uses_remaining_throws(self, monkeypatch):
+        """If all three throws produce only basics, bot stops after the cap
+        — not earlier, even though every state is `rank > target_rank == 0`.
+        """
+        # Three rolls all producing basics — bot keeps re-rolling, eventually
+        # capped by max_throws_for_me. We don't care what the final dice are.
+        values = iter([6, 5, 3, 6, 4, 3, 5, 4, 2, 6, 5, 4])  # enough for any reroll pattern
+        monkeypatch.setattr("app.game.ws.random.randint", lambda a, b: next(values))
+
+        game, bot = self._make_starter_only_game()
+        _bot_take_turn(bot, game)
+
+        # Bot exhausted throws (rolls_left == 0) OR stopped on a non-basic.
+        # Either way, it shouldn't have stopped at throws_used == 1 with a basic.
+        used = 3 - bot.turn.rolls_left
+        committed_basic = bot.turn.rank < 1000
+        assert not (used == 1 and committed_basic), (
+            f"Bot committed on a basic after 1 throw: combo={bot.turn.combo}, rank={bot.turn.rank}"
+        )
+
+    def test_starter_with_pair_and_lone_ace_doesnt_commit(self, monkeypatch):
+        """G55 follow-up regression: the user's playtest showed the bot
+        accepting nénette (2-2-1) / 4-4-1 / 6-6-1 as starter — pair plus
+        lone 1 → keepers used to say hold → bot committed below the
+        starter floor. After the Rule 3 fix it should use ≥ 2 throws.
+
+        Sequence below: first throw lands on 4-4-1 (basic 441). The
+        fixed Rule 3 picks `[False, True, False]` (keep 1 + first 4,
+        reroll second 4). The next random value (2) gives us 4-2-1 =
+        421, ceiling, bot stops at 2 throws.
+        """
+        values = iter([4, 4, 1, 2])  # throw 1: 4-4-1; reroll position 1: 2 → 421
+        monkeypatch.setattr("app.game.ws.random.randint", lambda a, b: next(values))
+
+        game, bot = self._make_starter_only_game()
+        _bot_take_turn(bot, game)
+
+        used = 3 - bot.turn.rolls_left
+        assert used == 2, f"Expected 2 throws, got {used}"
+        assert bot.turn.combo == "421"
+
+
+class TestBotDecisionLog:
+    """G55: every game-aware bot turn emits a `log_bot_decision` event so the
+    bot's reasoning is inspectable in the journal.
+    """
+
+    def test_decision_event_emitted(self, monkeypatch):
+        values = iter([4, 3, 2])  # commit on the suite
+        monkeypatch.setattr("app.game.ws.random.randint", lambda a, b: next(values))
+
+        bot = Player(id="s1", name="BotPlayer")
+        bot.turn = PlayerTurn()
+        game = Game(
+            id="DECISN01",
+            players=[bot],
+            phase=GamePhase.CHARGE,
+            round_starter_id="s1",
+            current_index=0,
+            max_throws_this_round=3,
+            afk_bot=False,
+            bank_rule="free",
+        )
+        _bot_take_turn(bot, game)
+
+        decisions = [e for e in game.log_events if e.get("key") == "log_bot_decision"]
+        assert len(decisions) == 1
+        d = decisions[0]
+        assert d["name"] == "BotPlayer"
+        assert d["combo"] == "234"
+        assert d["throws"] == 1
+        assert d["target"] == 0
+        assert d["reason"] == "starter_floor_met"
+        assert d["is_starter"] is True
+
+    def test_legacy_path_no_decision_event(self):
+        """`_bot_take_turn(player)` with no game context (unit-test legacy
+        path) must not crash and must not try to emit an event — there's
+        no game to write to."""
+        bot = Player(id="b1", name="UnitTestBot")
+        bot.turn = PlayerTurn()
+        _bot_take_turn(bot)  # game=None
+        assert bot.turn.done is True
+
+
+class TestBotPerThrowDecisionBuffer:
+    """G55 follow-up: every bot throw appends a structured entry to
+    `game.bot_decisions` so the heuristic can be reviewed offline via the
+    admin endpoint.
+    """
+
+    def _make_game(self):
+        bot = Player(id="s1", name="BotStarter")
+        bot.turn = PlayerTurn()
+        game = Game(
+            id="DECTRACE",
+            players=[bot],
+            phase=GamePhase.CHARGE,
+            round_starter_id="s1",
+            current_index=0,
+            max_throws_this_round=3,
+            afk_bot=False,
+            bank_rule="free",
+        )
+        return game, bot
+
+    def test_single_throw_records_one_entry(self, monkeypatch):
+        """Starter rolls a suite (4-3-2 → rank 1200 ≥ floor) — stops at
+        throw 1, one buffer entry with the stop_reason set."""
+        values = iter([4, 3, 2])
+        monkeypatch.setattr("app.game.ws.random.randint", lambda a, b: next(values))
+
+        game, bot = self._make_game()
+        _bot_take_turn(bot, game)
+
+        assert len(game.bot_decisions) == 1
+        e = game.bot_decisions[0]
+        assert e["throw"] == 1
+        assert e["dice_after"] == [4, 3, 2]
+        # First throw — bot kept nothing, rerolled all three from zero state.
+        assert e["kept_mask"] == [False, False, False]
+        assert e["dice_before"] == [0, 0, 0]
+        assert e["combo"] == "234"
+        assert e["target_rank"] == 0
+        assert e["is_starter"] is True
+        assert e["stop_reason"] == "starter_floor_met"
+        assert e["player_name"] == "BotStarter"
+        assert e["player_id"] == "s1"
+        assert e["game_id"] == "DECTRACE"
+
+    def test_multi_throw_records_per_throw_entries(self, monkeypatch):
+        """First throw 4-4-1 (basic, below floor), Rule 3(a) rerolls one 4,
+        next roll gives 2 → 421 (ceiling). Buffer has 2 entries; only the
+        last carries the stop_reason."""
+        values = iter([4, 4, 1, 2])
+        monkeypatch.setattr("app.game.ws.random.randint", lambda a, b: next(values))
+
+        game, bot = self._make_game()
+        _bot_take_turn(bot, game)
+
+        assert len(game.bot_decisions) == 2
+        first, second = game.bot_decisions
+        # First throw — no kept context (started from blank).
+        assert first["throw"] == 1
+        assert first["dice_after"] == [4, 4, 1]
+        assert first["combo"] == "441"
+        # Rule 3 doesn't end the turn → no stop_reason yet.
+        assert first["stop_reason"] is None
+        # Second throw is the reroll triggered by Rule 3(a). 421 trips the
+        # starter-floor break (rank 9000 ≥ 1000 + target=0) BEFORE the
+        # ceiling check, so the stop_reason is `starter_floor_met` — the
+        # bot would still also accept 421 via the ceiling check, but the
+        # floor check fires earlier in the loop.
+        assert second["throw"] == 2
+        assert second["combo"] == "421"
+        assert second["stop_reason"] == "starter_floor_met"
+        # The kept_mask records what the bot HELD on this throw — Rule 3(a)
+        # kept the lone 1 and one of the 4s, so two positions kept + one
+        # rerolled. Both possible arrangements (`[T,F,T]` or `[F,T,T]`)
+        # depending on which 4 the rule picked first are acceptable.
+        assert sum(second["kept_mask"]) == 2
+
+    def test_buffer_cap_enforced(self):
+        """Buffer rolls past `_BOT_DECISIONS_BUFFER_CAP` (200). Confirm the
+        cap by stuffing entries directly via `_record_bot_throw`."""
+        from app.game.ws import _BOT_DECISIONS_BUFFER_CAP, _record_bot_throw
+
+        game, bot = self._make_game()
+        # Push cap + 10 dummy entries.
+        for n in range(_BOT_DECISIONS_BUFFER_CAP + 10):
+            _record_bot_throw(
+                game=game,
+                player=bot,
+                throw_num=n,
+                dice_before=[0, 0, 0],
+                kept_mask=[False, False, False],
+                dice_after=[1, 1, 1],
+                combo="111",
+                rank=8000,
+                fiches=7,
+                target_rank=0,
+                is_starter=True,
+                max_throws_allowed=3,
+                stop_reason=None,
+            )
+
+        assert len(game.bot_decisions) == _BOT_DECISIONS_BUFFER_CAP
+        # Oldest dropped — first entry's throw_num is now 10, not 0.
+        assert game.bot_decisions[0]["throw"] == 10
+        assert game.bot_decisions[-1]["throw"] == _BOT_DECISIONS_BUFFER_CAP + 9
 
 
 class TestBotHandback:

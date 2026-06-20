@@ -1,0 +1,11 @@
+{% extends "_base.html" %}
+{% block body %}
+<p style="margin:0 0 16px 0;">Bienvenue <strong>{{ username }}</strong>,</p>
+<p style="margin:0 0 16px 0;">Votre compte est ouvert. Le 421 vous attend — un jeu de dés français qui se joue depuis des décennies dans les bistros et autour des tables familiales. Trois dés, des combinaisons à mémoriser, beaucoup de bluff.</p>
+<p style="margin:0 0 16px 0;">Pour commencer, jetez un œil aux règles ou rejoignez directement une partie publique :</p>
+<p style="margin:24px 0;text-align:center;">
+  <a href="{{ app_url }}/rooms" style="display:inline-block;background:#A8302A;color:#F4ECD8;padding:14px 28px;text-decoration:none;border-radius:4px;font-family:Georgia,serif;font-size:15px;letter-spacing:0.5px;">Rejoindre une partie</a>
+</p>
+<p style="margin:16px 0;font-size:14px;color:#3A2F26;">Ou apprenez les règles du jeu : <a href="{{ app_url }}/rules" style="color:#A8302A;">{{ app_url }}/rules</a></p>
+<p style="margin:24px 0 0 0;font-size:13px;color:#6B5A4A;border-top:1px solid #ECE0C2;padding-top:16px;">Vous recevez cet e-mail parce que vous avez accepté de recevoir nos communications lors de votre inscription. Vous pouvez vous désinscrire à tout moment via le lien en bas de page.</p>
+{% endblock %}

@@ -1,53 +1,73 @@
-"""Integration tests for G18 — `persist_player_session` bumps PlayerStats.
+"""Integration tests for `persist_player_session` (mid-partie leave).
 
-The function is called from the WS leave/kick handlers when a registered user
-steps out of an active game. We test it directly here because driving the
-full leave flow through the WS test client + verifying the eventual DB write
-adds a lot of moving parts; the function itself is the contract.
+G91 semantics: leaving mid-partie is treated as a concession.
+- parties_played += 1
+- parties_lost += 1
+- current_streak = 0
+- ELO loses (small, against an avg-1200 phantom field)
+- Manche counters NOT updated (the partie didn't end naturally for them)
+
+The function is called from the WS leave/kick handlers when a registered
+user steps out of an active partie. We test it directly here because
+driving the full leave flow through the WS test client + verifying the
+eventual DB write adds a lot of moving parts; the function itself is the
+contract.
 """
 
 from app.services.game_persistence import persist_player_session
 
 
-async def test_persist_player_session_bumps_games_and_losses(client, make_user):
-    """A leaver with round_points > 0 bumps games_played by 1 and losses by N."""
+async def test_persist_player_session_increments_parties_lost(client, make_user):
+    """A leaver bumps games_played and parties_lost (concession)."""
     data = make_user()
     reg = await client.post("/auth/register", json=data)
     token = reg.json()["access_token"]
     me = await client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
     user_id = me.json()["id"]
 
-    # Snapshot initial stats
     r_before = await client.get("/auth/export", headers={"Authorization": f"Bearer {token}"})
     before = r_before.json()["stats"]
     assert before["games_played"] == 0
-    assert before["losses"] == 0
+    assert before["parties_lost"] == 0
 
-    # User leaves a game where they took 2 round points
-    await persist_player_session(user_id, "TESTGAME", 2)
+    await persist_player_session(user_id, "TESTGAME", round_points=2)
 
     r_after = await client.get("/auth/export", headers={"Authorization": f"Bearer {token}"})
     after = r_after.json()["stats"]
     assert after["games_played"] == 1
-    assert after["losses"] == 2  # round_points attributed to losses
-    assert after["wins"] == 0
+    assert after["parties_lost"] == 1
+    assert after["parties_survived"] == 0
+    assert after["current_streak"] == 0
 
 
-async def test_persist_player_session_zero_points_counts_as_win(client, make_user):
-    """A leaver with round_points == 0 bumps games_played and wins (no losses)."""
+async def test_persist_player_session_resets_streak(client, make_user):
+    """A leaver who had a current_streak loses it (streak resets to 0)."""
+    from sqlalchemy import select
+
+    from app.db.base import AsyncSessionLocal
+    from app.db.models import PlayerStats
+
     data = make_user()
     reg = await client.post("/auth/register", json=data)
     token = reg.json()["access_token"]
     me = await client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
     user_id = me.json()["id"]
 
-    await persist_player_session(user_id, "TESTGAME", 0)
+    # Seed a current_streak directly (simulating prior survivals)
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(PlayerStats).where(PlayerStats.user_id == user_id))
+        stats = result.scalar_one()
+        stats.current_streak = 3
+        stats.longest_streak = 3
+        await db.commit()
+
+    await persist_player_session(user_id, "TESTGAME", round_points=1)
 
     r = await client.get("/auth/export", headers={"Authorization": f"Bearer {token}"})
-    stats = r.json()["stats"]
-    assert stats["games_played"] == 1
-    assert stats["wins"] == 1
-    assert stats["losses"] == 0
+    after = r.json()["stats"]
+    assert after["current_streak"] == 0
+    # longest_streak should be preserved even after a streak break
+    assert after["longest_streak"] == 3
 
 
 async def test_persist_player_session_accumulates_across_calls(client, make_user):
@@ -58,20 +78,19 @@ async def test_persist_player_session_accumulates_across_calls(client, make_user
     me = await client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
     user_id = me.json()["id"]
 
-    await persist_player_session(user_id, "GAME-A", 1)  # +1 loss
-    await persist_player_session(user_id, "GAME-B", 0)  # +1 win
-    await persist_player_session(user_id, "GAME-C", 3)  # +3 losses
+    await persist_player_session(user_id, "GAME-A", 1)
+    await persist_player_session(user_id, "GAME-B", 0)
+    await persist_player_session(user_id, "GAME-C", 3)
 
     r = await client.get("/auth/export", headers={"Authorization": f"Bearer {token}"})
     stats = r.json()["stats"]
     assert stats["games_played"] == 3
-    assert stats["wins"] == 1
-    assert stats["losses"] == 4
+    assert stats["parties_lost"] == 3
+    assert stats["parties_survived"] == 0
 
 
 async def test_persist_player_session_unknown_user_is_noop():
     """Calling with a non-existent user UUID logs + returns without crashing."""
-    # No assertion needed — just shouldn't raise.
     await persist_player_session("00000000-0000-0000-0000-000000000000", "TEST", 1)
 
 

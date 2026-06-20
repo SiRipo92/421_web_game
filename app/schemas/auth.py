@@ -6,6 +6,8 @@ from email_validator import EmailNotValidError
 from email_validator import validate_email as _validate_email
 from pydantic import BaseModel, EmailStr, field_validator
 
+from app.services.username_moderation import check_username
+
 try:
     from MailChecker import MailChecker as _MailChecker
 
@@ -43,11 +45,8 @@ class RegisterRequest(BaseModel):
     @field_validator("username")
     @classmethod
     def username_valid(cls, v: str) -> str:
-        """Enforce 2–32 character username length."""
-        v = v.strip()
-        if not (2 <= len(v) <= 32):
-            raise ValueError("Username must be 2–32 characters")
-        return v
+        """G96: format (3-20 chars, allowlisted chars) + bilingual blocklist."""
+        return check_username(v.strip())
 
     @field_validator("password")
     @classmethod
@@ -66,13 +65,24 @@ class RegisterRequest(BaseModel):
     @field_validator("birthdate")
     @classmethod
     def age_minimum(cls, v: date) -> date:
-        """Reject registrations from users under 15 years old."""
+        """Reject birthdates that fall outside a plausible human range.
+
+        - Minimum: 15 (RGPD-aligned digital consent age in France).
+        - Maximum: 120 (documented upper bound of human lifespan;
+          oldest living person on record is ~117). Catches typos and
+          impossible years like 1889.
+        - Future dates: rejected as nonsense.
+        """
         from datetime import date as _date
 
         today = _date.today()
+        if v > today:
+            raise ValueError("Birthdate cannot be in the future")
         age = today.year - v.year - ((today.month, today.day) < (v.month, v.day))
         if age < 15:
             raise ValueError("You must be at least 15 years old to register")
+        if age > 120:
+            raise ValueError("Birthdate appears invalid (over 120 years ago)")
         return v
 
     @field_validator("lang_pref")
@@ -107,7 +117,9 @@ class MeResponse(BaseModel):
     username: str
     email: str
     lang_pref: str
+    theme_pref: str = "light"
     email_opt_in: bool
+    username_pending_change: bool = False  # G96: in-app banner trigger
     profile_complete: bool = True
     has_avatar: bool = False
     role: str = "player"
@@ -126,22 +138,23 @@ class CompleteProfileRequest(BaseModel):
     @field_validator("username")
     @classmethod
     def username_valid(cls, v: str) -> str:
-        """Enforce 2–32 character username length."""
-        v = v.strip()
-        if not (2 <= len(v) <= 32):
-            raise ValueError("Username must be 2–32 characters")
-        return v
+        """G96: same gate as signup — format + bilingual blocklist."""
+        return check_username(v.strip())
 
     @field_validator("birthdate")
     @classmethod
     def age_minimum(cls, v: date) -> date:
-        """Reject users under 15 years old."""
+        """G97: same bounds as RegisterRequest — 15..120 years old, no future."""
         from datetime import date as _date
 
         today = _date.today()
+        if v > today:
+            raise ValueError("Birthdate cannot be in the future")
         age = today.year - v.year - ((today.month, today.day) < (v.month, v.day))
         if age < 15:
             raise ValueError("You must be at least 15 years old to register")
+        if age > 120:
+            raise ValueError("Birthdate appears invalid (over 120 years ago)")
         return v
 
 
@@ -150,16 +163,15 @@ class UpdateMeRequest(BaseModel):
 
     username: str | None = None
     lang_pref: str | None = None
+    theme_pref: str | None = None
 
     @field_validator("username")
     @classmethod
     def username_valid(cls, v: str | None) -> str | None:
+        """G96: same gate as signup — format + bilingual blocklist."""
         if v is None:
             return v
-        v = v.strip()
-        if not (2 <= len(v) <= 32):
-            raise ValueError("Username must be 2–32 characters")
-        return v
+        return check_username(v.strip())
 
     @field_validator("lang_pref")
     @classmethod
@@ -168,6 +180,15 @@ class UpdateMeRequest(BaseModel):
             return v
         if v not in ("fr", "en"):
             raise ValueError("lang_pref must be 'fr' or 'en'")
+        return v
+
+    @field_validator("theme_pref")
+    @classmethod
+    def theme_valid(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if v not in ("light", "dark"):
+            raise ValueError("theme_pref must be 'light' or 'dark'")
         return v
 
 

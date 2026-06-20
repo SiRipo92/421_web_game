@@ -1,0 +1,22 @@
+{% extends "_base.txt" %}
+{% block body %}
+Hi {{ username }},
+
+Your 421 Bistro account has been suspended for violating our community
+rules.
+
+Reason   : {{ reason_label }}
+Duration : {{ duration_label }}
+Expires  : {{ expires_at_label }}
+{% if case_id %}Reference: {{ case_id }}{% endif %}
+
+{% if evidence_summary %}
+Evidence on file:
+{{ evidence_summary }}
+{% endif %}
+
+To appeal this decision:
+{{ appeal_url }}
+
+A moderation team member will review your request within 7 days.
+{% endblock %}

@@ -35,10 +35,36 @@ export function Profile({ user, token, onRefreshUser, onLogout }) {
   }
 
   const elo = stats?.elo ?? 1200
-  const winRate = stats?.games_played ? Math.round((stats.wins / stats.games_played) * 100) : 0
+  const survivalPct = Math.round((stats?.survival_rate ?? 0) * 100)
+  const mancheResiliencePct = Math.round((stats?.manche_resilience ?? 0) * 100)
 
   return (
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: '2.5rem 1.5rem' }}>
+      {/* G96: admin-auto-sanitized handle prompt */}
+      {user.username_pending_change && (
+        <div
+          role="status"
+          style={{
+            background: 'rgba(168,48,42,0.10)',
+            border: '1px solid var(--rouge)',
+            borderRadius: 4,
+            padding: '0.9rem 1.2rem',
+            marginBottom: '1.5rem',
+            display: 'flex',
+            gap: 12,
+            alignItems: 'center',
+            flexWrap: 'wrap',
+          }}
+        >
+          <span aria-hidden="true" style={{ color: 'var(--rouge)', fontSize: '1.2rem' }}>!</span>
+          <p className="serif" style={{ margin: 0, flex: 1, minWidth: 260, color: 'var(--ink)' }}>
+            {t('pending_username_banner')}
+          </p>
+          <a href="#edit-username" className="btn btn-primary" style={{ padding: '0.45rem 1rem', fontSize: '0.9rem' }}>
+            {t('pending_username_cta')}
+          </a>
+        </div>
+      )}
       {/* Header */}
       <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', gap: 24, alignItems: 'center', marginBottom: '2.5rem' }}
         className="prof-hd">
@@ -87,67 +113,55 @@ export function Profile({ user, token, onRefreshUser, onLogout }) {
         <p className="serif" style={{ fontStyle: 'italic', color: 'var(--ink-mute)' }}>{t('loading')}</p>
       ) : (
         <>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: '2rem' }}
+          {/* G91: parties + survival rate + streak (4 cards) */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: '1rem' }}
             className="stats-grid">
-            <StatCard label={t('games_played')} value={stats?.games_played ?? 0} />
-            <StatCard label={t('win_rate')} value={`${winRate}%`} accent="var(--rouge)" />
-            <StatCard label={t('current_streak')} value={stats?.streak ?? 0} suffix="🔥" />
+            <StatCard label={t('parties_played')} value={stats?.games_played ?? 0} />
+            <StatCard label={t('parties_survived')} value={stats?.parties_survived ?? 0} accent="var(--felt-deep)" />
+            <StatCard label={t('parties_lost')} value={stats?.parties_lost ?? 0} accent="var(--rouge)" />
+            <StatCard label={t('survival_rate')} value={`${survivalPct}%`} accent="var(--rouge)" />
+          </div>
+
+          {/* G91: manche resilience + streaks (3 cards) */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14, marginBottom: '2rem' }}
+            className="stats-grid">
+            <StatCard label={t('manche_resilience')} value={`${mancheResiliencePct}%`} />
+            <StatCard label={t('current_streak')} value={stats?.current_streak ?? 0} suffix="🔥" />
             <StatCard label={t('longest_streak')} value={stats?.longest_streak ?? 0} />
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }} className="prof-grid">
-            {/* Combo chart */}
-            <div className="card" style={{ padding: '1.6rem' }}>
-              <div className="eyebrow">Tableau de chasse</div>
-              <div className="display" style={{ fontSize: '1.4rem', marginBottom: 14 }}>{t('combo_chart')}</div>
-              {stats?.top_combos && Object.entries(stats.top_combos).length > 0 ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {Object.entries(stats.top_combos).map(([k, v]) => {
-                    const max = Math.max(...Object.values(stats.top_combos))
-                    return (
-                      <div key={k} style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', gap: 10, alignItems: 'center' }}>
-                        <div className="serif" style={{ width: 80, fontStyle: k === 'nénette' ? 'italic' : 'normal', color: k === '421' ? 'var(--rouge)' : 'var(--ink)' }}>{k}</div>
-                        <div style={{ height: 8, background: 'var(--paper-deep)', borderRadius: 999, overflow: 'hidden' }}>
-                          <div style={{ height: '100%', width: `${max > 0 ? (v / max) * 100 : 0}%`, background: k === '421' ? 'var(--rouge)' : 'var(--brass)' }} />
-                        </div>
-                        <div className="mono" style={{ fontWeight: 700, width: 32, textAlign: 'right' }}>{v}</div>
-                      </div>
-                    )
-                  })}
-                </div>
-              ) : (
-                <p className="note">Aucune partie jouée.</p>
-              )}
-            </div>
-
-            {/* Recent games */}
-            <div className="card" style={{ padding: '1.6rem' }}>
-              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
-                <div>
-                  <div className="eyebrow">Dernières parties</div>
-                  <div className="display" style={{ fontSize: '1.4rem' }}>{t('recent_games')}</div>
-                </div>
+          {/* Recent parties */}
+          <div className="card" style={{ padding: '1.6rem', marginBottom: '1.5rem' }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+              <div>
+                <div className="eyebrow">{t('recent_games_eyebrow')}</div>
+                <div className="display" style={{ fontSize: '1.4rem' }}>{t('recent_games')}</div>
               </div>
-              <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column' }}>
-                {stats?.recent_games?.length > 0 ? stats.recent_games.map((r, i) => (
+            </div>
+            <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column' }}>
+              {stats?.recent_games?.length > 0 ? stats.recent_games.map((r, i) => {
+                const isLoser = r.placement === r.total_players
+                return (
                   <div key={i} style={{
-                    display: 'grid', gridTemplateColumns: 'auto auto 1fr auto', gap: 12, alignItems: 'center',
+                    display: 'grid', gridTemplateColumns: 'auto 1fr auto auto', gap: 12, alignItems: 'center',
                     padding: '0.7rem 0',
                     borderBottom: i < stats.recent_games.length - 1 ? '1px dashed var(--rule)' : 'none',
                   }}>
-                    <div className="mono" style={{ fontSize: '0.8rem', color: 'var(--ink-mute)', width: 48 }}>
+                    <div className="mono" style={{ fontSize: '0.8rem', color: 'var(--ink-mute)', width: 60 }}>
                       {new Date(r.played_at).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })}
                     </div>
-                    <div className="display" style={{ fontSize: r.rank === 1 ? '1.2rem' : '1rem', color: r.rank === 1 ? 'var(--rouge)' : 'var(--ink)' }}>
-                      {r.rank === 1 ? `🏆 ${t('winner_label')}` : `${r.rank}ᵉ ${t('place_suffix').replace('ᵉ ', '')}`}
+                    <div className="serif" style={{ color: isLoser ? 'var(--rouge)' : 'var(--ink)' }}>
+                      {isLoser ? t('partie_lost_label') : t('partie_survived_label')}
                     </div>
-                    <div />
-                    <div className="mono" style={{ color: r.elo_delta > 0 ? 'var(--felt-deep)' : 'var(--rouge)', fontWeight: 700 }}>
-                      {r.elo_delta > 0 ? '+' : ''}{r.elo_delta}
+                    <div className="mono" style={{ fontSize: '0.85rem', color: 'var(--ink-mute)' }}>
+                      {t('placement_x_of_n', { x: r.placement, n: r.total_players })}
+                    </div>
+                    <div className="mono" style={{ fontSize: '0.85rem', color: 'var(--ink-mute)' }}>
+                      {r.total_rounds} {t('rounds_short')}
                     </div>
                   </div>
-                )) : <p className="note">Aucune partie jouée.</p>}
-              </div>
+                )
+              }) : <p className="note">{t('no_parties_yet')}</p>}
             </div>
           </div>
 
