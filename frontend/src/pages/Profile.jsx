@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Avatar } from '../components/shared/Avatar.jsx'
 import { useLang } from '../context/useLang.js'
 import { badge } from '../utils/badge.js'
+import { RankTooltip } from '../components/shared/RankTooltip.jsx'
 import { useRef } from 'react'
 import * as authApi from '../api/auth.js'
 
@@ -12,14 +13,32 @@ export function Profile({ user, token, onRefreshUser, onLogout }) {
   const [stats, setStats] = useState(null)
   const [loading, setLoading] = useState(true)
 
+  // G98 follow-up: the URL was /api/profile (no username) which 404s
+  // silently. The backend route is /api/profile/{username}. Stats have
+  // never shown for anyone since this page shipped — the catch swallowed
+  // the 404 and stats stayed null, falling back to defaults (1200 ELO).
+  // Also refetch when the tab regains focus so finishing a game and
+  // navigating back to /profile shows the updated counters.
   useEffect(() => {
-    if (!token) return
-    fetch(`/api/profile`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.json())
-      .then(d => setStats(d))
-      .catch(() => {})
-      .finally(() => setLoading(false))
-  }, [token])
+    if (!token || !user?.username) return
+    let cancelled = false
+    const load = () => {
+      fetch(`/api/profile/${encodeURIComponent(user.username)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then(r => (r.ok ? r.json() : null))
+        .then(d => { if (!cancelled && d) setStats(d) })
+        .catch(() => {})
+        .finally(() => { if (!cancelled) setLoading(false) })
+    }
+    load()
+    const onFocus = () => load()
+    window.addEventListener('focus', onFocus)
+    return () => {
+      cancelled = true
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [token, user?.username])
 
   if (!user) {
     return (
@@ -35,6 +54,8 @@ export function Profile({ user, token, onRefreshUser, onLogout }) {
   }
 
   const elo = stats?.elo ?? 1200
+  const partiesPlayed = stats?.games_played ?? 0
+  const isUnranked = partiesPlayed === 0
   const survivalPct = Math.round((stats?.survival_rate ?? 0) * 100)
   const mancheResiliencePct = Math.round((stats?.manche_resilience ?? 0) * 100)
 
@@ -102,11 +123,19 @@ export function Profile({ user, token, onRefreshUser, onLogout }) {
             )}
           </div>
         </div>
-        <div className="ticket" style={{ textAlign: 'center', padding: '1rem 1.4rem', minWidth: 180 }}>
-          <div className="eyebrow" style={{ fontSize: '0.6rem' }}>{t('current_elo')}</div>
-          <div className="display" style={{ fontSize: '2.6rem', color: 'var(--rouge)', lineHeight: 1 }}>{elo}</div>
-          <div className="serif" style={{ fontStyle: 'italic', marginTop: 4 }}>{badge(elo)}</div>
-        </div>
+        <RankTooltip elo={elo} partiesPlayed={partiesPlayed} t={t}>
+          <div className="ticket" style={{ textAlign: 'center', padding: '1rem 1.4rem', minWidth: 180 }}>
+            <div className="eyebrow" style={{ fontSize: '0.6rem' }}>{t('current_elo')}</div>
+            <div className="display" style={{
+              fontSize: '2.6rem',
+              color: isUnranked ? 'var(--ink-mute)' : 'var(--rouge)',
+              lineHeight: 1,
+            }}>{isUnranked ? '—' : elo}</div>
+            <div className="serif" style={{ fontStyle: 'italic', marginTop: 4, color: isUnranked ? 'var(--ink-mute)' : undefined }}>
+              {isUnranked ? t('unranked') : badge(elo, partiesPlayed)}
+            </div>
+          </div>
+        </RankTooltip>
       </div>
 
       {loading ? (

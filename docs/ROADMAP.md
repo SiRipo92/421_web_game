@@ -392,7 +392,7 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 **Acceptance:** 100 open rooms exist; the lobby page loads in < 200 ms, shows page 1 of ~9 with 12 cards, pagination controls work, WS room-state changes refresh only the visible window.
 **Dependencies:** None. Pair-friendly with [[G11]] (single-player waiting modal) — both touch room-state UX.
 
-### G49. Password field show/hide toggle (login + registration)
+### G49. (DONE — shipped via G97) Password field show/hide toggle (login + registration)
 **Why:** Standard accessibility / usability affordance: an eye icon inside the password input lets the user reveal what they typed before submitting. Reduces failed-login frustration (typos in masked input), helps users on touch keyboards verify their entry. Today both `/login` and `/register` mask the input with no reveal option.
 **Scope:**
 - Promote the existing password `<input>`s into a small reusable component `PasswordField.jsx` (in `frontend/src/components/shared/`) that wraps an `<input>` + an absolutely-positioned eye/eye-off icon button at the right edge. Toggling the button flips `type` between `"password"` and `"text"`.
@@ -732,7 +732,7 @@ The right `<aside>` currently has Journal + Combo Hierarchy. Add Chat as a third
 **Acceptance:** A clean message round-trips in <1.5s with a brief pending state; a slur is held, dropped, and never relayed to other clients.
 **Dependencies:** [[G34]] is the parent; this entry is the delayed-send variant the user asked for specifically.
 
-### G75. Buy + verify the production domain (Cloudflare Registrar, ~€8/yr)
+### G75. (DONE) Buy + verify the production domain — `421bistro.com` via OVH + Cloudflare DNS
 **Why:** Email sending through Resend (and the upcoming Brevo migration in [[G76]]) requires a verified sender domain — DNS records (SPF, DKIM, DMARC) must be set before any transactional email reliably lands in inboxes. Same domain becomes the canonical site URL once deployment lands. Currently `noreply@421bistro.fr` is hard-coded in the email-sender default but the domain isn't owned, so every contact-form submission currently 502s with `email_sender_not_configured`.
 **Scope:**
 - Pick a domain name. Shortlist worth considering:
@@ -746,7 +746,7 @@ The right `<aside>` currently has Journal + Combo Hierarchy. Add Chat as a third
 **Acceptance:** Domain owned, DNS at Cloudflare, sender verified in the chosen email service, `/api/contact` POST succeeds end-to-end with a real email landing in `CONTACT_EMAIL`'s inbox.
 **Dependencies:** None — pure ops decision. Unblocks [[G76]] (Brevo migration) and is a prerequisite for [[G77]] (production deployment).
 
-### G76. Migrate transactional email from Resend to Brevo
+### G76. (DONE) Migrate transactional email from Resend to Brevo
 **Why:** Brevo (formerly Sendinblue) has a free tier of 300 emails/day forever vs. Resend's 100/day free tier capped at 3000/month. Brevo's template editor is also nicer for the password-reset / inactive-account-warning / breach-notification templates that G70 + G71 will need. EU-based (Paris HQ) which simplifies GDPR processing-agreement paperwork.
 **Scope:**
 - Sign up at Brevo, verify the domain from [[G75]] (DKIM + SPF records).
@@ -1157,7 +1157,7 @@ Promote tickets from "random slugs in email" to a real `ContactTicket(id, ref, f
 
 **Dependencies:** [[G87]] (spectator broadcast paths). Hooks for [[G34]] [[G36]] [[G37]] [[G39]] (moderation surfaces).
 
-### G90. Admin dashboard full build — pre-launch must-ship
+### G90. (DONE) Admin dashboard full build — pre-launch must-ship
 **Why:** Today `frontend/src/pages/AdminDashboard.jsx` is a skeleton with `PanelStub` placeholders. To launch, the user needs working admin tools: search users, ban/unban, change roles, delete accounts (RGPD right-to-be-forgotten + admin-initiated), see who's online, review the audit feed. Solo operator — needs to be ergonomic, not a 20-click maze.
 
 **Scope:**
@@ -1207,7 +1207,7 @@ Promote tickets from "random slugs in email" to a real `ContactTicket(id, ref, f
 
 **Effort:** ~5 days. **Launch-blocker.**
 
-### G91. Stats redesign — partie / manche semantics + survival-based ELO
+### G91. (DONE) Stats redesign — partie / manche semantics + survival-based ELO
 **Why:** Current PlayerStats columns are `wins` / `losses` — wrong vocabulary for 421. The game's objective isn't to "win" but to NOT lose: the one who ends up with all the fiches (or 0, depending on phase) is the loser; everyone else is a survivor. The current Profile.jsx also references fields that don't exist (`streak`, `top_combos`, `recent_games`) — they always render as 0/empty. And ELO never moves in practice (TheWitch has played 9 games, ELO still 1200) — either the write path is broken or the calc only runs in code paths that don't fire. Pre-launch this needs to be made coherent so users see meaningful stats from day one.
 
 **Scope (in execution order — never breaks the API):**
@@ -1340,7 +1340,7 @@ Promote tickets from "random slugs in email" to a real `ContactTicket(id, ref, f
 
 **Effort:** ~3 days (1 day audit + 2 days fixes). **Launch-blocker.**
 
-### G96. Username + profile-content moderation
+### G96. (DONE) Username + profile-content moderation
 **Why:** Discovered during G90 manual smoke testing: a user registered with username `BigBite420` and the signup endpoint accepted it. Same gap exists anywhere else free-form user content surfaces (display names, future profile bios, future chat). The avatar upload path is already gated by [[G46]]'s AI moderation — text inputs need parallel coverage. Without this, day-one public traffic could pollute the leaderboard with offensive handles that are then visible everywhere a user is mentioned.
 
 **Two-layer defense (industry standard for username gates):**
@@ -1493,6 +1493,94 @@ After [[G31a]] lands (three.js + cannon-es 3D dice prototype), replace the homep
 - G94b: [[G31a]] (three.js + cannon-es prototype must exist).
 
 **Recommendation:** Ship G94a after [[G77]] launch as a polish PR (1 evening of work, immediate visible value to new visitors). Upgrade to G94b whenever G31 lands.
+
+### G95. Room moderation surface — admin list + spectate + kick + dissolve + broadcast
+**Why:** Admin has user-level tooling ([[G90]]) but zero room-level tooling. If a live room turns toxic mid-game, an admin's only option today is to ban individual players reactively. We need: live list of active rooms, spectator entry into any room, admin-kick stronger than host-kick (kick + 1h chat-ban), nuclear dissolve-room option with audit, broadcast-banner to all sockets in a room.
+
+**Backend endpoints:**
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/admin/rooms` | List all active rooms (public + private). Returns: game_code, phase, host name, player count, max players, started_at, in-progress flag, top-3 players by tokens |
+| `GET` | `/api/admin/rooms/{game_id}` | Detail — full player roster + connection state + recent log entries + bot-decision count |
+| `POST` | `/api/admin/rooms/{game_id}/broadcast` | Send a server-message banner to ALL connected sockets in the room. Body: `{message_fr, message_en, severity: 'info' \| 'warning' \| 'critical'}` |
+| `POST` | `/api/admin/rooms/{game_id}/kick` | Admin kick — uses existing `kicked` WS message but with reason `admin_action`. Stronger than host-kick: also fires a 1h chat-ban for the kicked user to prevent immediate rejoin. Admin can kick the host. |
+| `POST` | `/api/admin/rooms/{game_id}/dissolve` | Nuclear option — disconnect all sockets, persist any in-flight partie's stats, dissolve the room. Notifies all players with a banner explaining why. Body: `{reason}`. |
+
+**Frontend:**
+- `/admin/rooms` — paginated room list with status badges, sortable by player_count / started_at
+- `/admin/rooms/:gameId` — detail view with action buttons (Spectate, Broadcast, Kick player, Dissolve room)
+- BroadcastModal: textarea + severity radio → renders as colored non-dismissible banner across the top of the game UI for the duration
+- KickModal: pick player + reason
+- DissolveModal: type-room-code-to-confirm (matches the delete-user pattern from G90)
+- WS frontend gains an `admin_broadcast` message-type handler → renders the banner
+
+**Admin vs host kick differences:**
+- Host kick: target sees `kicked` modal, can rejoin via lobby
+- Admin kick: target sees `kicked` modal AND gets a 1h chat-ban → cannot immediately re-join with chat privileges
+- Admin can kick the host (host cannot kick admin)
+- Admin dissolve: room is gone entirely; everyone redirected home with audit-logged reason
+
+**Admin-spectate visibility decision** (deferred from design conversation): admin-spectator sees the full state INCLUDING private dice mid-throw (cheat-detection use case). Differs from normal spectator ([[G87]]) which hides private state. Logged as `admin_spectate_started` for audit.
+
+**Acceptance:** A live room turns sour → admin opens `/admin/rooms` → clicks into the misbehaving room → broadcasts a warning banner → if it persists, kicks the offender (1h chat-ban applied automatically) → if game keeps going off-rails, dissolves the room with reason. All actions audit-logged.
+
+**Dependencies:** [[G90]] ✅ (admin tooling foundation); [[G87]] optional (spectator role on WS side — admin-spectate can ship with relaxed privacy and a TODO to tighten when G87 lands).
+
+**Effort:** ~2-3 days. **Launch-blocker** per the "must-ship admin moderation" decision.
+
+### G97. (DONE) Registration form polish — async username check, password toggle, confirm field, birthdate bounds
+**Why:** Five UX gaps discovered during G90/G96 smoke tests, bundled into one polish PR.
+
+**Shipped:**
+- `GET /auth/username-available` async check with debounced 500ms blur trigger
+- Per-field error highlighting (red border + inline message) replacing the form-bottom error summary
+- Password show/hide toggle (SVG eye icons) on both login + register
+- Confirm-password field with green-border + check on match
+- Birthdate bounds tightened to 15-120 years (catches 1889-style typos)
+- Split « Username already taken » vs « Email already taken » so the correct field highlights
+- Soft-delete now anonymizes username + email so handles are reusable
+
+**Bundled fixes:**
+- G49 (password toggle) — shipped here
+- Username-vs-email collision conflation fix
+- Self-delete + admin-availability checks ignore soft-deleted rows
+
+**Reusable components:** `PasswordInput.jsx`, `FormField.jsx` — usable in future reset-password / change-password flows.
+
+### G98. Rank centralization — single source of truth + unranked display + tooltip
+**Why:** Discovered during G90 smoke test: a freshly-registered user with 0 parties shows ELO=1200 + « Amateur » badge everywhere (Profile, Rankings, Login marketing). That's misleading — they didn't earn the rank, it's just the algorithm's starting value. Plus the rank config (badge thresholds + names) is duplicated across `app/routers/rankings.py:BADGES`, `frontend/src/utils/badge.js`, the login marketing copy in `i18n/index.js`, and inline in `Profile.jsx`/`Rankings.jsx`. Touching the ladder = a four-file change.
+
+**Scope:**
+
+**Backend** (`app/services/ranks.py` — new module):
+- `BADGES: tuple[tuple[int, str, str], ...]` — single source of truth: `((1700, "Maître", "👑"), (1500, "Expert", "🥇"), …)`
+- `get_badge(elo: int, parties_played: int = 1) -> tuple[str, str] | None` — returns `None` when `parties_played < 1` (the unranked case). Existing callers in `rankings.py` import from here and stop maintaining their own list.
+- ELO starting value stays 1200 (industry standard for any ELO system that needs an algorithm baseline). The UI just doesn't *show* it until the user has earned it.
+
+**Frontend** (`frontend/src/utils/ranks.js`):
+- Mirrors the backend tuple. Single export `BADGES` + `badge(elo, partiesPlayed)` returning `{name, icon}` or `null`.
+- Existing `frontend/src/utils/badge.js` becomes a thin re-export (or gets removed once consumers migrate).
+- Login marketing copy reads the badge ladder from this module instead of hardcoded i18n strings — when thresholds change, the home page reflects automatically.
+
+**Unranked display on public surfaces:**
+- Profile.jsx → ELO display shows « — » (em-dash) instead of « 1200 » when `parties_played === 0`. Subtitle changes from « Amateur » to « Non classé(e) » / « Unranked ».
+- Rankings.jsx → unranked players hidden from the top-50 list entirely (they wouldn't add value anyway; the leaderboard exists to surface earned standings).
+- Login marketing → no change (it shows the badge ladder, not any particular user's rank).
+- Admin user list already does this correctly via G90 — no change needed.
+
+**RankTooltip component:**
+- Hover/tap on the ELO display in Profile shows a popover with the full ladder + the player's current position highlighted.
+- Same component used on Rankings page header (info icon next to « Classement »).
+- Tap-friendly on mobile (toggle on tap, dismiss on outside-tap).
+
+**Acceptance:**
+- Newly registered user has Profile showing « — · Non classé(e) » instead of « 1200 · Amateur ».
+- After their first partie, the rank appears correctly per the shared module.
+- Editing `BADGES` in `app/services/ranks.py` + `frontend/src/utils/ranks.js` is the only change needed to shift the ladder.
+- Tooltip on Profile ELO reveals the full ladder with current rank highlighted.
+
+**Effort:** ~half day. Pure refactor + UX polish. **Not a launch-blocker** but ships cheaply before G95.
 
 ### G61. Right-rail panels become collapsible "tabs"
 **Why:** Reported during playtest. The right `<aside>` today is a fixed layout: collapsible **Journal** on top, *always-visible* **Combo hierarchy** at the bottom. The user wants the hierarchy to collapse the same way the journal does — and more broadly, they want the right rail to behave like a small set of *stackable tabs* (Journal · Hierarchy · later: Chat) that each open/close independently. This sets up the eventual chat slot ([[G59]]) without ripping out the existing panels.

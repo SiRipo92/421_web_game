@@ -975,6 +975,8 @@ async def _dispatch(
         # G18: persist this player's session stats if they were actively
         # playing AND they're a registered user. Snapshot the values FIRST
         # because the cleanup below pops them from the game dicts.
+        # G98 follow-up: pass manche counters through so the leave-mid-game
+        # path doesn't leave manches_played/manches_lost stuck at zero.
         if game.phase in (GamePhase.CHARGE, GamePhase.DECHARGE, GamePhase.TIEBREAK):
             leaver_user_id = game.user_ids.get(player_id)
             if leaver_user_id:
@@ -982,7 +984,11 @@ async def _dispatch(
 
                 asyncio.create_task(
                     persist_player_session(
-                        leaver_user_id, game.id, game.round_points.get(player_id, 0)
+                        leaver_user_id,
+                        game.id,
+                        game.round_points.get(player_id, 0),
+                        manches_played=game.manches_played.get(player_id, 0),
+                        manches_lost=game.manches_lost.get(player_id, 0),
                     )
                 )
 
@@ -1241,6 +1247,7 @@ async def _dispatch(
 
         # Same cleanup as a voluntary leave — including the G18 stats persistence
         # snapshot when the kicked player was actively playing as a registered user.
+        # G98 follow-up: pass manche counters so kick-mid-game records them too.
         if game.phase in (GamePhase.CHARGE, GamePhase.DECHARGE, GamePhase.TIEBREAK):
             target_user_id = game.user_ids.get(target_id)
             if target_user_id:
@@ -1248,7 +1255,11 @@ async def _dispatch(
 
                 asyncio.create_task(
                     persist_player_session(
-                        target_user_id, game.id, game.round_points.get(target_id, 0)
+                        target_user_id,
+                        game.id,
+                        game.round_points.get(target_id, 0),
+                        manches_played=game.manches_played.get(target_id, 0),
+                        manches_lost=game.manches_lost.get(target_id, 0),
                     )
                 )
 
