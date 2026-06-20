@@ -1,0 +1,16 @@
+/* TEAM */
+
+Author: Sierra Ripoche
+Contact: ripochesierra [at] gmail.com
+GitHub: SiRipo92
+Location: Paris, France
+
+
+/* SITE */
+
+Site: 421 Bistro
+Description: A web implementation of 421, the French bistro dice game.
+Standards: HTML5, CSS3, ES2024+
+Components: FastAPI, Postgres, SQLAlchemy async, React, Vite, WebSocket
+Software: Python 3.12, Node 20
+Last update: 2026-06
