@@ -11,7 +11,7 @@ import { useState } from 'react'
  * we don't render the message ourselves (that's the form's job, under
  * the input) but we color the border red when `aria-invalid="true"`.
  */
-export function PasswordInput({ id, value, onChange, onBlur, autoComplete = 'current-password', placeholder, required, invalid, t }) {
+export function PasswordInput({ id, value, onChange, onBlur, autoComplete = 'current-password', placeholder, required, invalid, matches, t }) {
   const [revealed, setRevealed] = useState(false)
   return (
     <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
@@ -28,8 +28,8 @@ export function PasswordInput({ id, value, onChange, onBlur, autoComplete = 'cur
         aria-invalid={invalid ? 'true' : 'false'}
         style={{
           width: '100%',
-          paddingRight: '2.5rem',
-          borderColor: invalid ? 'var(--rouge)' : undefined,
+          paddingRight: '4.2rem',
+          borderColor: invalid ? 'var(--rouge)' : matches ? 'var(--felt-deep)' : undefined,
           boxShadow: invalid ? '0 0 0 2px rgba(168,48,42,0.18)' : undefined,
         }}
       />
@@ -42,16 +42,19 @@ export function PasswordInput({ id, value, onChange, onBlur, autoComplete = 'cur
         style={{
           position: 'absolute',
           right: '0.6rem',
-          padding: 0,
-          fontSize: '1.1rem',
+          padding: '0.2rem 0.4rem',
+          fontSize: '0.7rem',
+          letterSpacing: '0.12em',
+          textTransform: 'uppercase',
           background: 'transparent',
           border: 'none',
           cursor: 'pointer',
           color: 'var(--ink-mute)',
-          lineHeight: 1,
+          fontFamily: 'var(--body)',
+          fontWeight: 600,
         }}
       >
-        {revealed ? '🙈' : '👁'}
+        {revealed ? t('password_hide_short') : t('password_show_short')}
       </button>
     </div>
   )

@@ -41,6 +41,30 @@ async def test_register_duplicate_rejected(client, make_user):
     assert r.status_code == 409
 
 
+async def test_register_username_collision_blames_username(client, make_user):
+    """G97: when only the username collides, error says 'Username already taken'."""
+    first = make_user("dup_u")
+    await client.post("/auth/register", json=first)
+    second = make_user("dup_u_v2")  # fresh email + suffix
+    second["username"] = first["username"]
+    r = await client.post("/auth/register", json=second)
+    assert r.status_code == 409
+    assert "username" in r.json()["detail"].lower()
+    assert "email" not in r.json()["detail"].lower()
+
+
+async def test_register_email_collision_blames_email(client, make_user):
+    """G97: when only the email collides, error says 'Email already taken'."""
+    first = make_user("dup_e")
+    await client.post("/auth/register", json=first)
+    second = make_user("dup_e_v2")  # fresh username
+    second["email"] = first["email"]
+    r = await client.post("/auth/register", json=second)
+    assert r.status_code == 409
+    assert "email" in r.json()["detail"].lower()
+    assert "username" not in r.json()["detail"].lower()
+
+
 async def test_register_underage_rejected(client, make_user):
     """Birthdate that puts the user under 15 returns 422."""
     data = make_user()

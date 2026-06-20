@@ -230,7 +230,7 @@ function RegisterForm({ t, lang, onRegister, onGoogleLogin, onSwitch, onNav }) {
         if (body.available) {
           setUsernameStatus('available'); setUsernameError('')
         } else if (body.error_code === 'taken') {
-          setUsernameStatus('taken'); setUsernameError(t('err_already_taken'))
+          setUsernameStatus('taken'); setUsernameError(t('err_username_taken'))
         } else if (body.error_code === 'content') {
           setUsernameStatus('invalid'); setUsernameError(t('err_username_inappropriate'))
         } else {
@@ -266,7 +266,7 @@ function RegisterForm({ t, lang, onRegister, onGoogleLogin, onSwitch, onNav }) {
     setUsernameError(''); setEmailError(''); setPasswordError(''); setConfirmPasswordError('')
     setBirthdateError(''); setAcceptCguError(''); setGeneralError('')
     let firstInvalid = null
-    if (usernameStatus === 'taken') { setUsernameError(t('err_already_taken')); firstInvalid = firstInvalid || 'reg-username' }
+    if (usernameStatus === 'taken') { setUsernameError(t('err_username_taken')); firstInvalid = firstInvalid || 'reg-username' }
     if (usernameStatus === 'invalid') { firstInvalid = firstInvalid || 'reg-username' }
     if (!username.trim()) { setUsernameError(t('err_field_required')); firstInvalid = firstInvalid || 'reg-username' }
     if (!validateEmailFormat(email)) { firstInvalid = firstInvalid || 'reg-email' }
@@ -288,7 +288,8 @@ function RegisterForm({ t, lang, onRegister, onGoogleLogin, onSwitch, onNav }) {
       const msg = (err?.detail || '').toLowerCase()
       if (err?.status === 429) setGeneralError(t('err_rate_limit'))
       else if (msg.includes('15') || msg.includes('age')) setBirthdateError(t('err_age_min'))
-      else if (msg.includes('taken') || err?.status === 409) setUsernameError(t('err_already_taken'))
+      else if (msg.includes('email already taken')) setEmailError(t('err_email_taken'))
+      else if (msg.includes('username already taken') || err?.status === 409) setUsernameError(t('err_username_taken'))
       else if (msg.includes('disposable')) setEmailError(t('err_disposable_email'))
       else if (msg.includes('domain') || msg.includes('not valid') || msg.includes('deliverable')) setEmailError(t('err_email_domain'))
       else if (msg.includes('inappropriate')) setUsernameError(t('err_username_inappropriate'))
@@ -337,11 +338,18 @@ function RegisterForm({ t, lang, onRegister, onGoogleLogin, onSwitch, onNav }) {
           autoComplete="new-password" placeholder="••••••••" required invalid={Boolean(passwordError)} t={t} />
         <PasswordChecklist password={password} />
       </FormField>
-      <FormField label={t('confirm_new_password')} htmlFor="reg-confirm-password" required error={confirmPasswordError}>
+      <FormField label={t('confirm_new_password')} htmlFor="reg-confirm-password" required
+        error={confirmPasswordError}
+        status={
+          confirmPassword && confirmPassword === password && !confirmPasswordError
+            ? <span style={{ color: 'var(--felt-deep)', fontSize: '0.9rem' }}>✓</span>
+            : null
+        }>
         <PasswordInput id="reg-confirm-password" value={confirmPassword}
           onChange={e => { setConfirmPassword(e.target.value); if (confirmPasswordError) setConfirmPasswordError('') }}
           onBlur={validateConfirmPassword}
-          autoComplete="new-password" placeholder="••••••••" required invalid={Boolean(confirmPasswordError)} t={t} />
+          autoComplete="new-password" placeholder="••••••••" required invalid={Boolean(confirmPasswordError)} t={t}
+          matches={confirmPassword && confirmPassword === password && !confirmPasswordError} />
       </FormField>
       <FormField label={t('birthdate')} htmlFor="reg-birthdate" required error={birthdateError} hint={t('age_notice')}>
         <input id="reg-birthdate" className="input" type="date" required

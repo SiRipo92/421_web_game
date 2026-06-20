@@ -75,11 +75,17 @@ async def username_available(request: Request, u: str, db: AsyncSession = Depend
 @limiter.limit("5/minute")
 async def register(request: Request, body: RegisterRequest, db: AsyncSession = Depends(get_db)):
     """Create a new user account and return a JWT."""
-    existing = await db.execute(
-        select(User).where((User.username == body.username) | (User.email == body.email))
-    )
-    if existing.scalar_one_or_none():
-        raise HTTPException(status_code=409, detail="Username or email already taken")
+    # G97: split conflict detection so the frontend can highlight the
+    # specific field that's taken. Backend ordering: username first
+    # (cheapest signal — most likely cause of conflict). If we changed to
+    # check both at once we'd need a second query to disambiguate, no
+    # perf win.
+    by_username = await db.execute(select(User).where(User.username == body.username))
+    if by_username.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Username already taken")
+    by_email = await db.execute(select(User).where(User.email == body.email))
+    if by_email.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Email already taken")
 
     user = User(
         username=body.username,
