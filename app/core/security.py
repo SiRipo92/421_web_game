@@ -22,6 +22,11 @@ ALGORITHM = "HS256"
 # bcrypt supports at most 72 bytes — truncate to preserve old passlib behaviour
 _MAX_PW_BYTES = 72
 
+# G90: throttle last_seen_at writes — refresh at most once every 5 minutes
+# per user. Avoids hot DB writes on chatty WS clients while keeping the
+# admin "online" filter accurate to ±5 min.
+_LAST_SEEN_REFRESH_SECONDS = 300
+
 
 def hash_password(password: str) -> str:
     """Return a bcrypt hash of the given password."""
@@ -56,6 +61,26 @@ async def _user_from_token(token: str, db: AsyncSession) -> Optional[User]:
     return result.scalar_one_or_none()
 
 
+async def _refresh_last_seen(user: User, db: AsyncSession) -> None:
+    """G90: throttled write of User.last_seen_at on authenticated activity.
+
+    Updates if the stored timestamp is older than _LAST_SEEN_REFRESH_SECONDS,
+    or null. Errors are swallowed — this is a best-effort liveness signal,
+    not load-bearing.
+    """
+    now = datetime.now(UTC)
+    if user.last_seen_at is not None:
+        # last_seen_at is timezone-aware (TIMESTAMPTZ); subtraction is safe.
+        age = (now - user.last_seen_at).total_seconds()
+        if age < _LAST_SEEN_REFRESH_SECONDS:
+            return
+    try:
+        user.last_seen_at = now
+        await db.commit()
+    except Exception:
+        await db.rollback()
+
+
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: AsyncSession = Depends(get_db),
@@ -67,6 +92,7 @@ async def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token",
         )
+    await _refresh_last_seen(user, db)
     return user
 
 

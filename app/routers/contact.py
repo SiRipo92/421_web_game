@@ -30,6 +30,7 @@ _CATEGORY_LABELS = {
     "export": {"fr": "Demande d'export de données", "en": "Data export request"},
     "delete": {"fr": "Demande de suppression de compte", "en": "Account deletion request"},
     "bug": {"fr": "Signalement de bug", "en": "Bug report"},
+    "appeal": {"fr": "Contestation de modération", "en": "Moderation appeal"},
     "other": {"fr": "Message de contact", "en": "Contact message"},
 }
 

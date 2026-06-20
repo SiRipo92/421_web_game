@@ -1,6 +1,8 @@
-import { useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useLang } from '../context/useLang.js'
+
+const VALID_SUBJECTS = new Set(['other', 'bug', 'export', 'delete', 'appeal'])
 
 const Required = () => (
   <span style={{ color: 'var(--rouge)', marginLeft: 4 }} aria-hidden="true">*</span>
@@ -8,10 +10,33 @@ const Required = () => (
 
 export function Contact() {
   const { t } = useLang()
+  const [searchParams] = useSearchParams()
+  // G90 follow-up: ban_notice email links to /contact?subject=appeal.
+  // Preselect the matching <select> option + seed a polite message stub so
+  // the recipient isn't staring at an empty textarea.
+  const initialSubject = (() => {
+    const s = searchParams.get('subject')
+    return s && VALID_SUBJECTS.has(s) ? s : 'other'
+  })()
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
-  const [subject, setSubject] = useState('other')
-  const [message, setMessage] = useState('')
+  const [subject, setSubject] = useState(initialSubject)
+  const [message, setMessage] = useState(initialSubject === 'appeal' ? '' : '')
+
+  // Seed the message textarea on mount when arriving with ?subject=appeal.
+  // Done once on mount via the ref pattern so user edits don't get
+  // clobbered if they navigate within the page.
+  const seededRef = useRef(false)
+  useEffect(() => {
+    if (seededRef.current) return
+    seededRef.current = true
+    if (initialSubject === 'appeal') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setMessage(t('contact_appeal_stub'))
+    }
+  // initialSubject is computed once; t is stable per language.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   // G68: explicit consent for processing the contact data is required
   // before sending. `required` on the checkbox blocks submit at the
   // browser level; the JS check is a belt-and-suspenders for screen
@@ -120,6 +145,7 @@ export function Contact() {
                 <option value="bug">{t('contact_subject_bug')}</option>
                 <option value="export">{t('contact_subject_export')}</option>
                 <option value="delete">{t('contact_subject_delete')}</option>
+                <option value="appeal">{t('contact_subject_appeal')}</option>
               </select>
             </div>
             <div>

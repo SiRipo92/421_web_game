@@ -1,0 +1,16 @@
+{% extends "_base.txt" %}
+{% block body %}
+Bonjour {{ username }},
+
+Votre compte 421 Bistro a été supprimé par un administrateur le
+{{ deletion_date_label }}.
+{% if reason %}
+Motif : {{ reason }}
+{% endif %}
+
+Conformément au RGPD, vos données personnelles seront définitivement
+effacées sous 30 jours.
+
+Pour contester cette suppression :
+{{ app_url }}/contact?subject=appeal
+{% endblock %}

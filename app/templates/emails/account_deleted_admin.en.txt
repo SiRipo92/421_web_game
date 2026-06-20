@@ -1,0 +1,15 @@
+{% extends "_base.txt" %}
+{% block body %}
+Hi {{ username }},
+
+Your 421 Bistro account was deleted by an administrator on
+{{ deletion_date_label }}.
+{% if reason %}
+Reason: {{ reason }}
+{% endif %}
+
+Per GDPR, your personal data will be permanently erased within 30 days.
+
+To appeal this deletion:
+{{ app_url }}/contact?subject=appeal
+{% endblock %}
