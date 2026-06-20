@@ -38,3 +38,20 @@ ci-lint:
 	.venv/bin/ruff check app/ tests/
 	.venv/bin/ruff format --check app/ tests/
 	cd frontend && npm run lint
+
+# Build the Sphinx documentation site locally. Output: docs/build/html/.
+# Open docs/build/html/index.html in a browser to preview.
+# ReadTheDocs runs the equivalent of this on every push to main via
+# .readthedocs.yaml — local previews catch broken references early.
+docs:
+	.venv/bin/sphinx-build -b html docs/source docs/build/html
+
+docs-clean:
+	rm -rf docs/build
+
+# Code quality sweep — vulture (dead Python) + radon (cyclomatic complexity).
+# Output is human-readable; tools don't enforce thresholds in CI.
+# See docs/CODE_QUALITY_2026-06.md for the captured findings.
+quality:
+	.venv/bin/vulture app/ --min-confidence 80 || true
+	.venv/bin/radon cc app/ -s -n B

@@ -5,3 +5,13 @@ httpx>=0.27
 anyio>=4
 ruff>=0.4
 psycopg2-binary>=2.9
+
+# G100b — documentation site (ReadTheDocs builds from docs/source/)
+sphinx>=7
+sphinx-rtd-theme>=2
+sphinx-autodoc-typehints>=2
+myst-parser>=3
+
+# G100b — code quality analysis (run locally / on demand, not in CI)
+vulture>=2
+radon>=6
