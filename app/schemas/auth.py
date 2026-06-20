@@ -6,6 +6,8 @@ from email_validator import EmailNotValidError
 from email_validator import validate_email as _validate_email
 from pydantic import BaseModel, EmailStr, field_validator
 
+from app.services.username_moderation import check_username
+
 try:
     from MailChecker import MailChecker as _MailChecker
 
@@ -43,11 +45,8 @@ class RegisterRequest(BaseModel):
     @field_validator("username")
     @classmethod
     def username_valid(cls, v: str) -> str:
-        """Enforce 2–32 character username length."""
-        v = v.strip()
-        if not (2 <= len(v) <= 32):
-            raise ValueError("Username must be 2–32 characters")
-        return v
+        """G96: format (3-20 chars, allowlisted chars) + bilingual blocklist."""
+        return check_username(v.strip())
 
     @field_validator("password")
     @classmethod
@@ -109,6 +108,7 @@ class MeResponse(BaseModel):
     lang_pref: str
     theme_pref: str = "light"
     email_opt_in: bool
+    username_pending_change: bool = False  # G96: in-app banner trigger
     profile_complete: bool = True
     has_avatar: bool = False
     role: str = "player"
@@ -127,11 +127,8 @@ class CompleteProfileRequest(BaseModel):
     @field_validator("username")
     @classmethod
     def username_valid(cls, v: str) -> str:
-        """Enforce 2–32 character username length."""
-        v = v.strip()
-        if not (2 <= len(v) <= 32):
-            raise ValueError("Username must be 2–32 characters")
-        return v
+        """G96: same gate as signup — format + bilingual blocklist."""
+        return check_username(v.strip())
 
     @field_validator("birthdate")
     @classmethod
@@ -156,12 +153,10 @@ class UpdateMeRequest(BaseModel):
     @field_validator("username")
     @classmethod
     def username_valid(cls, v: str | None) -> str | None:
+        """G96: same gate as signup — format + bilingual blocklist."""
         if v is None:
             return v
-        v = v.strip()
-        if not (2 <= len(v) <= 32):
-            raise ValueError("Username must be 2–32 characters")
-        return v
+        return check_username(v.strip())
 
     @field_validator("lang_pref")
     @classmethod

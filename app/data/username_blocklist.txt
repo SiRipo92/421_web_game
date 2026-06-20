@@ -1,0 +1,101 @@
+# G96 username blocklist (bilingual FR + EN).
+# Lines starting with `#` are comments. Blank lines ignored.
+# Entries are matched after normalization (lowercased, l33t-substituted,
+# special chars stripped). One term per line.
+#
+# How matching works:
+#   - SUBSTRINGS (prefixed with `*`): match ANYWHERE in the normalized
+#     handle. Use for terms with very low false-positive risk (slurs,
+#     unambiguous profanity that's never an innocent substring).
+#   - WHOLE-WORD (default, no prefix): matches only when the term is the
+#     full normalized handle OR appears as a token after splitting on
+#     `. _ -`. Use for shorter or more ambiguous terms that could appear
+#     in innocent contexts (e.g. `ass` in `assassin`, `bot` in `robot`).
+#
+# Curated, not exhaustive. Add new entries as you discover misses in
+# production. Substring promotion is one-way — once a term is a
+# substring, ANY handle containing it is rejected, so be conservative.
+
+# --- Unambiguous slurs (substring) ---
+*nigger
+*nigga
+*faggot
+*kike
+*chink
+*tranny
+*retard
+
+# --- FR profanity (substring — common bypass-handle bait) ---
+*bite
+*queue
+*chatte
+*salope
+*connard
+*connasse
+*encule
+*puta
+*putain
+*merde
+*ducon
+*batard
+*nique
+*niquer
+*ntm
+*fdp
+*pute
+*salaud
+*tarlouze
+*pedale
+*pedophile
+*violeur
+
+# --- EN profanity (substring — common bypass-handle bait) ---
+*fuck
+*shit
+*cunt
+*dick
+*cock
+*pussy
+*bitch
+*biotch
+*whore
+*slut
+*asshole
+*bastard
+*porn
+*horny
+*rapist
+*pedo
+*penis
+*vagina
+
+# --- FR (whole-word — could legitimately appear in compounds) ---
+zob
+pd
+viol
+con
+
+# --- EN (whole-word — common substring in innocent compounds) ---
+ass
+piss
+sex
+boner
+
+# --- Hate / extremism (whole-word) ---
+nazi
+hitler
+jihad
+isis
+
+# --- Impersonation flags (whole-word — blocks "admin", "bot", but NOT "robot" or "botanist") ---
+admin
+moderator
+moderateur
+modo
+system
+official
+officiel
+support
+bot
+deleted
+421bistro

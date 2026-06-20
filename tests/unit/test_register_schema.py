@@ -70,26 +70,71 @@ def test_password_special_char_satisfies_digit_rule():
 # ── Username ──────────────────────────────────────────────────────────────────
 
 
-def test_username_one_char_rejected():
-    with pytest.raises(ValidationError, match="2.32 characters"):
-        _make(username="x")
+def test_username_too_short_rejected():
+    """G96: tightened bound — minimum is now 3 chars."""
+    with pytest.raises(ValidationError, match="at least 3"):
+        _make(username="ab")
 
 
-def test_username_33_chars_rejected():
-    with pytest.raises(ValidationError, match="2.32 characters"):
-        _make(username="a" * 33)
+def test_username_too_long_rejected():
+    """G96: tightened bound — maximum is now 20 chars."""
+    with pytest.raises(ValidationError, match="at most 20"):
+        _make(username="a" * 21)
 
 
 def test_username_strips_whitespace():
     assert _make(username="  alice  ").username == "alice"
 
 
-def test_username_two_chars_accepted():
-    assert _make(username="ab").username == "ab"
+def test_username_three_chars_accepted():
+    """G96: 3 chars is the new minimum."""
+    assert _make(username="abc").username == "abc"
 
 
-def test_username_32_chars_accepted():
-    assert _make(username="a" * 32).username == "a" * 32
+def test_username_20_chars_accepted():
+    """G96: 20 chars is the new maximum."""
+    assert _make(username="a" * 20).username == "a" * 20
+
+
+def test_username_bigbite420_rejected():
+    """G96 acceptance: the original reported case must reject."""
+    with pytest.raises(ValidationError, match="inappropriate"):
+        _make(username="BigBite420")
+
+
+def test_username_l33t_bypass_rejected():
+    """G96: l33t substitutions don't bypass the blocklist."""
+    with pytest.raises(ValidationError, match="inappropriate"):
+        _make(username="c0nnard")
+
+
+def test_username_admin_impersonation_rejected():
+    """G96: handles flagging system roles ('admin') are rejected."""
+    with pytest.raises(ValidationError, match="inappropriate"):
+        _make(username="admin")
+
+
+def test_username_assassin_accepted():
+    """G96 false-positive guard: 'Assassin' contains 'ass' but is clean."""
+    assert _make(username="Assassin").username == "Assassin"
+
+
+def test_username_special_chars_rejected():
+    """G96: special chars beyond _ . - are rejected."""
+    with pytest.raises(ValidationError, match="letters, digits"):
+        _make(username="b!gger")
+
+
+def test_username_consecutive_special_rejected():
+    """G96: consecutive _ / . / - flagged."""
+    with pytest.raises(ValidationError, match="consecutive"):
+        _make(username="user__name")
+
+
+def test_username_leading_special_rejected():
+    """G96: cannot start with _ / . / -."""
+    with pytest.raises(ValidationError, match="start"):
+        _make(username="_sneaky")
 
 
 # ── Age / birthdate ───────────────────────────────────────────────────────────

@@ -314,7 +314,7 @@ async def test_ban_admin_protected_unless_actor_is_admin(client, make_user):
     await _promote(mod_uid, "moderator")
 
     # Create an admin victim
-    adm_data = make_user("admin_victim")
+    adm_data = make_user("victim_adm")
     adm_reg = await client.post("/auth/register", json=adm_data)
     adm_uid = (
         await client.get(
@@ -524,6 +524,136 @@ async def test_dashboard_summary_includes_online_count(client, make_user):
     assert body["online_count"] >= 1  # admin just authenticated → counts as online
     assert "recent_admin_actions" in body
     assert isinstance(body["recent_admin_actions"], list)
+
+
+# ---------------- G96 sanitize-username ----------------
+
+
+async def test_sanitize_username_requires_admin(client, make_user):
+    """A moderator cannot sanitize a user's handle; admin-only."""
+    mod_data = make_user("san_mod")
+    mod_reg = await client.post("/auth/register", json=mod_data)
+    mod_token = mod_reg.json()["access_token"]
+    mod_uid = (
+        await client.get("/auth/me", headers={"Authorization": f"Bearer {mod_token}"})
+    ).json()["id"]
+    await _promote(mod_uid, "moderator")
+
+    target_data = make_user("san_target")
+    target_reg = await client.post("/auth/register", json=target_data)
+    target_uid = (
+        await client.get(
+            "/auth/me", headers={"Authorization": f"Bearer {target_reg.json()['access_token']}"}
+        )
+    ).json()["id"]
+
+    r = await client.post(
+        f"/api/admin/users/{target_uid}/sanitize-username",
+        headers={"Authorization": f"Bearer {mod_token}"},
+    )
+    assert r.status_code == 403
+
+
+async def test_sanitize_username_generates_placeholder(client, make_user):
+    """Sanitize replaces the handle with `Player_<6chars>` and sets the
+    pending-change flag."""
+    _, admin_token, _ = await _make_admin(client, make_user, "sg_adm")
+    target_data = make_user("sg_target")
+    target_reg = await client.post("/auth/register", json=target_data)
+    target_uid = (
+        await client.get(
+            "/auth/me", headers={"Authorization": f"Bearer {target_reg.json()['access_token']}"}
+        )
+    ).json()["id"]
+    original_username = target_data["username"]
+
+    r = await client.post(
+        f"/api/admin/users/{target_uid}/sanitize-username",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["previous"] == original_username
+    assert body["username"].startswith("Player_")
+    assert body["pending_change"] is True
+
+    # Verify the DB flag landed
+    async with AsyncSessionLocal() as db:
+        u = await db.get(User, uuid.UUID(target_uid))
+        assert u.username_pending_change is True
+        assert u.username != original_username
+
+
+async def test_sanitize_username_writes_audit_log(client, make_user):
+    """Sanitize produces a GdprAuditLog row with from/to/by metadata."""
+    _, admin_token, _ = await _make_admin(client, make_user, "sa_adm")
+    target_data = make_user("sa_target")
+    target_reg = await client.post("/auth/register", json=target_data)
+    target_uid = (
+        await client.get(
+            "/auth/me", headers={"Authorization": f"Bearer {target_reg.json()['access_token']}"}
+        )
+    ).json()["id"]
+
+    r = await client.post(
+        f"/api/admin/users/{target_uid}/sanitize-username",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    new_username = r.json()["username"]
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(GdprAuditLog).where(
+                GdprAuditLog.user_id == uuid.UUID(target_uid),
+                GdprAuditLog.event_type == "username_auto_sanitized",
+            )
+        )
+        rows = result.scalars().all()
+        assert len(rows) >= 1
+        meta = rows[-1].metadata_ or {}
+        assert meta.get("from") == target_data["username"]
+        assert meta.get("to") == new_username
+
+
+async def test_self_rename_clears_pending_flag(client, make_user):
+    """G96: when a sanitized user picks a new handle via PATCH /auth/me,
+    the username_pending_change flag is cleared. Closes the feedback loop."""
+    _, admin_token, _ = await _make_admin(client, make_user, "sc_adm")
+    target_data = make_user("sc_target")
+    target_reg = await client.post("/auth/register", json=target_data)
+    target_token = target_reg.json()["access_token"]
+    target_uid = (
+        await client.get("/auth/me", headers={"Authorization": f"Bearer {target_token}"})
+    ).json()["id"]
+
+    # Admin sanitizes the user
+    await client.post(
+        f"/api/admin/users/{target_uid}/sanitize-username",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    me = await client.get("/auth/me", headers={"Authorization": f"Bearer {target_token}"})
+    assert me.json()["username_pending_change"] is True
+
+    # User picks a new (valid) handle
+    new_handle = "Marcel_42"
+    r = await client.patch(
+        "/auth/me",
+        json={"username": new_handle},
+        headers={"Authorization": f"Bearer {target_token}"},
+    )
+    assert r.status_code == 200
+    assert r.json()["username"] == new_handle
+    assert r.json()["username_pending_change"] is False
+
+
+async def test_signup_rejects_blocked_username(client, make_user):
+    """G96 acceptance: BigBite420 (the reported case) cannot register."""
+    bad = make_user("ignored_prefix")
+    bad["username"] = "BigBite420"
+    r = await client.post("/auth/register", json=bad)
+    assert r.status_code == 422
+    body_str = str(r.json()).lower()
+    assert "inappropriate" in body_str
 
 
 # ---------------- audit log integrity ----------------

@@ -21,6 +21,12 @@ export const updateUserRole = (token, userId, newRole) =>
     headers: auth(token),
   })
 
+export const sanitizeUsername = (token, userId) =>
+  req(`/api/admin/users/${userId}/sanitize-username`, {
+    method: 'POST',
+    headers: auth(token),
+  })
+
 // G90: paginated user list with filters
 export const listUsers = (token, params = {}) => {
   const qs = new URLSearchParams()

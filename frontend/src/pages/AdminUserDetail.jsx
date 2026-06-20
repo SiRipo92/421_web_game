@@ -73,6 +73,9 @@ export function AdminUserDetail({ user, token }) {
               >{t('admin_action_chat_ban')}</button>
               {isAdmin && (
                 <>
+                  <button type="button" className="btn-ghost" onClick={() => setModal('sanitize')}
+                    disabled={!!detail.deleted_at}
+                  >{t('admin_action_sanitize')}</button>
                   <button type="button" className="btn-ghost" onClick={() => setModal('role')}
                     disabled={!!detail.deleted_at}
                   >{t('admin_action_change_role')}</button>
@@ -160,6 +163,7 @@ export function AdminUserDetail({ user, token }) {
 
           {modal === 'ban' && <BanModal detail={detail} token={token} onClose={() => setModal(null)} onSuccess={() => { setModal(null); reload() }} t={t} />}
           {modal === 'chat-ban' && <ChatBanModal detail={detail} token={token} onClose={() => setModal(null)} onSuccess={() => { setModal(null); reload() }} t={t} />}
+          {modal === 'sanitize' && <SanitizeModal detail={detail} token={token} onClose={() => setModal(null)} onSuccess={() => { setModal(null); reload() }} t={t} />}
           {modal === 'role' && <RoleModal detail={detail} token={token} onClose={() => setModal(null)} onSuccess={() => { setModal(null); reload() }} t={t} />}
           {modal === 'delete' && <DeleteModal detail={detail} token={token} onClose={() => setModal(null)} onSuccess={() => navigate('/admin/users')} t={t} />}
         </>
@@ -287,6 +291,42 @@ function ChatBanModal({ detail, token, onClose, onSuccess, t }) {
           <button type="button" className="btn-ghost" onClick={onClose}>{t('cancel')}</button>
           <button type="button" className="btn-primary" onClick={submit} disabled={submitting}>
             {submitting ? '…' : t('admin_modal_confirm_chat_ban')}
+          </button>
+        </div>
+      </div>
+    </ModalShell>
+  )
+}
+
+function SanitizeModal({ detail, token, onClose, onSuccess, t }) {
+  const [submitting, setSubmitting] = useState(false)
+  const [err, setErr] = useState(null)
+  const submit = async () => {
+    setSubmitting(true)
+    setErr(null)
+    try {
+      await adminApi.sanitizeUsername(token, detail.id)
+      onSuccess()
+    } catch (e) {
+      setErr(e?.detail || 'error')
+      setSubmitting(false)
+    }
+  }
+  return (
+    <ModalShell onClose={onClose} title={t('admin_modal_sanitize_title', { username: detail.username })}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <p className="serif" style={{ margin: 0 }}>
+          {t('admin_modal_sanitize_blurb', { username: detail.username })}
+        </p>
+        <p className="serif" style={{ margin: 0, color: 'var(--ink-mute)', fontStyle: 'italic', fontSize: '0.88rem' }}>
+          {t('admin_modal_sanitize_followup')}
+        </p>
+        {err && <p style={{ color: 'var(--rouge)', fontSize: '0.85rem', margin: 0 }}>{String(err)}</p>}
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button type="button" className="btn-ghost" onClick={onClose}>{t('cancel')}</button>
+          <button type="button" className="btn-primary" style={{ background: 'var(--rouge)', color: 'var(--paper)' }}
+            onClick={submit} disabled={submitting}>
+            {submitting ? '…' : t('admin_modal_confirm_sanitize')}
           </button>
         </div>
       </div>

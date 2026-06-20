@@ -91,7 +91,7 @@ async def test_moderator_sees_dashboard_summary(client, make_user):
 
 async def test_admin_can_promote_another_user(client, make_user):
     """Admin promotes a regular player to moderator via PATCH endpoint."""
-    admin_data = make_user("admin")
+    admin_data = make_user("promoter")
     admin_reg = await client.post("/auth/register", json=admin_data)
     admin_token = admin_reg.json()["access_token"]
     admin_me = await client.get("/auth/me", headers={"Authorization": f"Bearer {admin_token}"})

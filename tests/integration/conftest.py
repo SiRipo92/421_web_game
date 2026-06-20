@@ -71,10 +71,16 @@ def make_user():
     """Factory for unique user payloads — prevents cross-test collisions."""
 
     def _make(prefix: str = "test") -> dict:
-        uid = uuid.uuid4().hex[:8]
+        # G96 username constraint: 3-20 chars, [A-Za-z0-9_.-], no consecutive
+        # special chars. Generated usernames must fit; cap prefix to 11 chars
+        # and use a 6-char UID suffix to land at <= 18 chars total. Email
+        # field is unconstrained so we keep the full prefix there for
+        # easier test debugging.
+        uid_full = uuid.uuid4().hex[:8]
+        prefix_clean = prefix[:11].replace("__", "_").rstrip("_.-")
         return {
-            "username": f"{prefix}_{uid}",
-            "email": f"{prefix}_{uid}@example.com",
+            "username": f"{prefix_clean}_{uid_full[:6]}",
+            "email": f"{prefix}_{uid_full}@example.com",
             "password": "Testpassword1",
             "birthdate": "1990-01-01",
         }
