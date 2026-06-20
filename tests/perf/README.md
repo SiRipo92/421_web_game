@@ -1,27 +1,27 @@
 # Performance baseline — 421 Bistro
 
 G99 backend perf scripts. Three k6 scenarios that exercise the load
-profile we expect at launch. Run locally with:
+profile we expect at launch. Run locally from the repo root:
 
 ```bash
 brew install k6
 # REST scenarios:
-k6 run perf/auth_login.js
-k6 run perf/room_lifecycle.js
+k6 run tests/perf/auth_login.js
+k6 run tests/perf/room_lifecycle.js
 # WS soak:
-k6 run perf/ws_broadcast.js
+k6 run tests/perf/ws_broadcast.js
 ```
 
 All scenarios target `http://localhost:8421` by default. Override with
 `BASE_URL` env var to point at a staging environment:
 
 ```bash
-BASE_URL=https://staging.421bistro.com k6 run perf/auth_login.js
+BASE_URL=https://staging.421bistro.com k6 run tests/perf/auth_login.js
 ```
 
 ## Baseline numbers
 
-See [docs/PERFORMANCE_BASELINE.md](../docs/PERFORMANCE_BASELINE.md) for
+See [docs/PERFORMANCE_BASELINE.md](../../docs/PERFORMANCE_BASELINE.md) for
 the captured numbers and what the SLOs are.
 
 ## CI integration

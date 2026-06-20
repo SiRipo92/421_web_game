@@ -1365,7 +1365,7 @@ Promote tickets from "random slugs in email" to a real `ContactTicket(id, ref, f
 **Shipped (2026-06-20):**
 - Coverage: 82.31% → 85.30%. `afk_eviction.py` 43% → 94%; `game_persistence.py` 82% → 89%; `schemas/auth.py` 87% → 99%. Coverage gate raised 80 → 85 in CI. Fixed 2 real bugs in `game_persistence._write` (unguarded `uuid.UUID()` calls that crashed on malformed user_ids entries).
 - Playwright scaffold: `frontend/playwright.config.ts` boots both backend + frontend webServers, `frontend/tests/e2e/auth.spec.ts` covers register + login + reset + wrong-password flows. Added `data-testid` attrs to login form buttons to avoid i18n collisions. Workflow at `.github/workflows/e2e.yml` runs the suite on every PR.
-- k6 perf scenarios: `perf/auth_login.js` (100 VUs, p95 < 500ms), `perf/room_lifecycle.js` (50 VUs register + create + list), `perf/ws_broadcast.js` (5-min WS soak with 10 connected players). Workflow at `.github/workflows/perf.yml` runs on `workflow_dispatch` or `perf`-labelled PRs.
+- k6 perf scenarios: `tests/perf/auth_login.js` (100 VUs, p95 < 500ms), `tests/perf/room_lifecycle.js` (50 VUs register + create + list), `tests/perf/ws_broadcast.js` (5-min WS soak with 10 connected players). Workflow at `.github/workflows/perf.yml` runs on `workflow_dispatch` or `perf`-labelled PRs.
 - Baselines doc at `docs/PERFORMANCE_BASELINE.md`; numbers are TBD until first dispatch run captures them.
 - **Deferred (G99 follow-ups):** the remaining Playwright journeys — multi-player two-browsers, single-player vs bots, AFK eviction overlay, admin moderation, RGPD export/delete. Scaffolding is in place; each needs ~30 min to write once the user identifies the priority flows.
 
@@ -1402,12 +1402,12 @@ Promote tickets from "random slugs in email" to a real `ContactTicket(id, ref, f
 - Tests run against a dedicated test DB (`fourtwentyone_e2e`) and start from a clean snapshot per spec.
 - CI integration: add a `playwright` job to GHA that runs after `pytest` passes.
 
-#### Backend performance baseline (`perf/`)
+#### Backend performance baseline (`tests/perf/`)
 - Tool: **k6** (Go-based, modern, native WebSocket support — better than locust for our WS-heavy app).
 - **Scenarios:**
-  - `perf/auth_login.js` — 100 concurrent users hitting `/auth/login` for 60s. Pass: p95 < 500ms, p99 < 1s, 0 errors.
-  - `perf/room_lifecycle.js` — 50 concurrent users registering → creating a room → playing 3 manches → leaving. Pass: p95 round-trip < 800ms, no WS disconnects.
-  - `perf/ws_broadcast.js` — 1 room with 10 connected players, 5-minute soak. Pass: every player receives every state broadcast within 100ms, no message loss.
+  - `tests/perf/auth_login.js` — 100 concurrent users hitting `/auth/login` for 60s. Pass: p95 < 500ms, p99 < 1s, 0 errors.
+  - `tests/perf/room_lifecycle.js` — 50 concurrent users registering → creating a room → playing 3 manches → leaving. Pass: p95 round-trip < 800ms, no WS disconnects.
+  - `tests/perf/ws_broadcast.js` — 1 room with 10 connected players, 5-minute soak. Pass: every player receives every state broadcast within 100ms, no message loss.
 - Document baseline numbers in `docs/PERFORMANCE_BASELINE.md` so we can detect regressions on future PRs.
 - Doesn't run in CI by default (too slow + too much resource); has a `make perf` target + an optional GHA workflow trigger.
 

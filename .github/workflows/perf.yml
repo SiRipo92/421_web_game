@@ -64,19 +64,19 @@ jobs:
           sudo apt-get update && sudo apt-get install -y k6
 
       - name: Run auth_login scenario
-        run: k6 run perf/auth_login.js --summary-export=auth_login.json
+        run: k6 run tests/perf/auth_login.js --summary-export=auth_login.json
         env:
           BASE_URL: "http://localhost:8421"
 
       - name: Run room_lifecycle scenario
-        run: k6 run perf/room_lifecycle.js --summary-export=room_lifecycle.json
+        run: k6 run tests/perf/room_lifecycle.js --summary-export=room_lifecycle.json
         env:
           BASE_URL: "http://localhost:8421"
 
       # WS soak is long (5min) and only useful on dispatch — skip on PR-label runs.
       - name: Run ws_broadcast scenario
         if: github.event_name == 'workflow_dispatch'
-        run: k6 run perf/ws_broadcast.js --summary-export=ws_broadcast.json
+        run: k6 run tests/perf/ws_broadcast.js --summary-export=ws_broadcast.json
         env:
           BASE_URL: "http://localhost:8421"
 

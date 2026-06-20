@@ -5,11 +5,11 @@ G99 backend performance scenarios + their SLOs. This document is the
 these thresholds are caught either by:
 1. The `perf.yml` GitHub Action enforcing the thresholds (it exits
    non-zero if k6's threshold checks fail).
-2. A reviewer running `k6 run perf/<scenario>.js` against a staging
+2. A reviewer running `k6 run tests/perf/<scenario>.js` against a staging
    environment + comparing summary JSON against the baseline below.
 
-Scripts live in [`perf/`](../perf/). See [`perf/README.md`](../perf/README.md)
-for how to run them.
+Scripts live in [`tests/perf/`](../tests/perf/). See
+[`tests/perf/README.md`](../tests/perf/README.md) for how to run them.
 
 ## Hardware caveat
 
@@ -99,8 +99,8 @@ Capture it by:
 
 ```bash
 # Locally (laptop hardware will differ — note that):
-k6 run perf/auth_login.js --summary-export=baseline_auth.json
-k6 run perf/room_lifecycle.js --summary-export=baseline_room.json
+k6 run tests/perf/auth_login.js --summary-export=baseline_auth.json
+k6 run tests/perf/room_lifecycle.js --summary-export=baseline_room.json
 
 # Or via GHA: Actions tab → "Perf (k6)" → Run workflow → main branch.
 # Download the k6-summaries artifact, copy p95/p99 + failure rate into
