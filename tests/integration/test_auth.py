@@ -53,6 +53,22 @@ async def test_register_username_collision_blames_username(client, make_user):
     assert "email" not in r.json()["detail"].lower()
 
 
+async def test_register_can_reuse_handle_after_self_delete(client, make_user):
+    """G97: deleting your account anonymizes username + email so the
+    handle is immediately reusable by a new registration."""
+    data = make_user("recyc")
+    reg = await client.post("/auth/register", json=data)
+    token = reg.json()["access_token"]
+    # Self-delete
+    r = await client.request(
+        "DELETE", "/auth/me", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert r.status_code == 204
+    # Re-register with same username + email — should succeed
+    r2 = await client.post("/auth/register", json=data)
+    assert r2.status_code == 201
+
+
 async def test_register_email_collision_blames_email(client, make_user):
     """G97: when only the email collides, error says 'Email already taken'."""
     first = make_user("dup_e")
