@@ -1467,7 +1467,35 @@ With these helpers in place, each new test becomes 20-40 lines, not 80-100.
 
 **Not a launch-blocker** by itself — the gate at 80 is fine for launch. But it's the natural next move after G99 + before any major game-logic changes ship.
 
-### G100. Pre-launch infra bundle — CI/CD redeploy, code quality sweep, Sphinx + ReadTheDocs, README
+### G100a. (DONE — pending PR merge) Pre-launch infra — CI/CD auto-deploy + dep audits + README
+**Why:** Launch-blocker subset of G100. Gets the repo to "push to main → auto-deploys" + a portfolio-ready README before the public flip.
+
+**Shipped (2026-06-20):**
+- `docs/DEPLOY_SETUP.md` — step-by-step Fly.io runbook covering `fly launch`, `fly secrets`, `FLY_API_TOKEN` generation, GHA secret wiring, custom domain, rollback, troubleshooting, free-tier cost math.
+- `.github/workflows/deploy.yml` — `workflow_run` triggered after CI passes on main → `flyctl deploy --remote-only`. Manual `workflow_dispatch` for hotfixes. Gracefully no-ops with a clear notice when `FLY_API_TOKEN` is not yet configured.
+- `fly.toml` — committed stub with health check + auto-stop machines. `fly launch` overwrites with real values when run locally.
+- `audit` job in `ci.yml` (G92c follow-up) — runs `pip-audit` + `npm audit --audit-level=high` on every PR. `continue-on-error: true` so it surfaces advisories without blocking urgent work; flip to false once the baseline is clean.
+- README rewrite — engineering-highlights pitch, badges, tech stack table, ASCII architecture diagram, quickstart, three-suite testing summary, deploy/security pointers, project structure tree, 421 rules.
+
+**Deferred to G100b:** code quality sweep + Sphinx/ReadTheDocs.
+
+### G100b. Pre-launch polish — code quality sweep + Sphinx/ReadTheDocs
+**Why:** Originally bundled with G100a; split out to keep the launch-blocker PR small. These are polish items that don't block launch but improve the portfolio readability of the repo.
+
+**Scope (single bundled PR):**
+
+- Run `vulture app/ --min-confidence 80` → identify unused functions / classes / variables. Triage each (some are intentionally unused).
+- Run `knip` (or `ts-prune`) on `frontend/` → identify unused exports / files. Remove unambiguous dead code.
+- Run `radon cc app/ -s` → flag any function with cyclomatic complexity > 10. Refactor the worst offenders.
+- Output: `docs/CODE_QUALITY_2026-06.md` summarising what was removed + what was refactored + what was deliberately kept.
+- Add `sphinx`, `sphinx-rtd-theme`, `sphinx-autodoc-typehints` to `requirements-dev.txt`.
+- `docs/source/conf.py` — autodoc the `app/` package, point at the GitHub repo, set the theme.
+- ReadTheDocs setup: create a project at readthedocs.io pointed at this repo, branch `main`. Lives at `421bistro.readthedocs.io`.
+- Add a build badge + "Documentation" section to README.
+
+**Effort:** ~2-3 days. Not a launch-blocker.
+
+### G100. (legacy — superseded by G100a + G100b) Pre-launch infra bundle — CI/CD redeploy, code quality sweep, Sphinx + ReadTheDocs, README
 **Why:** Three things that are loosely-coupled but all touch "the project's exterior surface" — what someone sees in the README, what the docs site looks like, and what happens when you push to main. Bundling them keeps the review focused on infrastructure / DX rather than product behaviour.
 
 **Already landed (folded into the G99 PR as a security follow-up to a committed-secret incident):**
