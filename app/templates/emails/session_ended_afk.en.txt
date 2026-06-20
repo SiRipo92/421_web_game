@@ -1,0 +1,18 @@
+{% extends "_base.txt" %}
+{% block body %}
+Hi {{ username }},
+
+Your session was ended for inactivity in room {{ game_code }}.
+The bot played for you for {{ timeout_minutes }} minute(s) before your
+seat was freed up for other players.
+
+Why: when a player goes inactive too long, the bot keeps playing for
+them, which blocks everyone else. Past a reasonable threshold, your
+seat is freed up.
+
+Your stats were recorded: partie lost, modest Elo loss.
+
+Find another game: {{ app_url }}/lobby
+
+This is a transactional email.
+{% endblock %}

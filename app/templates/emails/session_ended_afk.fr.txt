@@ -1,0 +1,18 @@
+{% extends "_base.txt" %}
+{% block body %}
+Bonjour {{ username }},
+
+Votre session a été terminée pour inactivité dans le salon {{ game_code }}.
+Le bot a joué pour vous pendant {{ timeout_minutes }} minute(s) avant que
+votre place ne soit libérée pour d'autres joueurs.
+
+Pourquoi : quand un joueur reste inactif trop longtemps, le bot continue
+de jouer à sa place, ce qui bloque les autres. Au-delà d'un seuil
+raisonnable, votre place est libérée.
+
+Vos statistiques ont été enregistrées : partie perdue, perte d'Elo limitée.
+
+Reprendre une partie : {{ app_url }}/lobby
+
+Cet e-mail est transactionnel.
+{% endblock %}

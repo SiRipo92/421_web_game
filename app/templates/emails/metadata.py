@@ -106,4 +106,16 @@ EMAIL_METADATA: dict[str, dict[str, dict[str, str]]] = {
             "eyebrow": "GDPR — Art. 34",
         },
     },
+    "session_ended_afk": {
+        "fr": {
+            "subject": "Votre partie 421 Bistro s'est terminée pour inactivité",
+            "title": "Session terminée — inactivité",
+            "eyebrow": "Partie · AFK",
+        },
+        "en": {
+            "subject": "Your 421 Bistro session ended for inactivity",
+            "title": "Session ended — inactivity",
+            "eyebrow": "Game · AFK",
+        },
+    },
 }

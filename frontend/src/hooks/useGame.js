@@ -23,6 +23,27 @@ function reducer(state, action) {
     // G95: admin dissolved the room entirely.
     case 'ROOM_DISSOLVED':
       return { ...state, roomDissolved: { reason: action.reason, by: action.by } }
+    // G93: AFK timeout heads-up — the bot is about to evict this player.
+    case 'EVICTION_WARNING':
+      return {
+        ...state,
+        evictionWarning: {
+          secondsRemaining: action.seconds_remaining || 0,
+        },
+      }
+    case 'EVICTION_WARNING_DISMISS':
+      return { ...state, evictionWarning: null }
+    // G93: a player was evicted. If it's us, render the overlay; if it's
+    // someone else, the regular state broadcast will refresh the roster.
+    case 'PLAYER_EVICTED_AFK':
+      return {
+        ...state,
+        playerEvicted: {
+          playerId: action.player_id,
+          playerName: action.player_name,
+          elapsedMinutes: action.elapsed_minutes,
+        },
+      }
     default:
       return state
   }
@@ -45,6 +66,8 @@ const INITIAL = {
   kickedReason: null,
   adminBroadcast: null,
   roomDissolved: null,
+  evictionWarning: null,
+  playerEvicted: null,
   afk_started_at: null,
 }
 
@@ -73,6 +96,15 @@ export function useGame(gameId, playerId, token) {
         })
       else if (msg.type === 'room_dissolved')
         dispatch({ type: 'ROOM_DISSOLVED', reason: msg.reason, by: msg.by })
+      else if (msg.type === 'eviction_warning')
+        dispatch({ type: 'EVICTION_WARNING', seconds_remaining: msg.seconds_remaining })
+      else if (msg.type === 'player_evicted_afk')
+        dispatch({
+          type: 'PLAYER_EVICTED_AFK',
+          player_id: msg.player_id,
+          player_name: msg.player_name,
+          elapsed_minutes: msg.elapsed_minutes,
+        })
     }
     ws.onclose = () => dispatch({ type: 'DISCONNECTED' })
 
@@ -104,6 +136,7 @@ export function useGame(gameId, playerId, token) {
   )
 
   const dismissAdminBroadcast = useCallback(() => dispatch({ type: 'ADMIN_BROADCAST_DISMISS' }), [])
+  const dismissEvictionWarning = useCallback(() => dispatch({ type: 'EVICTION_WARNING_DISMISS' }), [])
 
-  return { state, roll, keep, done, initialRoll, tiebreakRoll, start, leave, kick, updateRoomRules, dismissAdminBroadcast }
+  return { state, roll, keep, done, initialRoll, tiebreakRoll, start, leave, kick, updateRoomRules, dismissAdminBroadcast, dismissEvictionWarning }
 }

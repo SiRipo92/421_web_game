@@ -84,6 +84,15 @@ class Player:
     # host leaves mid-game; `game.players` may have been reordered by the
     # initial-roll sort, so list position is unreliable for tenure.
     joined_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    # G93: stamped when the AFK bot first takes over this player's turn.
+    # Cleared on bot-handback (player resumes interacting). Powers the
+    # eviction check (now - afk_started_at > bot_takeover_max_minutes) and
+    # the T-2min warning toast.
+    afk_started_at: Optional[datetime] = None
+    # G93: per-player count of warning toasts already sent for this AFK
+    # episode. Bumped by `_check_eviction_for` so the warning fires once
+    # per minute instead of on every bot turn (which can be sub-second).
+    afk_warnings_sent: int = field(default=0, compare=False)
 
 
 @dataclass

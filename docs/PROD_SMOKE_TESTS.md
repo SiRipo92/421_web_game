@@ -107,11 +107,63 @@ what player B sees when admin acts on player A.
 
 ## G93 — Bot-takeover hard timeout
 
-*Captured pre-emptively for when G93 ships. Production-only because the
-real test requires a 10-minute AFK window where the bot keeps playing
-and the eviction email needs to deliver via Brevo.*
+**Why this needs prod:** the eviction flow requires a 10-minute AFK
+window where the bot keeps playing. Brevo email delivery needs to hit
+real mailboxes, not the dev mock. Anti-grief chat-ban semantics need a
+real DB session, not the in-memory test setup.
 
-(To be filled in when G93 work begins.)
+**Prerequisites:**
+- App deployed and reachable over `https://421bistro.com`
+- Brevo domain verified + DKIM/SPF/DMARC live
+- A test account with `email_opt_in=True` so the eviction email actually delivers
+- For the speed run: set `BOT_TAKEOVER_MAX_MINUTES=5` in Fly.io secrets to halve the wait
+  (you can revert it after, or leave it at 5 if 10 feels too long in real play)
+
+### Test 1 — Bot eviction triggers after the timeout
+- [ ] Sign in as your test account from Device A
+- [ ] Create a public room, invite a second tab/account so the game can start
+- [ ] On Device A, when it's your turn, walk away (don't act). Bot takes over after `afk_seconds` (45s default)
+- [ ] Wait for the full `BOT_TAKEOVER_MAX_MINUTES` window. Bot should play your turns up to that point
+- [ ] At T-`BOT_TAKEOVER_WARNING_SECONDS` (default 2 min before eviction), Device A receives the orange-bordered toast: « Vous serez retiré(e) de la partie dans X minute(s) si vous restez inactif(ve) »
+- [ ] At T+0, Device A shows the full-screen eviction overlay with the elapsed minutes count
+- [ ] Other players see the roster shrink — Device A's slot is gone
+- [ ] Click « Retour à l'accueil » on Device A → lands home
+
+### Test 2 — Eviction email lands
+- [ ] After Test 1, check the test account's gmail inbox (or `421bistro.contact@gmail.com` if you used a `+suffix` alias)
+- [ ] Confirm an email arrived from `421 Bistro <noreply@421bistro.com>` with subject « Votre partie 421 Bistro s'est terminée pour inactivité »
+- [ ] Body shows the elapsed minutes + the room code + the « Reprendre une partie » CTA pointing at `/lobby`
+
+### Test 3 — Stats persisted on eviction
+- [ ] After Test 1, open Device A's `/profile`
+- [ ] Confirm `parties_played` went up by 1 and `parties_lost` went up by 1
+- [ ] Confirm ELO dropped slightly (-15 to -25 range; same as voluntary leave penalty)
+- [ ] Open `/admin/audit?event_type=afk_eviction` (as admin) → confirm the row exists with `elapsed_minutes` in metadata + the game_id
+
+### Test 4 — Bot-handback clears the eviction clock
+- [ ] Re-enter a game with the same test account
+- [ ] Go AFK for ~3 minutes → bot takes over → at some point COME BACK and act (any play action)
+- [ ] Confirm in the journal: `log_bot_handback` / `log_afk_return` event fired
+- [ ] Confirm Device A's `state.evictionWarning` is cleared (no toast lingering)
+- [ ] Go AFK AGAIN — the timeout should re-start from zero, not pick up where the previous episode left off
+
+### Test 5 — Anti-grief: 3rd eviction in 24h triggers chat-ban
+- [ ] As your test account, get evicted twice in a row (rapid: leave a game, get into another, repeat)
+- [ ] On the 3rd eviction, confirm:
+    * The eviction proceeds normally
+    * In `/admin/users/<test-account-id>`, `chat_banned_until` is now set ~24h in the future with reason `repeated_afk`
+    * The eviction email body warns about chat-blocking risk for repeated AFK
+    * Trying to chat in any room → blocked client-side (chat ban gate from existing G38 surfaces)
+
+### Test 6 — Timeout clamping (sanity check, no production traffic needed)
+- [ ] Set `BOT_TAKEOVER_MAX_MINUTES=1` in fly secrets, redeploy
+- [ ] The clamp at runtime should treat this as 5 (the MIN floor) — confirm by observing that eviction happens after 5 min, not 1 min
+- [ ] Set `BOT_TAKEOVER_MAX_MINUTES=99` → runtime should cap at 30 (MAX ceiling) — but this takes 30 min to verify; skip unless you specifically want to verify the upper bound
+
+### Test 7 — Eviction during partie-end edge cases
+- [ ] AFK eviction during TIEBREAK phase (rare): confirm the bot doesn't get stuck waiting for the evicted player's tiebreak throw
+- [ ] AFK eviction of the LAST registered player in a room: the room dissolves cleanly (lone-survivor path)
+- [ ] AFK eviction of the host: host migrates to the longest-tenured remaining player (same rule as admin-kick of the host)
 
 ---
 

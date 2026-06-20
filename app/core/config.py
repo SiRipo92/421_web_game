@@ -41,6 +41,15 @@ class Settings(BaseSettings):
     breach_notification_hours: int = 72
     # Moderation audit log retention (referenced in Privacy s7 + Terms s6).
     moderation_log_retention_days: int = 365
+    # G93: maximum minutes the AFK bot will continue playing for a human
+    # before the human is evicted from the room. Bot stays in-seat until
+    # this elapses; then the seat frees up so new joiners can take it.
+    # Clamped 5-30 at the eviction-check call site to prevent
+    # misconfiguration locking out legitimate slow players.
+    bot_takeover_max_minutes: int = 10
+    # G93: T-N seconds before eviction, send a warning toast to the AFK
+    # player. Default 120s = 2-minute heads-up.
+    bot_takeover_warning_seconds: int = 120
 
 
 settings = Settings()
