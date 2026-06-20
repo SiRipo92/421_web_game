@@ -415,6 +415,15 @@ const I18N = {
     room_dissolved_title: "Salon dissous",
     room_dissolved_intro: "Un administrateur a dissous ce salon. Voici le motif :",
     room_dissolved_back_home: "Retour à l'accueil",
+    // G93 AFK eviction
+    eviction_warning_eyebrow: "INACTIVITÉ",
+    eviction_warning_body: "Vous serez retiré(e) de la partie dans {mins} minute(s) si vous restez inactif(ve). Reprenez la main pour annuler.",
+    eviction_warning_dismiss: "Fermer l'avertissement",
+    evicted_eyebrow: "PARTIE INTERROMPUE",
+    evicted_title: "Vous avez été retiré(e)",
+    evicted_intro: "Vous êtes resté(e) inactif(ve) pendant {mins} minute(s). Le bot a joué pour vous, puis votre place a été libérée pour permettre à d'autres joueurs de continuer.",
+    evicted_stats_note: "Cette partie a été comptabilisée comme perdue. Une perte d'Elo limitée a été appliquée.",
+    evicted_back_home: "Retour à l'accueil",
     // G90 admin dashboard rebuild
     admin_summary_online: "Joueurs en ligne",
     admin_panel_users_body_g90: "Recherche, filtres, sanctions, suppressions — tout ce qu'il faut pour gérer la communauté.",
@@ -1249,6 +1258,15 @@ const I18N = {
     room_dissolved_title: "Room dissolved",
     room_dissolved_intro: "An administrator dissolved this room. Reason:",
     room_dissolved_back_home: "Back to home",
+    // G93 AFK eviction
+    eviction_warning_eyebrow: "INACTIVITY",
+    eviction_warning_body: "You will be removed from the game in {mins} minute(s) if you stay inactive. Take a turn to cancel.",
+    eviction_warning_dismiss: "Dismiss warning",
+    evicted_eyebrow: "GAME INTERRUPTED",
+    evicted_title: "You were removed",
+    evicted_intro: "You were inactive for {mins} minute(s). The bot played for you, then your seat was freed up for other players.",
+    evicted_stats_note: "This partie was counted as lost. A modest Elo loss was applied.",
+    evicted_back_home: "Back to home",
     // G90 admin dashboard rebuild
     admin_summary_online: "Players online",
     admin_panel_users_body_g90: "Search, filter, sanction, delete — everything needed to manage the community.",

@@ -1,0 +1,15 @@
+{% extends "_base.html" %}
+{% block body %}
+<p style="margin:0 0 16px 0;">Bonjour <strong>{{ username }}</strong>,</p>
+<p style="margin:0 0 16px 0;">Votre session a été <strong>terminée pour inactivité</strong> dans le salon <span class="mono" style="font-family:monospace;background:#F4ECD8;padding:2px 6px;border-radius:3px;">{{ game_code }}</span>.</p>
+<p style="margin:0 0 16px 0;">Le bot a joué pour vous pendant <strong>{{ timeout_minutes }} minute(s)</strong> avant que votre place ne soit libérée pour d'autres joueurs.</p>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;background:#F4ECD8;border-left:3px solid #A8302A;padding:16px 20px;margin:20px 0;font-size:14px;">
+  <tr><td style="padding:4px 0;color:#3A2F26;">Pourquoi cette mesure ?</td></tr>
+  <tr><td style="padding:4px 0;color:#6B5A4A;font-size:13px;">Quand un joueur reste inactif trop longtemps, le bot continue de jouer à sa place — ce qui bloque les autres et fausse le rythme du jeu. Au-delà d'un seuil raisonnable, votre place est libérée pour qu'un autre joueur puisse rejoindre.</td></tr>
+</table>
+<p style="margin:0 0 16px 0;">Vos statistiques de la partie en cours ont été enregistrées : <strong>partie perdue</strong>, perte d'Elo limitée.</p>
+<p style="margin:24px 0;text-align:center;">
+  <a href="{{ app_url }}/lobby" style="display:inline-block;background:#A8302A;color:#F4ECD8;padding:14px 28px;text-decoration:none;border-radius:4px;font-family:Georgia,serif;font-size:15px;letter-spacing:0.5px;">Reprendre une partie</a>
+</p>
+<p style="margin:24px 0 0 0;font-size:13px;color:#6B5A4A;border-top:1px solid #ECE0C2;padding-top:16px;">Cet e-mail est transactionnel — vous le recevez parce qu'il concerne directement votre activité de jeu. Si vous quittez fréquemment des parties, sachez que cela peut entraîner un blocage temporaire du chat pour protéger les autres joueurs.</p>
+{% endblock %}
