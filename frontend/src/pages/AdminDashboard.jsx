@@ -51,8 +51,8 @@ export function AdminDashboard({ user, token }) {
 
       {/* G90: real navigation panels replacing PanelStub placeholders */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.2rem', marginTop: '2rem' }} className="admin-panels">
-        <Link to="/admin/users" style={{ textDecoration: 'none', color: 'inherit' }}>
-          <div className="card" style={{ padding: '1.4rem', cursor: 'pointer', transition: 'background 0.15s' }}>
+        <Link to="/admin/users" className="admin-nav-card" style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}>
+          <div className="card" style={{ padding: '1.4rem', cursor: 'pointer', transition: 'background 0.15s, transform 0.1s', height: '100%' }}>
             <div className="eyebrow">{t('admin_panel_users_eyebrow')}</div>
             <h3 className="display" style={{ fontSize: '1.3rem', margin: '0.3rem 0 0.6rem' }}>
               {t('admin_panel_users_title')}
@@ -65,8 +65,8 @@ export function AdminDashboard({ user, token }) {
             </div>
           </div>
         </Link>
-        <Link to="/admin/audit" style={{ textDecoration: 'none', color: 'inherit' }}>
-          <div className="card" style={{ padding: '1.4rem', cursor: 'pointer', transition: 'background 0.15s' }}>
+        <Link to="/admin/audit" className="admin-nav-card" style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}>
+          <div className="card" style={{ padding: '1.4rem', cursor: 'pointer', transition: 'background 0.15s, transform 0.1s', height: '100%' }}>
             <div className="eyebrow">{t('admin_panel_audit_eyebrow')}</div>
             <h3 className="display" style={{ fontSize: '1.3rem', margin: '0.3rem 0 0.6rem' }}>
               {t('admin_panel_audit_title')}
@@ -109,6 +109,10 @@ export function AdminDashboard({ user, token }) {
       <style>{`
         @media (max-width: 900px) {
           .admin-panels { grid-template-columns: 1fr !important; }
+        }
+        .admin-nav-card:hover .card {
+          background: var(--paper-deep);
+          transform: translateY(-1px);
         }
       `}</style>
     </div>

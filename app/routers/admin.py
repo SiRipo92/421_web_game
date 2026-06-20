@@ -193,9 +193,18 @@ async def dashboard_summary(
     )
     online_count = online_row.scalar() or 0
 
+    # G90 follow-up: only include the last 7 days of admin actions, and
+    # exclude `role_changed` — those usually represent infrastructure
+    # setup (you promoting yourself once) rather than actionable
+    # moderation. Surface only the high-signal events on the dashboard.
+    recent_cutoff = now - timedelta(days=7)
+    interesting_events = _MOD_AUDIT_EVENTS - {"role_changed"}
     recent_row = await db.execute(
         select(GdprAuditLog)
-        .where(GdprAuditLog.event_type.in_(_MOD_AUDIT_EVENTS))
+        .where(
+            GdprAuditLog.event_type.in_(interesting_events),
+            GdprAuditLog.occurred_at >= recent_cutoff,
+        )
         .order_by(desc(GdprAuditLog.occurred_at))
         .limit(5)
     )
@@ -688,10 +697,20 @@ async def audit_feed(
     _: User = Depends(require_moderator),
     db: AsyncSession = Depends(get_db),
 ):
-    """Reverse-chronological moderation + GDPR audit feed."""
+    """Reverse-chronological moderation + GDPR audit feed.
+
+    By default we exclude the chatty `account_created` and
+    `account_created_google` events — they dominate the feed and aren't
+    actionable. Admin can opt in by filtering `event_type=account_created`
+    explicitly.
+    """
     filters = []
     if event_type:
         filters.append(GdprAuditLog.event_type == event_type)
+    else:
+        filters.append(
+            GdprAuditLog.event_type.notin_(("account_created", "account_created_google"))
+        )
     if target_user_id:
         filters.append(GdprAuditLog.user_id == _parse_uuid(target_user_id))
     if actor_id:

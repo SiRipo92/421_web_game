@@ -151,7 +151,7 @@ export function AdminUsers({ user, token }) {
           <div className="card" style={{ overflow: 'hidden' }}>
             <div style={{
               display: 'grid',
-              gridTemplateColumns: '1.4fr 2fr auto auto auto auto',
+              gridTemplateColumns: '1.6fr 2.2fr 100px 130px 70px 110px',
               gap: 14,
               padding: '0.8rem 1.4rem',
               background: 'var(--paper-deep)',
@@ -172,7 +172,7 @@ export function AdminUsers({ user, token }) {
                 to={`/admin/users/${u.id}`}
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: '1.4fr 2fr auto auto auto auto',
+                  gridTemplateColumns: '1.6fr 2.2fr 100px 130px 70px 110px',
                   gap: 14,
                   padding: '0.85rem 1.4rem',
                   alignItems: 'center',

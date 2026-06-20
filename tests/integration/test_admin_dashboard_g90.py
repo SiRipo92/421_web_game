@@ -454,6 +454,35 @@ async def test_delete_user_cannot_self_delete(client, make_user):
 # ---------------- audit feed ----------------
 
 
+async def test_audit_feed_excludes_account_created_by_default(client, make_user):
+    """Default audit feed hides account_created noise. Filter unlocks it.
+
+    Registering a user always writes an account_created event. Default
+    /api/admin/audit (no filter) should NOT surface those — they dominate
+    the feed without being actionable. Explicit ?event_type=account_created
+    should still return them.
+    """
+    _, admin_token, _ = await _make_admin(client, make_user, "audhide_adm")
+    # Register a regular user → writes an account_created event
+    await client.post("/auth/register", json=make_user("audhide_target"))
+
+    r_default = await client.get(
+        "/api/admin/audit",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert r_default.status_code == 200
+    types = {e["event_type"] for e in r_default.json()["entries"]}
+    assert "account_created" not in types
+    assert "account_created_google" not in types
+
+    r_explicit = await client.get(
+        "/api/admin/audit?event_type=account_created",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert r_explicit.status_code == 200
+    assert r_explicit.json()["total"] >= 1
+
+
 async def test_audit_feed_returns_recent_actions(client, make_user):
     _, admin_token, _ = await _make_admin(client, make_user, "audit_adm")
     target_data = make_user("audit_target")
