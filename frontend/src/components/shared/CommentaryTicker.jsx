@@ -272,7 +272,10 @@ export function ScoreToBeatBanner({ plays, t }) {
         className="eyebrow"
         style={{
           fontSize: 'clamp(0.5rem, 1.8vw, 0.58rem)',
-          color: 'var(--brass-soft)',
+          // G64 follow-up (2026-06-21): brass-soft is theme-flipped
+          // (#D4AB67 light → #E0BA78 dark) and both contrast with the
+          // hardcoded dark banner background. Keep theme-aware here.
+          color: '#E0BA78',
           letterSpacing: '0.16em',
         }}
       >
@@ -282,11 +285,17 @@ export function ScoreToBeatBanner({ plays, t }) {
         className="display"
         style={{
           fontSize: 'clamp(0.8rem, 3vw, 1.05rem)',
-          color: best.combo === '421' ? 'var(--brass-soft)' : 'var(--paper)',
+          // G64 follow-up (2026-06-21): the banner has a hardcoded dark
+          // rgba(15,11,8,0.72) overlay that does NOT theme-flip. Using
+          // var(--paper) for the text DOES theme-flip, so on dark mode
+          // the cream-on-dark text inverted to near-black-on-dark and
+          // became unreadable. Hard-pin a cream value that contrasts
+          // with the fixed dark overlay on either theme.
+          color: best.combo === '421' ? '#E0BA78' : '#F4ECD8',
           letterSpacing: '0.02em',
         }}
       >
-        <em style={{ fontStyle: 'italic', color: 'var(--brass-soft)' }}>{best.name}</em>
+        <em style={{ fontStyle: 'italic', color: '#E0BA78' }}>{best.name}</em>
         {' · '}
         {best.combo}{' '}
         <span className="mono" style={{ fontSize: '0.85em' }}>({best.fiches}f)</span>
