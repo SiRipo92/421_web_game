@@ -13,14 +13,32 @@ export function Profile({ user, token, onRefreshUser, onLogout }) {
   const [stats, setStats] = useState(null)
   const [loading, setLoading] = useState(true)
 
+  // G98 follow-up: the URL was /api/profile (no username) which 404s
+  // silently. The backend route is /api/profile/{username}. Stats have
+  // never shown for anyone since this page shipped — the catch swallowed
+  // the 404 and stats stayed null, falling back to defaults (1200 ELO).
+  // Also refetch when the tab regains focus so finishing a game and
+  // navigating back to /profile shows the updated counters.
   useEffect(() => {
-    if (!token) return
-    fetch(`/api/profile`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.json())
-      .then(d => setStats(d))
-      .catch(() => {})
-      .finally(() => setLoading(false))
-  }, [token])
+    if (!token || !user?.username) return
+    let cancelled = false
+    const load = () => {
+      fetch(`/api/profile/${encodeURIComponent(user.username)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then(r => (r.ok ? r.json() : null))
+        .then(d => { if (!cancelled && d) setStats(d) })
+        .catch(() => {})
+        .finally(() => { if (!cancelled) setLoading(false) })
+    }
+    load()
+    const onFocus = () => load()
+    window.addEventListener('focus', onFocus)
+    return () => {
+      cancelled = true
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [token, user?.username])
 
   if (!user) {
     return (

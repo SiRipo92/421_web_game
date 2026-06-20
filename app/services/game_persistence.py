@@ -69,7 +69,13 @@ async def dissolve_room_without_stats(game: Game) -> None:
     games.pop(game.id, None)
 
 
-async def persist_player_session(user_id_str: str, game_code: str, round_points: int) -> None:
+async def persist_player_session(
+    user_id_str: str,
+    game_code: str,
+    round_points: int,
+    manches_played: int = 0,
+    manches_lost: int = 0,
+) -> None:
     """Account for a registered player who left mid-partie.
 
     G91 semantics: a mid-partie leave counts as a parties_lost (you conceded).
@@ -77,10 +83,11 @@ async def persist_player_session(user_id_str: str, game_code: str, round_points:
     partie hadn't resolved). The remaining players continue the partie and
     will be persisted normally on natural end.
 
-    Manche counters are NOT updated here — that aggregation happens at the
-    actual partie end, when `game.manches_played` / `game.manches_lost` are
-    accurate. A leaver simply doesn't contribute to those columns for the
-    abandoned partie.
+    G98 follow-up: manche counters ARE updated here. Before G98 they were
+    skipped on leave (only natural partie-end captured them), which made
+    leave-mid-game leave a confusing profile state — games_played went up
+    but manche columns stayed at 0. Now we pass the in-memory counters
+    from the Game object through so the profile reflects real progress.
     """
     if not user_id_str:
         return
@@ -100,6 +107,8 @@ async def persist_player_session(user_id_str: str, game_code: str, round_points:
             stats.games_played += 1
             stats.parties_lost += 1
             stats.current_streak = 0
+            stats.manches_played += manches_played
+            stats.manches_lost += manches_lost
             # Small ELO penalty for early departure. Without knowing opponents,
             # treat as a loss against an average-1200 field.
             stats.elo = updated_elo(stats.elo, [1200], won=False)
