@@ -24,7 +24,7 @@ export function Game({ token }) {
   const [params] = useSearchParams()
   const playerId = params.get('pid')
   const navigate = useNavigate()
-  const { state, roll, keep, done, initialRoll, tiebreakRoll, leave, kick, updateRoomRules } = useGame(gameId, playerId, token)
+  const { state, roll, keep, done, initialRoll, tiebreakRoll, leave, kick, updateRoomRules, dismissAdminBroadcast } = useGame(gameId, playerId, token)
   const logRef = useRef(null)
   // G64: switch to the mobile-shell layout at ≤ 959 px viewports.
   const isMobile = useMediaQuery('(max-width: 959px)')
@@ -851,6 +851,78 @@ export function Game({ token }) {
           onClose={() => navigate('/')}
         />
       )}
+
+      {/* G95: admin broadcast banner — non-dismissible by user (closes only
+          when admin sends a fresh one or via the dismiss button after the
+          admin tells you to). Severity controls the color. */}
+      {state.adminBroadcast && (
+        <AdminBroadcastBanner banner={state.adminBroadcast} lang={lang} onDismiss={dismissAdminBroadcast} t={t} />
+      )}
+
+      {/* G95: room dissolved by admin — full takeover screen with the
+          reason, redirects home on click. */}
+      {state.roomDissolved && (
+        <RoomDissolvedOverlay t={t} reason={state.roomDissolved.reason} onClose={() => navigate('/')} />
+      )}
+    </div>
+  )
+}
+
+function AdminBroadcastBanner({ banner, lang, onDismiss, t }) {
+  const message = lang === 'en' ? banner.message_en : banner.message_fr
+  const colors = {
+    info: { bg: 'rgba(196, 140, 40, 0.12)', border: 'var(--brass)', text: 'var(--ink)' },
+    warning: { bg: 'rgba(196, 140, 40, 0.22)', border: 'var(--brass-deep)', text: 'var(--ink)' },
+    critical: { bg: 'rgba(168, 48, 42, 0.18)', border: 'var(--rouge)', text: 'var(--ink)' },
+  }
+  const c = colors[banner.severity] || colors.info
+  return (
+    <div role="status" style={{
+      position: 'fixed', top: 0, left: 0, right: 0, zIndex: 90,
+      background: c.bg, borderBottom: `2px solid ${c.border}`,
+      padding: '0.7rem 1.2rem', display: 'flex', alignItems: 'center', gap: 12,
+      backdropFilter: 'blur(4px)',
+    }}>
+      <span aria-hidden="true" style={{ color: c.border, fontWeight: 700 }}>
+        {banner.severity === 'critical' ? '⚠' : banner.severity === 'warning' ? '!' : 'ⓘ'}
+      </span>
+      <strong className="serif" style={{ color: c.border, fontSize: '0.8rem', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+        {t('admin_broadcast_label')}
+      </strong>
+      <p className="serif" style={{ margin: 0, flex: 1, color: c.text }}>{message}</p>
+      <button type="button" className="btn-link" onClick={onDismiss}
+        aria-label={t('admin_broadcast_dismiss')}
+        style={{ fontSize: '1.2rem', padding: '0 0.5rem', color: c.border }}>
+        ×
+      </button>
+    </div>
+  )
+}
+
+function RoomDissolvedOverlay({ t, reason, onClose }) {
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', zIndex: 200,
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+    }}>
+      <div className="card" style={{ maxWidth: 500, padding: '2rem', textAlign: 'center', background: 'var(--paper)' }}>
+        <div className="eyebrow" style={{ color: 'var(--rouge)', marginBottom: 8 }}>
+          {t('room_dissolved_eyebrow')}
+        </div>
+        <h2 className="display" style={{ fontSize: '1.6rem', margin: '0 0 1rem' }}>
+          {t('room_dissolved_title')}
+        </h2>
+        <p className="serif" style={{ margin: '0 0 1rem', color: 'var(--ink-soft)' }}>
+          {t('room_dissolved_intro')}
+        </p>
+        <div className="ticket" style={{ padding: '0.9rem 1.1rem', marginBottom: '1.5rem', textAlign: 'left' }}>
+          <div className="eyebrow" style={{ fontSize: '0.6rem' }}>{t('admin_modal_reason')}</div>
+          <p className="serif" style={{ margin: '0.3rem 0 0' }}>{reason}</p>
+        </div>
+        <button type="button" className="btn btn-primary" onClick={onClose}>
+          {t('room_dissolved_back_home')}
+        </button>
+      </div>
     </div>
   )
 }

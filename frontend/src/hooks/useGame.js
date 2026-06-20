@@ -8,6 +8,21 @@ function reducer(state, action) {
       return { ...state, connected: false }
     case 'KICKED':
       return { ...state, kickedReason: action.reason || 'afk' }
+    // G95: admin sends a banner to everyone in the room.
+    case 'ADMIN_BROADCAST':
+      return {
+        ...state,
+        adminBroadcast: {
+          message_fr: action.message_fr,
+          message_en: action.message_en,
+          severity: action.severity || 'info',
+        },
+      }
+    case 'ADMIN_BROADCAST_DISMISS':
+      return { ...state, adminBroadcast: null }
+    // G95: admin dissolved the room entirely.
+    case 'ROOM_DISSOLVED':
+      return { ...state, roomDissolved: { reason: action.reason, by: action.by } }
     default:
       return state
   }
@@ -28,6 +43,8 @@ const INITIAL = {
   last_round_plays: [],
   log: [],
   kickedReason: null,
+  adminBroadcast: null,
+  roomDissolved: null,
   afk_started_at: null,
 }
 
@@ -47,6 +64,15 @@ export function useGame(gameId, playerId, token) {
       const msg = JSON.parse(e.data)
       if (msg.type === 'state') dispatch({ type: 'STATE', payload: msg })
       else if (msg.type === 'kicked') dispatch({ type: 'KICKED', reason: msg.reason })
+      else if (msg.type === 'admin_broadcast')
+        dispatch({
+          type: 'ADMIN_BROADCAST',
+          message_fr: msg.message_fr,
+          message_en: msg.message_en,
+          severity: msg.severity,
+        })
+      else if (msg.type === 'room_dissolved')
+        dispatch({ type: 'ROOM_DISSOLVED', reason: msg.reason, by: msg.by })
     }
     ws.onclose = () => dispatch({ type: 'DISCONNECTED' })
 
@@ -77,5 +103,7 @@ export function useGame(gameId, playerId, token) {
     [send],
   )
 
-  return { state, roll, keep, done, initialRoll, tiebreakRoll, start, leave, kick, updateRoomRules }
+  const dismissAdminBroadcast = useCallback(() => dispatch({ type: 'ADMIN_BROADCAST_DISMISS' }), [])
+
+  return { state, roll, keep, done, initialRoll, tiebreakRoll, start, leave, kick, updateRoomRules, dismissAdminBroadcast }
 }
