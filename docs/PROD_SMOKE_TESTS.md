@@ -167,6 +167,61 @@ real DB session, not the in-memory test setup.
 
 ---
 
+## G92 — Pre-launch security audit
+
+The dev test suite (`tests/integration/test_security.py`) verifies the
+in-process behaviour of the new headers + reset-invalidates-sessions +
+CORS allowlist + Sentry redaction. The items below need a real proxy
+in front of us (Cloudflare → Fly) and can't be exercised from
+`AsyncClient(transport=ASGITransport)`.
+
+### Test 1 — Security headers on a real response
+```
+curl -I https://421bistro.com/healthz
+```
+- [ ] `Strict-Transport-Security: max-age=31536000; includeSubDomains; preload` present (must only ship over https)
+- [ ] `X-Frame-Options: DENY`
+- [ ] `X-Content-Type-Options: nosniff`
+- [ ] `Referrer-Policy: strict-origin-when-cross-origin`
+- [ ] `Content-Security-Policy: default-src 'self'; ...` matches the value built by `_build_csp(debug=False)`
+- [ ] `Permissions-Policy` denies `camera`, `microphone`, `geolocation`, etc.
+
+### Test 2 — Forgot-password rate limit
+```
+for i in $(seq 1 4); do
+  curl -s -o /dev/null -w "%{http_code}\n" \
+    -X POST -H 'Content-Type: application/json' \
+    -d '{"email":"someone@example.com"}' \
+    https://421bistro.com/auth/forgot-password
+  sleep 1
+done
+```
+- [ ] First 3 requests return 202
+- [ ] 4th request returns 429 `{"detail":"rate_limit"}`
+- [ ] Wait 1 hour, retry → back to 202
+
+### Test 3 — CORS lockdown
+- [ ] Preflight with `Origin: https://evil.example.com` returns NO `Access-Control-Allow-Origin: *` and NO echo of the evil origin
+- [ ] Preflight with `Origin: https://421bistro.com` returns the matching `Access-Control-Allow-Origin: https://421bistro.com`
+- [ ] Confirm `settings.cors_allowed_origins` in Fly env matches the production frontend host(s)
+
+### Test 4 — Session invalidation on password reset
+- [ ] Log in on browser A, copy the JWT (DevTools → Application → Local Storage)
+- [ ] On browser B, do "forgot password" flow → reset to a new password
+- [ ] Reload browser A → automatically logged out (401 on `/auth/me`)
+- [ ] Browser A can re-log in with the new password
+
+### Test 5 — Sentry redaction
+- [ ] Force a 500 on `/auth/login` (e.g. by killing the DB pool mid-request)
+- [ ] Open the Sentry event → confirm `request.data` shows `[redacted: auth route]` and `Authorization` header shows `[redacted]`
+- [ ] Confirm the captured request body does NOT contain the plaintext password
+
+### Test 6 — Anthropic / Brevo key rotation
+- [ ] Follow the runbook in `docs/SECURITY.md` §3 to rotate `BREVO_API_KEY` → verify a fresh registration triggers a welcome email
+- [ ] Rotate `ANTHROPIC_API_KEY` → verify avatar moderation still succeeds (fails open on missing key, so this only verifies the happy path)
+
+---
+
 ## G77 — Production deployment itself
 
 *Smoke tests for the deploy itself — DNS / SSL / Fly.io health checks /

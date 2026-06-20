@@ -50,6 +50,11 @@ class Settings(BaseSettings):
     # G93: T-N seconds before eviction, send a warning toast to the AFK
     # player. Default 120s = 2-minute heads-up.
     bot_takeover_warning_seconds: int = 120
+    # G92 security audit: comma-separated list of allowed CORS origins. In
+    # production this is set to the public site origin (+ any staging URL);
+    # in dev the defaults below cover the Vite dev server. The wildcard
+    # `*` is forbidden in production code paths.
+    cors_allowed_origins: str = "http://localhost:5173,http://localhost:8421"
 
 
 settings = Settings()

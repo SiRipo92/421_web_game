@@ -128,7 +128,9 @@ async def register(request: Request, body: RegisterRequest, db: AsyncSession = D
             lang=user.lang_pref,
         )
 
-    return TokenResponse(access_token=create_access_token(str(user.id)))
+    return TokenResponse(
+        access_token=create_access_token(str(user.id), token_version=user.token_version)
+    )
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -155,7 +157,11 @@ async def login(request: Request, body: LoginRequest, db: AsyncSession = Depends
             },
         )
     return TokenResponse(
-        access_token=create_access_token(str(user.id), remember_me=body.remember_me)
+        access_token=create_access_token(
+            str(user.id),
+            remember_me=body.remember_me,
+            token_version=user.token_version,
+        )
     )
 
 
@@ -186,8 +192,17 @@ async def me(user: User = Depends(get_current_user)):
 
 
 @router.post("/forgot-password", status_code=status.HTTP_202_ACCEPTED)
-async def forgot_password(body: ForgotPasswordRequest, db: AsyncSession = Depends(get_db)):
-    """Send a password-reset email; always 202 to prevent email enumeration."""
+@limiter.limit("3/hour")
+async def forgot_password(
+    request: Request, body: ForgotPasswordRequest, db: AsyncSession = Depends(get_db)
+):
+    """Send a password-reset email; always 202 to prevent email enumeration.
+
+    G92: tight 3/hour rate limit on the source IP. Without this, an
+    attacker could spam reset emails as a denial-of-wallet (each call
+    bills Brevo) or as a phishing primer (flood the victim's inbox so
+    they miss a real reset).
+    """
     result = await db.execute(
         select(User).where(User.email == body.email, User.deleted_at.is_(None))
     )
@@ -208,8 +223,17 @@ async def forgot_password(body: ForgotPasswordRequest, db: AsyncSession = Depend
 
 
 @router.post("/reset-password", status_code=status.HTTP_200_OK)
-async def reset_password(body: ResetPasswordRequest, db: AsyncSession = Depends(get_db)):
-    """Validate a reset token and update the user's password hash."""
+@limiter.limit("10/hour")
+async def reset_password(
+    request: Request, body: ResetPasswordRequest, db: AsyncSession = Depends(get_db)
+):
+    """Validate a reset token and update the user's password hash.
+
+    G92: also bumps `user.token_version`, which invalidates every JWT
+    issued before this reset. If the password was changed because the
+    account was compromised, any token an attacker has already
+    exfiltrated stops working on the next request.
+    """
     token_hash = hashlib.sha256(body.token.encode()).hexdigest()
     now = datetime.now(UTC)
 
@@ -232,6 +256,10 @@ async def reset_password(body: ResetPasswordRequest, db: AsyncSession = Depends(
         raise HTTPException(status_code=400, detail="Invalid or expired reset token")
 
     user.hashed_password = hash_password(body.new_password)
+    # G92: kill every outstanding session by bumping token_version. The
+    # next request bearing an old JWT will fail decode in
+    # `_user_from_token` and get a 401.
+    user.token_version = (user.token_version or 0) + 1
     reset_token.used_at = now
     await db.commit()
 
@@ -302,7 +330,10 @@ async def google_auth(
         await db.commit()
         await db.refresh(user)
 
-    return TokenResponse(access_token=create_access_token(str(user.id)), is_new=is_new)
+    return TokenResponse(
+        access_token=create_access_token(str(user.id), token_version=user.token_version),
+        is_new=is_new,
+    )
 
 
 @router.post("/complete-profile", status_code=200)

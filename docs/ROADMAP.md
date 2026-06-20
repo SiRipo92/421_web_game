@@ -1277,7 +1277,7 @@ Promote tickets from "random slugs in email" to a real `ContactTicket(id, ref, f
 
 **Effort:** ~5 days. **Launch-blocker.**
 
-### G92. Pre-launch security audit
+### G92. (DONE — pending PR merge) Pre-launch security audit
 **Why:** Before exposing this to public traffic, the user wants a structured audit pass against common web-app vulnerabilities + a written punch list of fixes. Not a "we ran a scanner once" — a deliberate review of authentication, authorization, dependency hygiene, secrets management, rate-limit coverage, header hardening, RGPD posture, and incident-response preparedness.
 
 **Scope (audit + fix):**
@@ -1349,6 +1349,16 @@ Promote tickets from "random slugs in email" to a real `ContactTicket(id, ref, f
 **Acceptance:** A `docs/SECURITY_AUDIT_2026-06.md` punch list document is committed, every item either fixed or explicitly documented as accepted-risk. Mandatory items (auth, secrets, headers, RGPD endpoints) all fixed before launch.
 
 **Effort:** ~3 days (1 day audit + 2 days fixes). **Launch-blocker.**
+
+**Shipped (2026-06-20):**
+- Audit punch list at [`docs/SECURITY_AUDIT_2026-06.md`](./SECURITY_AUDIT_2026-06.md), runbook at [`docs/SECURITY.md`](./SECURITY.md).
+- `SecurityHeadersMiddleware` ships HSTS, CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy on every response.
+- CORS locked to an explicit allowlist (`settings.cors_allowed_origins`) — no more wildcard, even in debug.
+- Sentry `before_send` filter scrubs `Authorization` / `Cookie` / auth-route bodies.
+- `User.token_version` column + JWT `tv` claim; `/auth/reset-password` bumps it, invalidating every outstanding session for that user.
+- `/auth/forgot-password` rate-limited to 3/hour, `/auth/reset-password` to 10/hour.
+- `npm audit fix` applied (0 vulnerabilities remaining).
+- **Deferred (G92b/G92c/G92d):** tighten CSP `'unsafe-inline'` styles; wire `pip-audit` + `npm audit` into CI; rotate prod `SECRET_KEY` before launch (forces global re-login during low-traffic window).
 
 ### G96. (DONE) Username + profile-content moderation
 **Why:** Discovered during G90 manual smoke testing: a user registered with username `BigBite420` and the signup endpoint accepted it. Same gap exists anywhere else free-form user content surfaces (display names, future profile bios, future chat). The avatar upload path is already gated by [[G46]]'s AI moderation — text inputs need parallel coverage. Without this, day-one public traffic could pollute the leaderboard with offensive handles that are then visible everywhere a user is mentioned.
