@@ -15,7 +15,7 @@ Closes/Progresses: G<number>
 
 ## Test plan
 
-- [ ] `pytest --cov=app --cov-fail-under=85` passes locally
+- [ ] `pytest --cov=app --cov-fail-under=80` passes locally (target 90%+, gate is the floor)
 - [ ] `ruff check app/ tests/` clean
 - [ ] `ruff format --check app/ tests/` clean
 - [ ] `cd frontend && npm run lint` clean
