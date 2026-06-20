@@ -520,12 +520,53 @@ async def _afk_timer(game: Game, player_id: str, game_id: str):
     """Wait afk_seconds then auto-play for the player if they still haven't acted."""
     from copy import deepcopy
 
+    from app.services.afk_eviction import (
+        evict_player,
+        is_eviction_due,
+        mark_afk_started,
+        should_send_warning,
+        warning_payload,
+    )
+
     await asyncio.sleep(game.afk_seconds)
     player = next((p for p in game.players if p.id == player_id), None)
     if not player or player.turn is None or player.turn.done:
         return
     if game.current_player() and game.current_player().id != player_id:
         return
+
+    # G93: stamp the start of this AFK episode on first bot-takeover.
+    # Idempotent — subsequent bot turns within the same episode are no-ops.
+    await mark_afk_started(player)
+
+    # G93: if the AFK clock has run out, evict the player instead of playing
+    # another bot turn. The seat frees up; remaining clients see the roster
+    # shrink via the post-eviction broadcast.
+    if is_eviction_due(player):
+        _log(
+            game,
+            "log_afk_eviction",
+            f"{player.name} a été retiré(e) de la partie pour inactivité.",
+            name=player.name,
+        )
+        await evict_player(game, player, broadcaster=manager.broadcast)
+        await manager.broadcast(game_id, game_state(game))
+        return
+
+    # G93: T-2min warning toast. Idempotent per AFK episode via
+    # `afk_warnings_sent`. Targets only the AFK player's sockets so the
+    # warning doesn't spam everyone at the table.
+    if should_send_warning(player):
+        try:
+            for ws, pid in list(manager.connections.get(game_id, [])):
+                if pid == player_id:
+                    try:
+                        await ws.send_json(warning_payload(player))
+                    except Exception:  # noqa: BLE001
+                        pass
+        finally:
+            player.afk_warnings_sent += 1
+
     # G2: snapshot BEFORE the bot mutates anything. If the human reconnects /
     # acts during the grace window, we restore this snapshot and the bot's
     # play is undone — they get to play their own turn from where they left off.
@@ -620,6 +661,10 @@ def _abort_bot_handback(game: Game, player_id: str) -> bool:
     player = next((p for p in game.players if p.id == player_id), None)
     if player is not None:
         player.turn = snapshot["turn"]
+        # G93: human is back — reset the eviction clock so they get the
+        # full timeout window on their next AFK episode.
+        player.afk_started_at = None
+        player.afk_warnings_sent = 0
     # Restore the rhythm if the bot's play locked it as starter.
     if snapshot.get("max_throws_this_round") is not None:
         game.max_throws_this_round = snapshot["max_throws_this_round"]
@@ -950,6 +995,9 @@ async def _dispatch(
         game.afk_session.discard(player_id)
         returning = next((p for p in game.players if p.id == player_id), None)
         if returning is not None:
+            # G93: human is back — reset the eviction clock.
+            returning.afk_started_at = None
+            returning.afk_warnings_sent = 0
             _log(
                 game,
                 "log_afk_return",
@@ -975,6 +1023,8 @@ async def _dispatch(
         # G18: persist this player's session stats if they were actively
         # playing AND they're a registered user. Snapshot the values FIRST
         # because the cleanup below pops them from the game dicts.
+        # G98 follow-up: pass manche counters through so the leave-mid-game
+        # path doesn't leave manches_played/manches_lost stuck at zero.
         if game.phase in (GamePhase.CHARGE, GamePhase.DECHARGE, GamePhase.TIEBREAK):
             leaver_user_id = game.user_ids.get(player_id)
             if leaver_user_id:
@@ -982,7 +1032,11 @@ async def _dispatch(
 
                 asyncio.create_task(
                     persist_player_session(
-                        leaver_user_id, game.id, game.round_points.get(player_id, 0)
+                        leaver_user_id,
+                        game.id,
+                        game.round_points.get(player_id, 0),
+                        manches_played=game.manches_played.get(player_id, 0),
+                        manches_lost=game.manches_lost.get(player_id, 0),
                     )
                 )
 
@@ -1241,6 +1295,7 @@ async def _dispatch(
 
         # Same cleanup as a voluntary leave — including the G18 stats persistence
         # snapshot when the kicked player was actively playing as a registered user.
+        # G98 follow-up: pass manche counters so kick-mid-game records them too.
         if game.phase in (GamePhase.CHARGE, GamePhase.DECHARGE, GamePhase.TIEBREAK):
             target_user_id = game.user_ids.get(target_id)
             if target_user_id:
@@ -1248,7 +1303,11 @@ async def _dispatch(
 
                 asyncio.create_task(
                     persist_player_session(
-                        target_user_id, game.id, game.round_points.get(target_id, 0)
+                        target_user_id,
+                        game.id,
+                        game.round_points.get(target_id, 0),
+                        manches_played=game.manches_played.get(target_id, 0),
+                        manches_lost=game.manches_lost.get(target_id, 0),
                     )
                 )
 

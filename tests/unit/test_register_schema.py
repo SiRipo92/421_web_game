@@ -196,3 +196,142 @@ def test_email_opt_in_defaults_false():
 
 def test_email_opt_in_true_accepted():
     assert _make(email_opt_in=True).email_opt_in is True
+
+
+# ── Email validator edge cases (G99 coverage push) ────────────────────────────
+
+
+def test_email_dns_failure_falls_back_to_normalized(monkeypatch):
+    """DNS lookup raising a generic exception → fall back to lowercased input
+    rather than rejecting. We don't want a flaky DNS resolver to block
+    real signups."""
+    from app.schemas import auth as auth_schema
+
+    def boom_resolver(*args, **kwargs):
+        raise OSError("dns down")
+
+    monkeypatch.setattr(auth_schema, "_validate_email", boom_resolver)
+    user = _make(email="UPPER@example.com")
+    assert user.email == "upper@example.com"
+
+
+def test_email_deliverability_rejected(monkeypatch):
+    """EmailNotValidError from the deliverability check → ValidationError.
+
+    Pydantic's EmailStr runs first and accepts a syntactically valid
+    address; our `email_deliverable` field_validator then asks
+    `_validate_email(..., check_deliverability=True)` which can raise
+    if the domain has no MX record. We simulate that path here."""
+    from email_validator import EmailNotValidError
+
+    from app.schemas import auth as auth_schema
+
+    def reject(*args, **kwargs):
+        raise EmailNotValidError("domain has no MX record")
+
+    monkeypatch.setattr(auth_schema, "_validate_email", reject)
+    with pytest.raises(ValidationError, match="MX record"):
+        _make(email="user@nonexistent-domain-zzz.example")
+
+
+def test_email_disposable_rejected(monkeypatch):
+    """MailChecker says disposable → reject with the disposable message."""
+    from app.schemas import auth as auth_schema
+
+    if not auth_schema._mailchecker_available:
+        pytest.skip("MailChecker not installed in this env")
+
+    class _FakeChecker:
+        @staticmethod
+        def is_valid(addr):
+            return False
+
+    monkeypatch.setattr(auth_schema, "_MailChecker", _FakeChecker)
+    with pytest.raises(ValidationError, match="[Dd]isposable"):
+        _make(email="user@10minutemail.com")
+
+
+# ── Reset / update / complete-profile schemas ─────────────────────────────────
+
+
+def test_reset_password_strong():
+    """ResetPasswordRequest enforces the same password rules as register."""
+    from app.schemas.auth import ResetPasswordRequest
+
+    # Too short
+    with pytest.raises(ValidationError, match="8 characters"):
+        ResetPasswordRequest(token="t" * 32, new_password="Ab1")
+    # No uppercase
+    with pytest.raises(ValidationError, match="uppercase"):
+        ResetPasswordRequest(token="t" * 32, new_password="lowercase1")
+    # No digit/special
+    with pytest.raises(ValidationError, match="number or special"):
+        ResetPasswordRequest(token="t" * 32, new_password="OnlyLetters")
+    # Over 72 bytes
+    with pytest.raises(ValidationError, match="72 characters"):
+        ResetPasswordRequest(token="t" * 32, new_password="Ab1" + "x" * 80)
+    # Happy path
+    r = ResetPasswordRequest(token="t" * 32, new_password="Goodpass1")
+    assert r.new_password == "Goodpass1"
+
+
+def test_update_me_passthrough_when_none():
+    """UpdateMeRequest with explicit None values stays None (no validation fire)."""
+    from app.schemas.auth import UpdateMeRequest
+
+    r = UpdateMeRequest(username=None, lang_pref=None, theme_pref=None)
+    assert r.username is None and r.lang_pref is None and r.theme_pref is None
+
+
+def test_update_me_invalid_lang_pref_rejected():
+    from app.schemas.auth import UpdateMeRequest
+
+    with pytest.raises(ValidationError, match="lang_pref"):
+        UpdateMeRequest(lang_pref="de")
+
+
+def test_update_me_invalid_theme_pref_rejected():
+    from app.schemas.auth import UpdateMeRequest
+
+    with pytest.raises(ValidationError, match="theme_pref"):
+        UpdateMeRequest(theme_pref="purple")
+
+
+def test_update_me_valid_theme_accepted():
+    from app.schemas.auth import UpdateMeRequest
+
+    assert UpdateMeRequest(theme_pref="dark").theme_pref == "dark"
+    assert UpdateMeRequest(theme_pref="light").theme_pref == "light"
+
+
+def test_complete_profile_birthdate_future_rejected():
+    from app.schemas.auth import CompleteProfileRequest
+
+    future = date.today() + timedelta(days=30)
+    with pytest.raises(ValidationError, match="future"):
+        CompleteProfileRequest(username="Newbie", birthdate=future)
+
+
+def test_complete_profile_birthdate_too_young_rejected():
+    from app.schemas.auth import CompleteProfileRequest
+
+    today = date.today()
+    too_young = date(today.year - 14, today.month, today.day)
+    with pytest.raises(ValidationError, match="at least 15"):
+        CompleteProfileRequest(username="Newbie", birthdate=too_young)
+
+
+def test_complete_profile_birthdate_over_120_rejected():
+    from app.schemas.auth import CompleteProfileRequest
+
+    today = date.today()
+    too_old = date(today.year - 130, today.month, today.day)
+    with pytest.raises(ValidationError, match="120"):
+        CompleteProfileRequest(username="Newbie", birthdate=too_old)
+
+
+def test_complete_profile_valid_birthdate_accepted():
+    from app.schemas.auth import CompleteProfileRequest
+
+    r = CompleteProfileRequest(username="Newbie", birthdate=date(1990, 6, 15))
+    assert r.birthdate == date(1990, 6, 15)

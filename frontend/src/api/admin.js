@@ -83,3 +83,32 @@ export const auditFeed = (token, params = {}) => {
   const query = qs.toString()
   return req(`/api/admin/audit${query ? `?${query}` : ''}`, { headers: auth(token) })
 }
+
+// ---------------- G95 room moderation ----------------
+
+export const listRooms = (token) =>
+  req('/api/admin/rooms', { headers: auth(token) })
+
+export const getRoomDetail = (token, gameId) =>
+  req(`/api/admin/rooms/${gameId}`, { headers: auth(token) })
+
+export const broadcastToRoom = (token, gameId, { message_fr, message_en, severity }) =>
+  req(`/api/admin/rooms/${gameId}/broadcast`, {
+    method: 'POST',
+    headers: auth(token),
+    body: JSON.stringify({ message_fr, message_en, severity }),
+  })
+
+export const adminKickPlayer = (token, gameId, { player_id, reason, chat_ban_hours }) =>
+  req(`/api/admin/rooms/${gameId}/kick`, {
+    method: 'POST',
+    headers: auth(token),
+    body: JSON.stringify({ player_id, reason, chat_ban_hours }),
+  })
+
+export const dissolveRoom = (token, gameId, reason) =>
+  req(`/api/admin/rooms/${gameId}/dissolve`, {
+    method: 'POST',
+    headers: auth(token),
+    body: JSON.stringify({ confirm_game_id: gameId, reason }),
+  })

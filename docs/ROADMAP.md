@@ -199,7 +199,17 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 - New table `Notification(user_id, kind, payload jsonb, read_at, created_at)`.
 - Endpoints: `GET /api/notifications`, `POST /api/notifications/{id}/read`, WS push channel on the user's auth WS (or SSE).
 - Profile page: notifications bell with unread count + a panel that lists recent.
-- First populators: G28 (friends) and G29 (invites).
+- **Populators** (each event type maps to one Notification row + bell counter increment):
+    * Friend request received / accepted ([[G28]])
+    * Game invite received ([[G29]])
+    * Rank promotion (your ELO crossed into a new badge tier — [[G82]])
+    * Moderation action against you: ban, chat-ban, account deletion ([[G90]] emits these via GdprAuditLog — mirror to Notification on write)
+    * **Admin room broadcast** received ([[G95]] — currently a WS-only banner that disappears on dismiss; should also create a persistent Notification so the user has a record after dismissing)
+    * **Admin kick** from a room ([[G95]])
+    * **AFK eviction** ([[G93]] — currently a one-shot overlay + email; persistent Notification gives the user a way to look back at what room they were evicted from + when)
+    * Account deletion warning (T-30d / T-7d / T+0 inactive cron — [[G70]] + [[G83]])
+- **Email gating:** the Notification is created regardless of `email_opt_in`. The corresponding *email* still respects opt-in for non-transactional events (e.g. rank promotion). Transactional events (moderation, eviction, deletion) get both the Notification AND the email regardless of opt-in.
+- **Schema decision:** the audit-log → notification mirror happens at write time (not via a reader joining the two tables) so the Notification table can be queried without the heavier GdprAuditLog joins.
 
 ### G28. Follow system + presence indicators
 **Why:** Asymmetric follow (Sierra follows June; June doesn't auto-follow back). Like Twitter/Instagram, not Facebook friends. Combined with a presence layer ([[G88]]), this lets users see who's online, who's currently in a game, and when offline followers were last seen — the foundation for "join my friend's game" without needing an invite-accept dance.
@@ -392,7 +402,7 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 **Acceptance:** 100 open rooms exist; the lobby page loads in < 200 ms, shows page 1 of ~9 with 12 cards, pagination controls work, WS room-state changes refresh only the visible window.
 **Dependencies:** None. Pair-friendly with [[G11]] (single-player waiting modal) — both touch room-state UX.
 
-### G49. Password field show/hide toggle (login + registration)
+### G49. (DONE — shipped via G97) Password field show/hide toggle (login + registration)
 **Why:** Standard accessibility / usability affordance: an eye icon inside the password input lets the user reveal what they typed before submitting. Reduces failed-login frustration (typos in masked input), helps users on touch keyboards verify their entry. Today both `/login` and `/register` mask the input with no reveal option.
 **Scope:**
 - Promote the existing password `<input>`s into a small reusable component `PasswordField.jsx` (in `frontend/src/components/shared/`) that wraps an `<input>` + an absolutely-positioned eye/eye-off icon button at the right edge. Toggling the button flips `type` between `"password"` and `"text"`.
@@ -732,7 +742,7 @@ The right `<aside>` currently has Journal + Combo Hierarchy. Add Chat as a third
 **Acceptance:** A clean message round-trips in <1.5s with a brief pending state; a slur is held, dropped, and never relayed to other clients.
 **Dependencies:** [[G34]] is the parent; this entry is the delayed-send variant the user asked for specifically.
 
-### G75. Buy + verify the production domain (Cloudflare Registrar, ~€8/yr)
+### G75. (DONE) Buy + verify the production domain — `421bistro.com` via OVH + Cloudflare DNS
 **Why:** Email sending through Resend (and the upcoming Brevo migration in [[G76]]) requires a verified sender domain — DNS records (SPF, DKIM, DMARC) must be set before any transactional email reliably lands in inboxes. Same domain becomes the canonical site URL once deployment lands. Currently `noreply@421bistro.fr` is hard-coded in the email-sender default but the domain isn't owned, so every contact-form submission currently 502s with `email_sender_not_configured`.
 **Scope:**
 - Pick a domain name. Shortlist worth considering:
@@ -746,7 +756,7 @@ The right `<aside>` currently has Journal + Combo Hierarchy. Add Chat as a third
 **Acceptance:** Domain owned, DNS at Cloudflare, sender verified in the chosen email service, `/api/contact` POST succeeds end-to-end with a real email landing in `CONTACT_EMAIL`'s inbox.
 **Dependencies:** None — pure ops decision. Unblocks [[G76]] (Brevo migration) and is a prerequisite for [[G77]] (production deployment).
 
-### G76. Migrate transactional email from Resend to Brevo
+### G76. (DONE) Migrate transactional email from Resend to Brevo
 **Why:** Brevo (formerly Sendinblue) has a free tier of 300 emails/day forever vs. Resend's 100/day free tier capped at 3000/month. Brevo's template editor is also nicer for the password-reset / inactive-account-warning / breach-notification templates that G70 + G71 will need. EU-based (Paris HQ) which simplifies GDPR processing-agreement paperwork.
 **Scope:**
 - Sign up at Brevo, verify the domain from [[G75]] (DKIM + SPF records).
@@ -1157,7 +1167,7 @@ Promote tickets from "random slugs in email" to a real `ContactTicket(id, ref, f
 
 **Dependencies:** [[G87]] (spectator broadcast paths). Hooks for [[G34]] [[G36]] [[G37]] [[G39]] (moderation surfaces).
 
-### G90. Admin dashboard full build — pre-launch must-ship
+### G90. (DONE) Admin dashboard full build — pre-launch must-ship
 **Why:** Today `frontend/src/pages/AdminDashboard.jsx` is a skeleton with `PanelStub` placeholders. To launch, the user needs working admin tools: search users, ban/unban, change roles, delete accounts (RGPD right-to-be-forgotten + admin-initiated), see who's online, review the audit feed. Solo operator — needs to be ergonomic, not a 20-click maze.
 
 **Scope:**
@@ -1207,7 +1217,7 @@ Promote tickets from "random slugs in email" to a real `ContactTicket(id, ref, f
 
 **Effort:** ~5 days. **Launch-blocker.**
 
-### G91. Stats redesign — partie / manche semantics + survival-based ELO
+### G91. (DONE) Stats redesign — partie / manche semantics + survival-based ELO
 **Why:** Current PlayerStats columns are `wins` / `losses` — wrong vocabulary for 421. The game's objective isn't to "win" but to NOT lose: the one who ends up with all the fiches (or 0, depending on phase) is the loser; everyone else is a survivor. The current Profile.jsx also references fields that don't exist (`streak`, `top_combos`, `recent_games`) — they always render as 0/empty. And ELO never moves in practice (TheWitch has played 9 games, ELO still 1200) — either the write path is broken or the calc only runs in code paths that don't fire. Pre-launch this needs to be made coherent so users see meaningful stats from day one.
 
 **Scope (in execution order — never breaks the API):**
@@ -1267,7 +1277,7 @@ Promote tickets from "random slugs in email" to a real `ContactTicket(id, ref, f
 
 **Effort:** ~5 days. **Launch-blocker.**
 
-### G92. Pre-launch security audit
+### G92. (DONE — pending PR merge) Pre-launch security audit
 **Why:** Before exposing this to public traffic, the user wants a structured audit pass against common web-app vulnerabilities + a written punch list of fixes. Not a "we ran a scanner once" — a deliberate review of authentication, authorization, dependency hygiene, secrets management, rate-limit coverage, header hardening, RGPD posture, and incident-response preparedness.
 
 **Scope (audit + fix):**
@@ -1340,7 +1350,180 @@ Promote tickets from "random slugs in email" to a real `ContactTicket(id, ref, f
 
 **Effort:** ~3 days (1 day audit + 2 days fixes). **Launch-blocker.**
 
-### G96. Username + profile-content moderation
+**Shipped (2026-06-20):**
+- Audit punch list at [`docs/SECURITY_AUDIT_2026-06.md`](./SECURITY_AUDIT_2026-06.md), runbook at [`docs/SECURITY.md`](./SECURITY.md).
+- `SecurityHeadersMiddleware` ships HSTS, CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy on every response.
+- CORS locked to an explicit allowlist (`settings.cors_allowed_origins`) — no more wildcard, even in debug.
+- Sentry `before_send` filter scrubs `Authorization` / `Cookie` / auth-route bodies.
+- `User.token_version` column + JWT `tv` claim; `/auth/reset-password` bumps it, invalidating every outstanding session for that user.
+- `/auth/forgot-password` rate-limited to 3/hour, `/auth/reset-password` to 10/hour.
+- `npm audit fix` applied (0 vulnerabilities remaining).
+- **Deferred (G92b/G92c/G92d):** tighten CSP `'unsafe-inline'` styles; wire `pip-audit` + `npm audit` into CI; rotate prod `SECRET_KEY` before launch (forces global re-login during low-traffic window).
+
+### G99. (DONE — pending PR merge) Pre-launch test bundle — coverage push, Playwright E2E, backend perf
+
+**Shipped (2026-06-20):**
+- Coverage: 82.31% → 85.30%. `afk_eviction.py` 43% → 94%; `game_persistence.py` 82% → 89%; `schemas/auth.py` 87% → 99%. Coverage gate raised 80 → 85 in CI. Fixed 2 real bugs in `game_persistence._write` (unguarded `uuid.UUID()` calls that crashed on malformed user_ids entries).
+- Playwright scaffold: `frontend/playwright.config.ts` boots both backend + frontend webServers, `frontend/tests/e2e/auth.spec.ts` covers register + login + reset + wrong-password flows. Added `data-testid` attrs to login form buttons to avoid i18n collisions. Workflow at `.github/workflows/e2e.yml` runs the suite on every PR.
+- k6 perf scenarios: `tests/perf/auth_login.js` (100 VUs, p95 < 500ms), `tests/perf/room_lifecycle.js` (50 VUs register + create + list), `tests/perf/ws_broadcast.js` (5-min WS soak with 10 connected players). Workflow at `.github/workflows/perf.yml` runs on `workflow_dispatch` or `perf`-labelled PRs.
+- Baselines doc at `docs/PERFORMANCE_BASELINE.md`; numbers are TBD until first dispatch run captures them.
+- **Deferred (G99 follow-ups):** the remaining Playwright journeys — multi-player two-browsers, single-player vs bots, AFK eviction overlay, admin moderation, RGPD export/delete. Scaffolding is in place; each needs ~30 min to write once the user identifies the priority flows.
+
+**Original scope:**
+
+**Why:** Before public launch we want real confidence that core flows survive both regression and load. Three gaps right now:
+1. **Coverage too close to the gate.** 82.31% squeaks past the 80% threshold — one careless commit and the gate trips. Modules with weakest coverage: `app/services/afk_eviction.py` (43%), `app/game/ws.py` (the entire WebSocket handler is barely tested in isolation), `app/services/game_persistence.py` (82%), `app/schemas/auth.py` (87%).
+2. **No functional / E2E tests.** Every "test in the browser" smoke check is currently manual — captured in `docs/PROD_SMOKE_TESTS.md` but only run by hand. A registration → login → join → play → quit round-trip needs to be automated.
+3. **No load / performance baseline.** We don't know how the WS broadcast loop behaves at 50 concurrent rooms, what the p95 latency on `/auth/login` is under load, or whether the bot-handback timer survives many simultaneous AFK events.
+
+**Scope (single bundled PR):**
+
+#### Coverage push (target 90%+ on `app/`)
+- **`app/game/ws.py`** — currently the lowest-leverage tested code despite being the biggest behaviour surface. Write integration tests that drive a real WS connection through:
+  - Connect → state broadcast → roll → keep → done → manche transition
+  - Two concurrent clients in the same room: turn handoff, state convergence
+  - Disconnect mid-turn → AFK timer fires → bot plays → human reconnects → handback grace window → cancel → handback
+  - Eviction path (test_security covers the API; this covers the WS message flow)
+- **`app/services/afk_eviction.py`** — drive `evict_player` against a real DB; assert audit log row, player removed from `game.players`, `eviction_count_24h` incremented, chat-ban applied on 3rd eviction.
+- **`app/services/game_persistence.py`** — round-trip a finished game: every column populated, every player's stats updated, ELO delta correct on both sides.
+- **`app/schemas/auth.py`** — exercise every regex / boundary in `username_valid`, `password_valid`, `birthdate_valid` (including the future-dated + 140-year-old edge cases).
+- Aim: 90%+ overall, no module under 75%.
+
+#### Playwright E2E (`tests/e2e/`)
+- Add Playwright + `@playwright/test` to `frontend/package.json` as a dev dep, plus a top-level `playwright.config.ts` that boots the FastAPI app + Vite dev server before the test run.
+- **Critical journeys (5-7 tests):**
+  - **Register + login:** new account → welcome flow → land in lobby.
+  - **Reset password kills sessions:** open two browsers, reset on B, verify A's session dies.
+  - **Single-player vs bots:** create a room → start with bots → play a manche → confirm score updates + log entries.
+  - **Multi-player (two browsers):** create room on A → join from B → both play one full partie → finish screen renders for both.
+  - **AFK eviction:** join a room, idle past the timeout, confirm the eviction warning toast + the evicted overlay + back-to-lobby redirect.
+  - **Admin moderation:** admin logs in, lists rooms, dissolves a room → spectators get the room_dissolved overlay.
+  - **RGPD self-service:** authenticated user requests data export → JSON dump downloads; account deletion → username freed.
+- Tests run against a dedicated test DB (`fourtwentyone_e2e`) and start from a clean snapshot per spec.
+- CI integration: add a `playwright` job to GHA that runs after `pytest` passes.
+
+#### Backend performance baseline (`tests/perf/`)
+- Tool: **k6** (Go-based, modern, native WebSocket support — better than locust for our WS-heavy app).
+- **Scenarios:**
+  - `tests/perf/auth_login.js` — 100 concurrent users hitting `/auth/login` for 60s. Pass: p95 < 500ms, p99 < 1s, 0 errors.
+  - `tests/perf/room_lifecycle.js` — 50 concurrent users registering → creating a room → playing 3 manches → leaving. Pass: p95 round-trip < 800ms, no WS disconnects.
+  - `tests/perf/ws_broadcast.js` — 1 room with 10 connected players, 5-minute soak. Pass: every player receives every state broadcast within 100ms, no message loss.
+- Document baseline numbers in `docs/PERFORMANCE_BASELINE.md` so we can detect regressions on future PRs.
+- Doesn't run in CI by default (too slow + too much resource); has a `make perf` target + an optional GHA workflow trigger.
+
+**Acceptance:**
+- Coverage gate raised from 80 → 90 in `pyproject.toml`.
+- Playwright suite green; documented how to run locally + in CI.
+- Performance baseline numbers committed to `docs/PERFORMANCE_BASELINE.md`.
+- Existing 451 backend tests still pass.
+
+**Effort:** ~4-5 days. **Launch-blocker.**
+
+### G99b. ws.py coverage push — eviction-timer, tiebreak, manche-advance
+**Why:** G99 raised total coverage 82% → 85%, but `app/game/ws.py` is the outlier — still at **69%** (242 untested lines) despite being the single largest behaviour surface in the app. The CI gate is currently relaxed to 80% (`f84fa12`) to keep headroom for incremental development; tightening it back to 90% needs ws.py coverage to come up first.
+
+Crucially, **Playwright E2E coverage doesn't count toward `pytest-cov`** — the FastAPI process runs in a subprocess during Playwright runs, outside pytest's instrumentation. The only way to move the pytest number is more pytest-level tests against the real WS handler.
+
+**Why this is hard (documented in G99 review):**
+1. `_afk_timer` calls `asyncio.sleep(45)` in real time — every test that exercises the eviction path needs `asyncio.sleep` monkeypatched, AND the same patch applied to `_finalize_bot_turn`'s grace-window sleep. One missed patch and the test hangs.
+2. Starlette's `TestClient.websocket_connect` is sync-only, but our DB session is async-bound to its own event loop. Crossing the boundary errors with "attached to a different loop." Existing `test_ws.py` works around this by poking `games[]` directly + skipping the HTTP join endpoint — fine for state assertions, awkward for multi-step turn flows.
+3. Multi-player tests (the only way to exercise tiebreak + manche-advance) need ~80-100 lines per spec: two WS clients, driven through `initial_roll → roll → keep → done → tiebreak_roll`, assertions at each step.
+4. Bot logic uses real `random.randint(1, 6)` — tests need a value-queue monkeypatched per spec.
+
+**Scope (single bundled PR):**
+
+#### Untested paths to cover (in priority order)
+
+Lines reference the ws.py state at G99 merge (commit `8b151a1`).
+
+1. **`_afk_timer` end-to-end (lines 511-625, ~115 lines).** Eviction path: AFK clock expires → `evict_player` → state broadcast → no more bot turns for that player. Warning path: T-2min toast fires once per AFK episode. Reconnect-during-grace path: bot plays, snapshot stored, human reconnects, snapshot restored, finalize-task cancelled.
+2. **`_finalize_bot_turn` (lines 628-708).** The deferred advance + resolve + AFK-reschedule chain that fires after the grace window. Cancel-during-grace, normal-fire, error-during-fire (sentry capture path).
+3. **Tiebreak resolution branch in `_handle_action` (lines 1222-1258).** Two players with tied ranks → both prompted for tiebreak roll → `_resolve_tiebreak` picks winner → manche awards loser → next manche starts.
+4. **Round / manche advance (lines 1136-1161).** Last `done` action of a manche triggers `_resolve_round`, awards round_points to loser, checks for partie end, broadcasts winner banner.
+5. **Reconnect mid-turn (lines 802-822).** Player disconnects mid-`roll`, reconnects, state broadcast catches them up to their current `PlayerTurn.dice` snapshot.
+6. **Leave + host migration during specific phases (lines 1431-1478).** Host leaves during CHARGE → longest-tenured non-AFK takes over. Host leaves during TIEBREAK → resolved differently because tiebreak roll is pending.
+
+#### Test patterns (so the work is mechanical, not exploratory)
+
+Establish 2-3 helper fixtures in a new `tests/integration/conftest_ws.py`:
+- `_fast_clock()` — context manager that monkeypatches `asyncio.sleep` to be effectively instant (`await asyncio.sleep(0)`).
+- `_seed_random(values: list[int])` — context manager that monkeypatches `app.game.ws.random.randint` with a value queue.
+- `_make_two_player_game(client, make_user)` — async helper that registers 2 users, creates a room, joins both, returns the WS clients + game_id.
+
+With these helpers in place, each new test becomes 20-40 lines, not 80-100.
+
+#### Bumps + housekeeping
+- Once `ws.py` ≥ 85% and total ≥ 90%, bump the CI gate in `.github/workflows/ci.yml` 80 → 90 and the PR template line in lockstep.
+- Drop the "target 90%+, gate is the floor" qualifier from the PR template since the gate IS 90% then.
+
+**Acceptance:**
+- `app/game/ws.py` coverage ≥ 85% (currently 69%).
+- Total `app/` coverage ≥ 90% (currently 85.30%).
+- CI gate raised 80 → 90 in the same PR.
+- All 6 priority paths above have at least one explicit test.
+- The 3 helper fixtures committed under `tests/integration/conftest_ws.py` so future ws.py tests stay short.
+
+**Effort:** ~2-3 days. The first 5-7 tests (covering eviction-timer + tiebreak) take ~1 day and would push total coverage to ~88-89%. The remaining tests to clear 90% are another ~1 day. The third day is the unexpected friction one always hits with WS + asyncio test infra.
+
+**Not a launch-blocker** by itself — the gate at 80 is fine for launch. But it's the natural next move after G99 + before any major game-logic changes ship.
+
+### G100. Pre-launch infra bundle — CI/CD redeploy, code quality sweep, Sphinx + ReadTheDocs, README
+**Why:** Three things that are loosely-coupled but all touch "the project's exterior surface" — what someone sees in the README, what the docs site looks like, and what happens when you push to main. Bundling them keeps the review focused on infrastructure / DX rather than product behaviour.
+
+**Already landed (folded into the G99 PR as a security follow-up to a committed-secret incident):**
+- `LICENSE` at repo root — all-rights-reserved, viewing-only. The repo will go public for portfolio review; this license makes the no-use intent explicit (no copy, no run, no derive, no redistribute, no ML training).
+- `.github/PULL_REQUEST_TEMPLATE.md` — checklist enforcing coverage gate + secret-free guarantee + roadmap link.
+- `.github/workflows/secrets-scan.yml` — gitleaks runs on every PR + push. Catches accidental commit of passwords, API keys, JWTs, DB URLs with embedded credentials.
+
+**Still to do in G100:**
+
+#### CI/CD — push-to-main → build → webhook deploy
+- Currently CI runs tests + lint on PRs. Missing: a deploy step on `main` merges.
+- **Wire `flyctl deploy --remote-only` from a GHA workflow on `push: main`:**
+  - Generate a Fly.io API token, store as `FLY_API_TOKEN` repo secret.
+  - New `.github/workflows/deploy.yml`: on push to main → checkout → install flyctl → `flyctl deploy --remote-only` (Fly builds the container on their builders, deploys on success).
+  - **Webhook redeploy is implicit** — `flyctl deploy` itself triggers the rolling deploy on Fly's side. No separate webhook needed unless we want a Slack / Discord notification, which is a follow-up.
+- **Add the G92 deferred items to CI:**
+  - **G92c:** `pip-audit` + `npm audit` as a non-blocking job on every PR.
+  - **G92d:** rotate prod `SECRET_KEY` as a manual step in the deploy runbook (`docs/SECURITY.md` §3.2). NOT automated — too dangerous to do on every deploy.
+
+#### Code quality + dead code sweep
+- Run `vulture app/ --min-confidence 80` → identify unused functions / classes / variables. Manually triage each (some are intentionally unused, like exception classes we want available).
+- Run `knip` (or `ts-prune`) on `frontend/` → identify unused exports / files. Remove unambiguous dead code.
+- Run `radon cc app/ -s` → flag any function with cyclomatic complexity > 10. Refactor the worst offenders (likely candidates: `app/game/ws.py:_handle_action`, `app/game/logic.py:apply_dice`).
+- **Output:** a short `docs/CODE_QUALITY_2026-06.md` summarizing what was removed + what was refactored + what was deliberately kept. Modeled on the G92 punch list.
+
+#### Sphinx + ReadTheDocs
+- Add `sphinx`, `sphinx-rtd-theme`, `sphinx-autodoc-typehints` to `requirements-dev.txt`.
+- `docs/source/conf.py` — autodoc the `app/` package, point at the GitHub repo, set the theme.
+- `docs/source/index.rst` — table of contents linking to:
+  - Quickstart (port + DB setup, copied from README)
+  - Architecture overview (high-level: FastAPI + WS + Postgres + React)
+  - API reference (autogenerated from FastAPI's OpenAPI schema)
+  - Game rules (the actual 421 rules — currently buried in `app/game/logic.py` comments)
+  - Module reference (autodoc dump of `app/`)
+  - The existing `docs/SECURITY.md` + `docs/SECURITY_AUDIT_2026-06.md`
+- ReadTheDocs setup: create a project at readthedocs.io pointed at this repo, branch `main`, autodetect Python config. Lives at `421bistro.readthedocs.io`.
+- Add a build badge to README + a "Documentation" section linking out.
+
+#### README rewrite
+- Current README is mostly setup instructions. Rewrite to:
+  - One-paragraph "what is 421 Bistro" (the game, the goal, who it's for).
+  - Screenshot / GIF of gameplay.
+  - Badges: CI status, ReadTheDocs build, coverage, license.
+  - Quickstart: docker-compose up + `npm run dev` + first registration.
+  - Architecture overview (1 paragraph + a link to the Sphinx docs).
+  - Contributing notes (branch naming, PR style, where the test suite lives).
+  - License + contact.
+
+**Acceptance:**
+- `git push origin main` triggers a Fly deploy automatically (verified by force-pushing a no-op commit + watching the workflow).
+- `pip-audit` + `npm audit` jobs visible on every PR (non-blocking initially, can be flipped to blocking later).
+- `docs/CODE_QUALITY_2026-06.md` summary committed.
+- `421bistro.readthedocs.io` builds successfully from main; badge in README links to it.
+- README has the rewritten structure with a working screenshot or GIF.
+
+**Effort:** ~3-4 days. **Launch-blocker for the CI/CD portion**; docs + README polish can ship same-PR but aren't blockers.
 **Why:** Discovered during G90 manual smoke testing: a user registered with username `BigBite420` and the signup endpoint accepted it. Same gap exists anywhere else free-form user content surfaces (display names, future profile bios, future chat). The avatar upload path is already gated by [[G46]]'s AI moderation — text inputs need parallel coverage. Without this, day-one public traffic could pollute the leaderboard with offensive handles that are then visible everywhere a user is mentioned.
 
 **Two-layer defense (industry standard for username gates):**
@@ -1493,6 +1676,94 @@ After [[G31a]] lands (three.js + cannon-es 3D dice prototype), replace the homep
 - G94b: [[G31a]] (three.js + cannon-es prototype must exist).
 
 **Recommendation:** Ship G94a after [[G77]] launch as a polish PR (1 evening of work, immediate visible value to new visitors). Upgrade to G94b whenever G31 lands.
+
+### G95. Room moderation surface — admin list + spectate + kick + dissolve + broadcast
+**Why:** Admin has user-level tooling ([[G90]]) but zero room-level tooling. If a live room turns toxic mid-game, an admin's only option today is to ban individual players reactively. We need: live list of active rooms, spectator entry into any room, admin-kick stronger than host-kick (kick + 1h chat-ban), nuclear dissolve-room option with audit, broadcast-banner to all sockets in a room.
+
+**Backend endpoints:**
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/admin/rooms` | List all active rooms (public + private). Returns: game_code, phase, host name, player count, max players, started_at, in-progress flag, top-3 players by tokens |
+| `GET` | `/api/admin/rooms/{game_id}` | Detail — full player roster + connection state + recent log entries + bot-decision count |
+| `POST` | `/api/admin/rooms/{game_id}/broadcast` | Send a server-message banner to ALL connected sockets in the room. Body: `{message_fr, message_en, severity: 'info' \| 'warning' \| 'critical'}` |
+| `POST` | `/api/admin/rooms/{game_id}/kick` | Admin kick — uses existing `kicked` WS message but with reason `admin_action`. Stronger than host-kick: also fires a 1h chat-ban for the kicked user to prevent immediate rejoin. Admin can kick the host. |
+| `POST` | `/api/admin/rooms/{game_id}/dissolve` | Nuclear option — disconnect all sockets, persist any in-flight partie's stats, dissolve the room. Notifies all players with a banner explaining why. Body: `{reason}`. |
+
+**Frontend:**
+- `/admin/rooms` — paginated room list with status badges, sortable by player_count / started_at
+- `/admin/rooms/:gameId` — detail view with action buttons (Spectate, Broadcast, Kick player, Dissolve room)
+- BroadcastModal: textarea + severity radio → renders as colored non-dismissible banner across the top of the game UI for the duration
+- KickModal: pick player + reason
+- DissolveModal: type-room-code-to-confirm (matches the delete-user pattern from G90)
+- WS frontend gains an `admin_broadcast` message-type handler → renders the banner
+
+**Admin vs host kick differences:**
+- Host kick: target sees `kicked` modal, can rejoin via lobby
+- Admin kick: target sees `kicked` modal AND gets a 1h chat-ban → cannot immediately re-join with chat privileges
+- Admin can kick the host (host cannot kick admin)
+- Admin dissolve: room is gone entirely; everyone redirected home with audit-logged reason
+
+**Admin-spectate visibility decision** (deferred from design conversation): admin-spectator sees the full state INCLUDING private dice mid-throw (cheat-detection use case). Differs from normal spectator ([[G87]]) which hides private state. Logged as `admin_spectate_started` for audit.
+
+**Acceptance:** A live room turns sour → admin opens `/admin/rooms` → clicks into the misbehaving room → broadcasts a warning banner → if it persists, kicks the offender (1h chat-ban applied automatically) → if game keeps going off-rails, dissolves the room with reason. All actions audit-logged.
+
+**Dependencies:** [[G90]] ✅ (admin tooling foundation); [[G87]] optional (spectator role on WS side — admin-spectate can ship with relaxed privacy and a TODO to tighten when G87 lands).
+
+**Effort:** ~2-3 days. **Launch-blocker** per the "must-ship admin moderation" decision.
+
+### G97. (DONE) Registration form polish — async username check, password toggle, confirm field, birthdate bounds
+**Why:** Five UX gaps discovered during G90/G96 smoke tests, bundled into one polish PR.
+
+**Shipped:**
+- `GET /auth/username-available` async check with debounced 500ms blur trigger
+- Per-field error highlighting (red border + inline message) replacing the form-bottom error summary
+- Password show/hide toggle (SVG eye icons) on both login + register
+- Confirm-password field with green-border + check on match
+- Birthdate bounds tightened to 15-120 years (catches 1889-style typos)
+- Split « Username already taken » vs « Email already taken » so the correct field highlights
+- Soft-delete now anonymizes username + email so handles are reusable
+
+**Bundled fixes:**
+- G49 (password toggle) — shipped here
+- Username-vs-email collision conflation fix
+- Self-delete + admin-availability checks ignore soft-deleted rows
+
+**Reusable components:** `PasswordInput.jsx`, `FormField.jsx` — usable in future reset-password / change-password flows.
+
+### G98. Rank centralization — single source of truth + unranked display + tooltip
+**Why:** Discovered during G90 smoke test: a freshly-registered user with 0 parties shows ELO=1200 + « Amateur » badge everywhere (Profile, Rankings, Login marketing). That's misleading — they didn't earn the rank, it's just the algorithm's starting value. Plus the rank config (badge thresholds + names) is duplicated across `app/routers/rankings.py:BADGES`, `frontend/src/utils/badge.js`, the login marketing copy in `i18n/index.js`, and inline in `Profile.jsx`/`Rankings.jsx`. Touching the ladder = a four-file change.
+
+**Scope:**
+
+**Backend** (`app/services/ranks.py` — new module):
+- `BADGES: tuple[tuple[int, str, str], ...]` — single source of truth: `((1700, "Maître", "👑"), (1500, "Expert", "🥇"), …)`
+- `get_badge(elo: int, parties_played: int = 1) -> tuple[str, str] | None` — returns `None` when `parties_played < 1` (the unranked case). Existing callers in `rankings.py` import from here and stop maintaining their own list.
+- ELO starting value stays 1200 (industry standard for any ELO system that needs an algorithm baseline). The UI just doesn't *show* it until the user has earned it.
+
+**Frontend** (`frontend/src/utils/ranks.js`):
+- Mirrors the backend tuple. Single export `BADGES` + `badge(elo, partiesPlayed)` returning `{name, icon}` or `null`.
+- Existing `frontend/src/utils/badge.js` becomes a thin re-export (or gets removed once consumers migrate).
+- Login marketing copy reads the badge ladder from this module instead of hardcoded i18n strings — when thresholds change, the home page reflects automatically.
+
+**Unranked display on public surfaces:**
+- Profile.jsx → ELO display shows « — » (em-dash) instead of « 1200 » when `parties_played === 0`. Subtitle changes from « Amateur » to « Non classé(e) » / « Unranked ».
+- Rankings.jsx → unranked players hidden from the top-50 list entirely (they wouldn't add value anyway; the leaderboard exists to surface earned standings).
+- Login marketing → no change (it shows the badge ladder, not any particular user's rank).
+- Admin user list already does this correctly via G90 — no change needed.
+
+**RankTooltip component:**
+- Hover/tap on the ELO display in Profile shows a popover with the full ladder + the player's current position highlighted.
+- Same component used on Rankings page header (info icon next to « Classement »).
+- Tap-friendly on mobile (toggle on tap, dismiss on outside-tap).
+
+**Acceptance:**
+- Newly registered user has Profile showing « — · Non classé(e) » instead of « 1200 · Amateur ».
+- After their first partie, the rank appears correctly per the shared module.
+- Editing `BADGES` in `app/services/ranks.py` + `frontend/src/utils/ranks.js` is the only change needed to shift the ladder.
+- Tooltip on Profile ELO reveals the full ladder with current rank highlighted.
+
+**Effort:** ~half day. Pure refactor + UX polish. **Not a launch-blocker** but ships cheaply before G95.
 
 ### G61. Right-rail panels become collapsible "tabs"
 **Why:** Reported during playtest. The right `<aside>` today is a fixed layout: collapsible **Journal** on top, *always-visible* **Combo hierarchy** at the bottom. The user wants the hierarchy to collapse the same way the journal does — and more broadly, they want the right rail to behave like a small set of *stackable tabs* (Journal · Hierarchy · later: Chat) that each open/close independently. This sets up the eventual chat slot ([[G59]]) without ripping out the existing panels.

@@ -49,8 +49,8 @@ export function AdminDashboard({ user, token }) {
         <SummaryGrid summary={summary} t={t} />
       )}
 
-      {/* G90: real navigation panels replacing PanelStub placeholders */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.2rem', marginTop: '2rem' }} className="admin-panels">
+      {/* G90 + G95: navigation panels */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1.2rem', marginTop: '2rem' }} className="admin-panels">
         <Link to="/admin/users" className="admin-nav-card" style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}>
           <div className="card" style={{ padding: '1.4rem', cursor: 'pointer', transition: 'background 0.15s, transform 0.1s', height: '100%' }}>
             <div className="eyebrow">{t('admin_panel_users_eyebrow')}</div>
@@ -59,6 +59,20 @@ export function AdminDashboard({ user, token }) {
             </h3>
             <p className="serif" style={{ margin: 0, color: 'var(--ink-soft)', fontSize: '0.92rem', lineHeight: 1.45 }}>
               {t('admin_panel_users_body_g90')}
+            </p>
+            <div className="mono" style={{ marginTop: 12, fontSize: '0.78rem', color: 'var(--rouge)' }}>
+              {t('admin_open')} →
+            </div>
+          </div>
+        </Link>
+        <Link to="/admin/rooms" className="admin-nav-card" style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}>
+          <div className="card" style={{ padding: '1.4rem', cursor: 'pointer', transition: 'background 0.15s, transform 0.1s', height: '100%' }}>
+            <div className="eyebrow">{t('admin_panel_rooms_eyebrow')}</div>
+            <h3 className="display" style={{ fontSize: '1.3rem', margin: '0.3rem 0 0.6rem' }}>
+              {t('admin_panel_rooms_title')}
+            </h3>
+            <p className="serif" style={{ margin: 0, color: 'var(--ink-soft)', fontSize: '0.92rem', lineHeight: 1.45 }}>
+              {t('admin_panel_rooms_body_g95')}
             </p>
             <div className="mono" style={{ marginTop: 12, fontSize: '0.78rem', color: 'var(--rouge)' }}>
               {t('admin_open')} →

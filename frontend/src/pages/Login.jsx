@@ -127,7 +127,7 @@ function LoginForm({ t, lang, onLogin, onGoogleLogin, onSwitch, onNav }) {
         </label>
       </div>
       {generalError && <p style={{ color: 'var(--rouge)', fontSize: '0.9rem', margin: 0 }}>{generalError}</p>}
-      <button type="submit" disabled={loading} className="btn btn-primary" style={{ justifyContent: 'center', marginTop: '0.5rem' }}>
+      <button data-testid="login-submit" type="submit" disabled={loading} className="btn btn-primary" style={{ justifyContent: 'center', marginTop: '0.5rem' }}>
         {loading ? '…' : t('login')}
       </button>
       <div style={{ textAlign: 'center' }}>
@@ -143,7 +143,7 @@ function LoginForm({ t, lang, onLogin, onGoogleLogin, onSwitch, onNav }) {
         {t('play_guest')}
       </button>
       <p style={{ textAlign: 'center', marginTop: '0.5rem', fontSize: '0.95rem', color: 'var(--ink-mute)' }} className="serif">
-        {t('new_to_421')}<button type="button" className="btn-link" onClick={onSwitch}>{t('register')}</button>
+        {t('new_to_421')}<button data-testid="switch-to-register" type="button" className="btn-link" onClick={onSwitch}>{t('register')}</button>
       </p>
     </form>
   )
@@ -393,7 +393,7 @@ function RegisterForm({ t, lang, onRegister, onGoogleLogin, onSwitch, onNav }) {
         </label>
       </div>
       {generalError && <p style={{ color: 'var(--rouge)', fontSize: '0.9rem', margin: 0 }}>{generalError}</p>}
-      <button type="submit" disabled={loading} className="btn btn-primary" style={{ justifyContent: 'center', marginTop: '0.5rem' }}>
+      <button data-testid="register-submit" type="submit" disabled={loading} className="btn btn-primary" style={{ justifyContent: 'center', marginTop: '0.5rem' }}>
         {loading ? '…' : t('register')}
       </button>
       <div className="hr-orn" style={{ margin: '0.5rem 0' }}>

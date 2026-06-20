@@ -1,4 +1,10 @@
-"""Rankings and player profile endpoints (G91 stats redesign)."""
+"""Rankings and player profile endpoints (G91 stats redesign).
+
+G98: badge ladder now lives in `app/services/ranks.py` (single source
+of truth shared by both backend + frontend mirror module). Unranked
+users (parties_played == 0) get badge=None instead of "Amateur" by
+accident of their algorithm-baseline ELO of 1200.
+"""
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -8,24 +14,9 @@ from app.db.base import get_db
 from app.db.models import Game as GameRecord
 from app.db.models import GamePlayer, PlayerStats, User
 from app.schemas.rankings import GameHistoryEntry, PlayerRank, ProfileResponse, RankingsResponse
+from app.services.ranks import get_badge
 
 router = APIRouter(tags=["rankings"])
-
-BADGES = [
-    (1700, "Maître", "👑"),
-    (1500, "Expert", "🥇"),
-    (1300, "Confirmé", "🥈"),
-    (1100, "Amateur", "🥉"),
-    (0, "Débutant", "🎲"),
-]
-
-
-def get_badge(elo: int) -> tuple[str, str]:
-    """Return (badge_name, icon) for the given ELO score."""
-    for threshold, name, icon in BADGES:
-        if elo >= threshold:
-            return name, icon
-    return "Débutant", "🎲"
 
 
 def _survival_rate(stats: PlayerStats) -> float:
@@ -43,17 +34,25 @@ def _manche_resilience(stats: PlayerStats) -> float:
 
 @router.get("/api/rankings", response_model=RankingsResponse)
 async def rankings(db: AsyncSession = Depends(get_db)):
-    """Return the top-50 players ordered by ELO descending."""
+    """Return the top-50 ranked players ordered by ELO descending.
+
+    G98: unranked users (parties_played == 0) are excluded entirely.
+    The leaderboard exists to surface earned standings — listing a
+    page of unranked 1200-ELO users would dilute the signal.
+    """
     result = await db.execute(
         select(PlayerStats, User.username)
         .join(User, User.id == PlayerStats.user_id)
-        .where(User.deleted_at.is_(None))
+        .where(User.deleted_at.is_(None), PlayerStats.games_played > 0)
         .order_by(PlayerStats.elo.desc())
         .limit(50)
     )
     players = []
     for stats, username in result:
-        badge, icon = get_badge(stats.elo)
+        badge_pair = get_badge(stats.elo, stats.games_played)
+        # In this branch we already filtered for games_played > 0 so
+        # badge_pair is always non-None — keep the unpacking safe anyway.
+        badge, icon = badge_pair if badge_pair else (None, None)
         players.append(
             PlayerRank(
                 username=username,
@@ -108,7 +107,8 @@ async def profile(username: str, db: AsyncSession = Depends(get_db)):
             )
         )
 
-    badge, icon = get_badge(stats.elo)
+    badge_pair = get_badge(stats.elo, stats.games_played)
+    badge, icon = badge_pair if badge_pair else (None, None)
     return ProfileResponse(
         username=user.username,
         elo=stats.elo,

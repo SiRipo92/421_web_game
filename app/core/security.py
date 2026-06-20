@@ -38,14 +38,23 @@ def verify_password(plain: str, hashed: str) -> bool:
     return _bcrypt.checkpw(plain.encode()[:_MAX_PW_BYTES], hashed.encode())
 
 
-def create_access_token(user_id: str, remember_me: bool = False) -> str:
-    """Issue a signed JWT; remember_me extends TTL from minutes to days."""
+def create_access_token(user_id: str, remember_me: bool = False, token_version: int = 0) -> str:
+    """Issue a signed JWT; remember_me extends TTL from minutes to days.
+
+    G92: `tv` (token_version) is embedded so we can globally invalidate
+    a user's outstanding tokens by bumping their stored counter (e.g. on
+    password reset).
+    """
     if remember_me:
         delta = timedelta(days=settings.remember_me_expire_days)
     else:
         delta = timedelta(minutes=settings.access_token_expire_minutes)
     expire = datetime.now(UTC) + delta
-    return jwt.encode({"sub": user_id, "exp": expire}, settings.secret_key, algorithm=ALGORITHM)
+    return jwt.encode(
+        {"sub": user_id, "exp": expire, "tv": token_version},
+        settings.secret_key,
+        algorithm=ALGORITHM,
+    )
 
 
 async def _user_from_token(token: str, db: AsyncSession) -> Optional[User]:
@@ -53,12 +62,22 @@ async def _user_from_token(token: str, db: AsyncSession) -> Optional[User]:
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
         user_id: str = payload.get("sub")
+        token_version: int = payload.get("tv", 0)
         if user_id is None:
             return None
     except JWTError:
         return None
     result = await db.execute(select(User).where(User.id == user_id, User.deleted_at.is_(None)))
-    return result.scalar_one_or_none()
+    user = result.scalar_one_or_none()
+    if user is None:
+        return None
+    # G92: token issued before the last password reset / kill-sessions
+    # event → reject. Old tokens minted without `tv` carry 0; existing
+    # users default to token_version=0 on the schema upgrade, so prior
+    # sessions stay valid until the next reset bumps it.
+    if token_version != user.token_version:
+        return None
+    return user
 
 
 async def _refresh_last_seen(user: User, db: AsyncSession) -> None:

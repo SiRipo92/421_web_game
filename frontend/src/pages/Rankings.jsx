@@ -46,7 +46,7 @@ export function Rankings({ user }) {
                 <Avatar name={p?.username} size={3} />
                 <div className="display" style={{ fontSize: isFirst ? '1.3rem' : '1.1rem', marginTop: 8 }}>{p?.username}</div>
                 <div className="mono" style={{ fontSize: '0.85rem', opacity: 0.7 }}>{p?.elo} Elo</div>
-                <div className="serif" style={{ fontStyle: 'italic', marginTop: 4, fontSize: '0.85rem' }}>{badge(p?.elo ?? 0)}</div>
+                <div className="serif" style={{ fontStyle: 'italic', marginTop: 4, fontSize: '0.85rem' }}>{badge(p?.elo ?? 0, p?.games_played ?? 1)}</div>
               </div>
             )
           })}
@@ -87,7 +87,7 @@ export function Rankings({ user }) {
                       {p.username}
                       {isSelf && <span className="tag tag-rouge" style={{ fontSize: '0.55rem', marginLeft: 4 }}>{t('you_badge')}</span>}
                     </div>
-                    <div className="mono" style={{ fontSize: '0.7rem', color: 'var(--ink-mute)' }}>{badge(p.elo)}</div>
+                    <div className="mono" style={{ fontSize: '0.7rem', color: 'var(--ink-mute)' }}>{badge(p.elo, p.games_played)}</div>
                   </div>
                 </div>
                 <div className="mono" style={{ fontWeight: 700, fontSize: '1.05rem' }}>{p.elo}</div>

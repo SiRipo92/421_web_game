@@ -24,7 +24,7 @@ export function Game({ token }) {
   const [params] = useSearchParams()
   const playerId = params.get('pid')
   const navigate = useNavigate()
-  const { state, roll, keep, done, initialRoll, tiebreakRoll, leave, kick, updateRoomRules } = useGame(gameId, playerId, token)
+  const { state, roll, keep, done, initialRoll, tiebreakRoll, leave, kick, updateRoomRules, dismissAdminBroadcast, dismissEvictionWarning } = useGame(gameId, playerId, token)
   const logRef = useRef(null)
   // G64: switch to the mobile-shell layout at ≤ 959 px viewports.
   const isMobile = useMediaQuery('(max-width: 959px)')
@@ -851,6 +851,148 @@ export function Game({ token }) {
           onClose={() => navigate('/')}
         />
       )}
+
+      {/* G95: admin broadcast banner — non-dismissible by user (closes only
+          when admin sends a fresh one or via the dismiss button after the
+          admin tells you to). Severity controls the color. */}
+      {state.adminBroadcast && (
+        <AdminBroadcastBanner banner={state.adminBroadcast} lang={lang} onDismiss={dismissAdminBroadcast} t={t} />
+      )}
+
+      {/* G95: room dissolved by admin — full takeover screen with the
+          reason, redirects home on click. */}
+      {state.roomDissolved && (
+        <RoomDissolvedOverlay t={t} reason={state.roomDissolved.reason} onClose={() => navigate('/')} />
+      )}
+
+      {/* G93: AFK eviction warning toast — backend targets only the
+          affected player's sockets so the toast naturally only shows
+          for them. Dismissible. */}
+      {state.evictionWarning && (
+        <EvictionWarningToast banner={state.evictionWarning} onDismiss={dismissEvictionWarning} t={t} />
+      )}
+
+      {/* G93: this player was evicted for AFK. Overlay shows ONLY when
+          the evicted player is us — others see the roster shrink via
+          the regular state broadcast. */}
+      {state.playerEvicted && state.playerEvicted.playerId === playerId && (
+        <EvictedOverlay
+          t={t}
+          elapsedMinutes={state.playerEvicted.elapsedMinutes}
+          onClose={() => navigate('/')}
+        />
+      )}
+    </div>
+  )
+}
+
+function EvictionWarningToast({ banner, onDismiss, t }) {
+  const mins = Math.max(1, Math.ceil(banner.secondsRemaining / 60))
+  return (
+    <div role="alert" style={{
+      position: 'fixed', top: 16, right: 16, zIndex: 95,
+      background: 'var(--paper)', border: '2px solid var(--rouge)',
+      borderRadius: 6, padding: '0.9rem 1.1rem',
+      boxShadow: '0 6px 18px rgba(168,48,42,0.25)',
+      maxWidth: 320,
+    }}>
+      <div className="eyebrow" style={{ color: 'var(--rouge)', fontSize: '0.6rem', marginBottom: 4 }}>
+        {t('eviction_warning_eyebrow')}
+      </div>
+      <p className="serif" style={{ margin: 0, fontSize: '0.92rem', lineHeight: 1.4 }}>
+        {t('eviction_warning_body', { mins })}
+      </p>
+      <button type="button" className="btn-link" onClick={onDismiss}
+        aria-label={t('eviction_warning_dismiss')}
+        style={{ position: 'absolute', top: 6, right: 8, fontSize: '1rem', color: 'var(--ink-mute)' }}>
+        ×
+      </button>
+    </div>
+  )
+}
+
+function EvictedOverlay({ t, elapsedMinutes, onClose }) {
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', zIndex: 200,
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+    }}>
+      <div className="card" style={{ maxWidth: 500, padding: '2rem', textAlign: 'center', background: 'var(--paper)' }}>
+        <div className="eyebrow" style={{ color: 'var(--rouge)', marginBottom: 8 }}>
+          {t('evicted_eyebrow')}
+        </div>
+        <h2 className="display" style={{ fontSize: '1.6rem', margin: '0 0 1rem' }}>
+          {t('evicted_title')}
+        </h2>
+        <p className="serif" style={{ margin: '0 0 1rem', color: 'var(--ink-soft)' }}>
+          {t('evicted_intro', { mins: elapsedMinutes })}
+        </p>
+        <p className="serif" style={{ margin: '0 0 1.5rem', color: 'var(--ink-mute)', fontSize: '0.88rem' }}>
+          {t('evicted_stats_note')}
+        </p>
+        <button type="button" className="btn btn-primary" onClick={onClose}>
+          {t('evicted_back_home')}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function AdminBroadcastBanner({ banner, lang, onDismiss, t }) {
+  const message = lang === 'en' ? banner.message_en : banner.message_fr
+  const colors = {
+    info: { bg: 'rgba(196, 140, 40, 0.12)', border: 'var(--brass)', text: 'var(--ink)' },
+    warning: { bg: 'rgba(196, 140, 40, 0.22)', border: 'var(--brass-deep)', text: 'var(--ink)' },
+    critical: { bg: 'rgba(168, 48, 42, 0.18)', border: 'var(--rouge)', text: 'var(--ink)' },
+  }
+  const c = colors[banner.severity] || colors.info
+  return (
+    <div role="status" style={{
+      position: 'fixed', top: 0, left: 0, right: 0, zIndex: 90,
+      background: c.bg, borderBottom: `2px solid ${c.border}`,
+      padding: '0.7rem 1.2rem', display: 'flex', alignItems: 'center', gap: 12,
+      backdropFilter: 'blur(4px)',
+    }}>
+      <span aria-hidden="true" style={{ color: c.border, fontWeight: 700 }}>
+        {banner.severity === 'critical' ? '⚠' : banner.severity === 'warning' ? '!' : 'ⓘ'}
+      </span>
+      <strong className="serif" style={{ color: c.border, fontSize: '0.8rem', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+        {t('admin_broadcast_label')}
+      </strong>
+      <p className="serif" style={{ margin: 0, flex: 1, color: c.text }}>{message}</p>
+      <button type="button" className="btn-link" onClick={onDismiss}
+        aria-label={t('admin_broadcast_dismiss')}
+        style={{ fontSize: '1.2rem', padding: '0 0.5rem', color: c.border }}>
+        ×
+      </button>
+    </div>
+  )
+}
+
+function RoomDissolvedOverlay({ t, reason, onClose }) {
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', zIndex: 200,
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+    }}>
+      <div className="card" style={{ maxWidth: 500, padding: '2rem', textAlign: 'center', background: 'var(--paper)' }}>
+        <div className="eyebrow" style={{ color: 'var(--rouge)', marginBottom: 8 }}>
+          {t('room_dissolved_eyebrow')}
+        </div>
+        <h2 className="display" style={{ fontSize: '1.6rem', margin: '0 0 1rem' }}>
+          {t('room_dissolved_title')}
+        </h2>
+        <p className="serif" style={{ margin: '0 0 1rem', color: 'var(--ink-soft)' }}>
+          {t('room_dissolved_intro')}
+        </p>
+        <div className="ticket" style={{ padding: '0.9rem 1.1rem', marginBottom: '1.5rem', textAlign: 'left' }}>
+          <div className="eyebrow" style={{ fontSize: '0.6rem' }}>{t('admin_modal_reason')}</div>
+          <p className="serif" style={{ margin: '0.3rem 0 0' }}>{reason}</p>
+        </div>
+        <button type="button" className="btn btn-primary" onClick={onClose}>
+          {t('room_dissolved_back_home')}
+        </button>
+      </div>
     </div>
   )
 }

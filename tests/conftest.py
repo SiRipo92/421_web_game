@@ -73,9 +73,30 @@ def _bypass_email_deliverability(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _disable_rate_limit():
-    """Disable slowapi limits so back-to-back tests don't trip per-IP quotas."""
+    """Disable slowapi limits so back-to-back tests don't trip per-IP quotas.
+
+    Setting `limiter.enabled = False` is necessary but not sufficient — the
+    in-memory storage still accumulates counts in some code paths (the
+    `_inject_headers` branch evaluates `current_limit` even when disabled,
+    and certain test sequences leak counts across fixture teardowns). We
+    also reset the storage at both ends so a slow test on the previous
+    file can't poison the bucket for the next file's first test.
+
+    The symptom this guards against: `r.json()["access_token"]` raising
+    KeyError because the register call returned 429 mid-suite.
+    """
     limiter.enabled = False
+    try:
+        limiter._storage.reset()
+    except Exception:
+        # Some storage backends (e.g. Redis in CI) don't expose reset()
+        # — the enabled=False flag remains the primary defence.
+        pass
     yield
+    try:
+        limiter._storage.reset()
+    except Exception:
+        pass
     limiter.enabled = True
 
 

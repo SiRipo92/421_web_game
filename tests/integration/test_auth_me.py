@@ -6,6 +6,7 @@ import uuid
 async def _register_and_token(client, make_user) -> tuple[dict, str]:
     data = make_user()
     r = await client.post("/auth/register", json=data)
+    assert r.status_code == 201, f"register failed: {r.status_code} {r.text}"
     return data, r.json()["access_token"]
 
 
