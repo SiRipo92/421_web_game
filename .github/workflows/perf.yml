@@ -1,0 +1,89 @@
+name: Perf (k6)
+
+# G99: k6 backend perf scenarios. NOT run on every PR (too slow + too
+# noisy). Run on:
+#   - workflow_dispatch (manual trigger from the Actions tab)
+#   - PRs labelled `perf` (drop the label to skip on a re-push)
+# Results are uploaded as artifacts so reviewers can diff numbers PR-to-PR.
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [labeled, synchronize]
+    branches: [main, develop]
+
+jobs:
+  perf:
+    name: k6 perf suite
+    # Skip unless explicitly opted-in via label or manual dispatch.
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'perf')
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: fourtwentyone_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U app"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Alembic upgrade
+        run: alembic upgrade head
+        env:
+          DATABASE_URL: "postgresql+asyncpg://app:test@localhost:5432/fourtwentyone_test"
+
+      - name: Start FastAPI in the background
+        run: |
+          .venv/bin/uvicorn app.main:app --port 8421 --host 127.0.0.1 &
+          # Wait for /healthz to respond
+          for i in {1..30}; do
+            if curl -s http://localhost:8421/healthz; then break; fi
+            sleep 1
+          done
+        env:
+          PYTHONPATH: .
+          DATABASE_URL: "postgresql+asyncpg://app:test@localhost:5432/fourtwentyone_test"
+          SECRET_KEY: "ci-test-secret-key-not-for-production"
+          DEBUG: "true"
+
+      - name: Install k6
+        run: |
+          sudo gpg -k && sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update && sudo apt-get install -y k6
+
+      - name: Run auth_login scenario
+        run: k6 run perf/auth_login.js --summary-export=auth_login.json
+        env:
+          BASE_URL: "http://localhost:8421"
+
+      - name: Run room_lifecycle scenario
+        run: k6 run perf/room_lifecycle.js --summary-export=room_lifecycle.json
+        env:
+          BASE_URL: "http://localhost:8421"
+
+      # WS soak is long (5min) and only useful on dispatch — skip on PR-label runs.
+      - name: Run ws_broadcast scenario
+        if: github.event_name == 'workflow_dispatch'
+        run: k6 run perf/ws_broadcast.js --summary-export=ws_broadcast.json
+        env:
+          BASE_URL: "http://localhost:8421"
+
+      - name: Upload k6 summaries
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: k6-summaries
+          path: "*.json"
+          retention-days: 30

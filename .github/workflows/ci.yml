@@ -33,7 +33,7 @@ jobs:
         working-directory: frontend
 
   test:
-    name: Tests + coverage ≥ 80%
+    name: Tests + coverage ≥ 85%
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -69,7 +69,7 @@ jobs:
         # import time. In CI both point at the same DB (we only have one
         # service), but the env var has to be set for the safety guard
         # to let the suite run.
-        run: pytest tests/ -v --cov=app --cov-fail-under=80 --cov-report=xml --cov-report=term-missing
+        run: pytest tests/ -v --cov=app --cov-fail-under=85 --cov-report=xml --cov-report=term-missing
         env:
           DATABASE_URL: "postgresql+asyncpg://app:test@localhost:5432/fourtwentyone_test"
           TEST_DATABASE_URL: "postgresql+asyncpg://app:test@localhost:5432/fourtwentyone_test"

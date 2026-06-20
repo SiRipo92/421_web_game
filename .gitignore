@@ -49,3 +49,8 @@ cdc.txt
 frontend/node_modules/
 static/dist/
 prototype/
+
+# Playwright (G99)
+frontend/test-results/
+frontend/playwright-report/
+frontend/.playwright/
