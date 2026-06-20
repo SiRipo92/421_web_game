@@ -1519,6 +1519,91 @@ With these helpers in place, each new test becomes 20-40 lines, not 80-100.
 
 **Effort:** ~2-3 days. Not a launch-blocker.
 
+### G101. Post-launch v1 bug bundle — surfaced by first-day playtesting on prod (2026-06-21)
+
+First post-launch session on `421bistro.com` exposed a cluster of bugs that all break the "ongoing room with stats persistence" promise we made in the README. Tracking them as one entry because they share root causes; each item gets its own PR.
+
+#### 101a. Game room closes after 3 round-points instead of staying open
+
+**Symptom:** After one player accumulated 3 round-points (which should be the partie loss threshold = 5 by default, but the test room may have been configured to 3), the entire ROOM closed. Spec is: the partie ends → results persist → the *room stays open* for the next partie. The user (TheWitch) was left in the empty room with no notification and no actions available — just "Waiting" in the top banner.
+
+**Likely cause:** `_persist_partie_and_reset` in `app/game/logic.py` or its caller in `app/game/ws.py` is treating partie-end as room-end. Need to verify the room dissolve path isn't being triggered, and that `_start_new_partie` is called after persistence.
+
+**Acceptance:**
+- Multi-partie session: play partie 1 to its loss-threshold → loser is recorded → room transitions to partie 2 automatically → all players still connected can play
+- Integration test: drive a 2-player session through 2 consecutive parties; assert both are persisted to the DB and the room remains in the `games` registry after each
+
+#### 101b. Stats not persisted after a partie win
+
+**Symptom:** TheWitch finished a partie as the survivor (a real partie, not aborted). Profile still shows: 0 parties_played / 0 parties_survived / unranked ELO / no game history.
+
+**Likely cause:** Could be one of (a) `persist_completed_partie` is being called with `partie_loser_id` unset (the early-return path), (b) the broken room-close above is destroying state before `_persist_partie_and_reset` runs, (c) the new `_write` defensive UUID parse from G99 part 1 is silently skipping registered users. Need to add structured logging on the persist path to diagnose.
+
+**Acceptance:**
+- After a manual end-to-end partie, the survivor's profile shows `games_played: 1, parties_survived: 1, current_streak: 1` and the partie appears in their game history
+- Add a `tests/integration/test_partie_flow.py` that drives a full partie end-to-end through the WS handler and asserts DB persistence
+
+#### 101c. Host migration on disconnect doesn't notify remaining players + doesn't transfer ownership
+
+**Symptom:** When the room host disconnects mid-game, the remaining player (TheWitch on mobile) saw no notification — the UI just sat at "Waiting" with no actionable state. The room ownership did not migrate to TheWitch. They had to manually leave the abandoned room.
+
+**Required behaviour (per the original spec):**
+- When a player leaves, send a clear WS event to remaining players (toast or banner)
+- If the leaver was the host, transfer ownership to the longest-tenured remaining player
+- If the leaver was registered, persist their mid-partie stats (G98 already covers this)
+- The remaining player should see "You are now the host" + be able to start the next partie
+
+**Acceptance:**
+- Integration test: 2-player game → host disconnects → remaining player receives `player_left` event with `new_host: <their_id>` → they can now invoke host-only actions
+- Mobile UI: show a small banner "X left the room. You're the new host." when this happens
+
+#### 101d. No mobile roster + no mobile moderation actions
+
+**Symptom:** From mobile, there is no way to see who else is in the room (the roster panel is desktop-only). This means hosts/admins on mobile can't kick, can't ban, can't see usernames clearly for context, and can't initiate any future per-player feature (chat, DM, follow).
+
+**Scope:**
+- Add a roster drawer / bottom-sheet on `GameMobile.jsx`, accessible via a dedicated dock button
+- Each row: avatar + username + role pill + tokens + (if host or admin) kick/ban actions
+- Tap on a row → opens a sheet with available actions (extensible: future chat / DM / report)
+
+**Acceptance:**
+- On mobile, tapping a "🪑 Roster" dock button opens a bottom sheet with all current players
+- Host sees a "Kick" action per non-host player; admin sees "Kick" + "Chat-ban"
+- All actions go through the same backend endpoints already used by desktop
+
+#### 101e. In-game event surface — consolidate journal + live ticker + add inline announcement layer
+
+**Symptom:** Mobile users have to manually open the journal drawer to see what's happening. The opponent-play toast we just shipped (`fix/mobile-game-polish`) is one element of this, but the user wants every meaningful event (player committed, set the rhythm, tiebreak triggered, chips redistributed, pool emptied, partie ended) to surface inline as it happens, not buried in a drawer.
+
+Also: the current `Journal` + `Live ticker` drawers show different views of the same events. Should consolidate.
+
+**Scope (v2 redesign — bigger):**
+- Unified event log: one data source, one component, one drawer entry
+- Inline announcement layer above the dock: each meaningful event shows for ~4s, queued FIFO if multiple arrive in sequence
+- Theme-aware contrast: announcement card adapts to light/dark
+- Tap an announcement → opens the full event log filtered to that event type
+
+**Effort:** ~2 days. Worth a design pass first to nail the announcement vocabulary + which events deserve foreground vs background.
+
+#### 101f. Mobile baseline: target 360px minimum (currently breaks at 390px)
+
+**Symptom:** First user observation on an iPhone 13 (390px) showed multiple overflow/contrast issues. The current breakpoints (640px for mobile) work but the inline-style budgets were calibrated against ~768px tablets, not phones.
+
+**Scope:** sweep every authenticated page on a 360px viewport (Samsung Galaxy A03 territory). Pages most likely to have issues:
+- `Profile.jsx` — long stat labels + ELO chip layout
+- `Rankings.jsx` — table rows with multiple columns
+- `AdminUsers.jsx` / `AdminRooms.jsx` — moderation tables (admins on phones is real)
+- `CreateRoom.jsx` — form field widths
+- Profile-style cards anywhere on the home page
+
+**Acceptance:** every page loads cleanly on a 360x844 viewport with no horizontal scroll and every CTA visible without zooming.
+
+**Effort:** ~1 day. Mostly small CSS adjustments + a Playwright check-set at 360px viewport.
+
+---
+
+**Overall G101 priority:** 101a + 101b + 101c are launch-quality bugs — they break the "ongoing room with persistent stats" promise we sold. Tackle in that order. 101d + 101e + 101f are polish / v2 redesign items that can ship in subsequent PRs.
+
 ### G100. (legacy — superseded by G100a + G100b) Pre-launch infra bundle — CI/CD redeploy, code quality sweep, Sphinx + ReadTheDocs, README
 **Why:** Three things that are loosely-coupled but all touch "the project's exterior surface" — what someone sees in the README, what the docs site looks like, and what happens when you push to main. Bundling them keeps the review focused on infrastructure / DX rather than product behaviour.
 

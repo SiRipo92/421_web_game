@@ -168,20 +168,30 @@ export function GameMobile({
           <div className="gameroom-piste piste" style={{ position: 'absolute', inset: 0 }} role="region" aria-label="Piste de jeu">
             <ScoreToBeatBanner plays={state.current_round_plays} t={t} />
 
-            {/* Pool — focal centre */}
+            {/* Pool — focal centre. User feedback: show chips currently
+                in play (the dynamic stat that changes turn-to-turn) rather
+                than chips still in the bank — bank is a secondary number.
+                In-play = sum of all players' token holdings. */}
             <div
               className="gameroom-pool"
               style={{
-                position: 'absolute', top: '46%', left: '50%', transform: 'translate(-50%,-50%)',
-                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
+                position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)',
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
               }}
             >
-              {(state.pool ?? 0) > 0 && <ChipStack count={state.pool} size="large" />}
-              <span className="gameroom-pool-label eyebrow" style={{
-                fontSize: '0.78rem', color: 'var(--paper-deep)', letterSpacing: '0.12em',
-              }}>
-                {t('pool')} · <span className="mono" style={{ fontSize: '0.95rem', fontWeight: 700 }}>{state.pool ?? 0}</span>
-              </span>
+              {(() => {
+                const inPlay = (state.players || []).reduce((s, p) => s + (p.tokens || 0), 0)
+                return (
+                  <>
+                    {inPlay > 0 && <ChipStack count={inPlay} size="large" />}
+                    <span className="gameroom-pool-label eyebrow" style={{
+                      fontSize: '0.78rem', color: 'var(--paper-deep)', letterSpacing: '0.12em',
+                    }}>
+                      {t('chips_in_play')} · <span className="mono" style={{ fontSize: '0.95rem', fontWeight: 700 }}>{inPlay}</span>
+                    </span>
+                  </>
+                )
+              })()}
             </div>
 
             {/* Dice cluster — lifted to bottom: 14 % to clear the bottom

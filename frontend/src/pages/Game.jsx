@@ -497,6 +497,10 @@ export function Game({ token }) {
                   and the label bumps to 0.88rem so the pool count reads as
                   the centre of attention now that the piste itself is a bit
                   smaller. */}
+              {/* Desktop pool — match mobile: show chips currently in
+                  play, not chips still in the bank. The header
+                  CounterChip already shows the bank count, so this
+                  central display surfaces the more dynamic stat. */}
               <div
                 className="gameroom-pool"
                 style={{
@@ -504,17 +508,24 @@ export function Game({ token }) {
                   display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14,
                 }}
               >
-                {(state.pool ?? 0) > 0 && <ChipStack count={state.pool} size="large" />}
-                <span
-                  className="gameroom-pool-label eyebrow"
-                  style={{
-                    fontSize: '0.88rem',
-                    color: 'var(--paper-deep)',
-                    letterSpacing: '0.14em',
-                  }}
-                >
-                  {t('pool')} · <span className="mono" style={{ fontSize: '1rem', fontWeight: 700 }}>{state.pool ?? 0}</span>
-                </span>
+                {(() => {
+                  const inPlay = (state.players || []).reduce((s, p) => s + (p.tokens || 0), 0)
+                  return (
+                    <>
+                      {inPlay > 0 && <ChipStack count={inPlay} size="large" />}
+                      <span
+                        className="gameroom-pool-label eyebrow"
+                        style={{
+                          fontSize: '0.88rem',
+                          color: 'var(--paper-deep)',
+                          letterSpacing: '0.14em',
+                        }}
+                      >
+                        {t('chips_in_play')} · <span className="mono" style={{ fontSize: '1rem', fontWeight: 700 }}>{inPlay}</span>
+                      </span>
+                    </>
+                  )
+                })()}
               </div>
 
               {/* Dice cluster — anchored at the bottom of the felt.
