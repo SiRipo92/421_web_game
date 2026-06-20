@@ -65,13 +65,24 @@ class RegisterRequest(BaseModel):
     @field_validator("birthdate")
     @classmethod
     def age_minimum(cls, v: date) -> date:
-        """Reject registrations from users under 15 years old."""
+        """Reject birthdates that fall outside a plausible human range.
+
+        - Minimum: 15 (RGPD-aligned digital consent age in France).
+        - Maximum: 120 (documented upper bound of human lifespan;
+          oldest living person on record is ~117). Catches typos and
+          impossible years like 1889.
+        - Future dates: rejected as nonsense.
+        """
         from datetime import date as _date
 
         today = _date.today()
+        if v > today:
+            raise ValueError("Birthdate cannot be in the future")
         age = today.year - v.year - ((today.month, today.day) < (v.month, v.day))
         if age < 15:
             raise ValueError("You must be at least 15 years old to register")
+        if age > 120:
+            raise ValueError("Birthdate appears invalid (over 120 years ago)")
         return v
 
     @field_validator("lang_pref")
@@ -133,13 +144,17 @@ class CompleteProfileRequest(BaseModel):
     @field_validator("birthdate")
     @classmethod
     def age_minimum(cls, v: date) -> date:
-        """Reject users under 15 years old."""
+        """G97: same bounds as RegisterRequest — 15..120 years old, no future."""
         from datetime import date as _date
 
         today = _date.today()
+        if v > today:
+            raise ValueError("Birthdate cannot be in the future")
         age = today.year - v.year - ((today.month, today.day) < (v.month, v.day))
         if age < 15:
             raise ValueError("You must be at least 15 years old to register")
+        if age > 120:
+            raise ValueError("Birthdate appears invalid (over 120 years ago)")
         return v
 
 

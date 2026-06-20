@@ -646,6 +646,8 @@ const I18N = {
     err_pwd_uppercase: "Le mot de passe doit contenir au moins une majuscule.",
     err_pwd_special: "Le mot de passe doit contenir au moins un chiffre ou caractère spécial.",
     err_age_min: "Vous devez avoir au moins 15 ans pour vous inscrire.",
+    err_age_max: "Date de naissance invalide (plus de 120 ans).",
+    err_age_future: "La date de naissance ne peut pas être dans le futur.",
     err_accept_cgu: "Vous devez accepter les CGU.",
     err_reset_invalid: "Lien de réinitialisation invalide ou expiré.",
     // G97 — registration form polish
@@ -1416,6 +1418,8 @@ const I18N = {
     err_pwd_uppercase: "Password must contain at least one uppercase letter.",
     err_pwd_special: "Password must contain at least one number or special character.",
     err_age_min: "You must be at least 15 years old to sign up.",
+    err_age_max: "Invalid birthdate (over 120 years ago).",
+    err_age_future: "Birthdate cannot be in the future.",
     err_accept_cgu: "You must accept the terms and conditions.",
     err_reset_invalid: "Invalid or expired reset link.",
     // G97 — registration form polish

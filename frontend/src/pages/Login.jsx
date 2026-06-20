@@ -152,7 +152,13 @@ function LoginForm({ t, lang, onLogin, onGoogleLogin, onSwitch, onNav }) {
 const EMAIL_RE = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/
 
 const MIN_AGE_YEARS = 15
-const minBirthdate = () => new Date(Date.now() - MIN_AGE_YEARS * 365.25 * 86400000).toISOString().split('T')[0]
+const MAX_AGE_YEARS = 120
+// Browser <input type="date"> bounds: max = oldest date that lands at
+// MIN_AGE_YEARS (you must be at LEAST 15), min = oldest date that lands
+// at MAX_AGE_YEARS (catches typos like 1889). The date picker greys out
+// everything outside this range.
+const maxBirthdate = () => new Date(Date.now() - MIN_AGE_YEARS * 365.25 * 86400000).toISOString().split('T')[0]
+const minBirthdateAllowed = () => new Date(Date.now() - MAX_AGE_YEARS * 365.25 * 86400000).toISOString().split('T')[0]
 
 function SsoButtons({ t, lang, onGoogleSuccess, mode }) {
   return (
@@ -208,7 +214,9 @@ function RegisterForm({ t, lang, onRegister, onGoogleLogin, onSwitch, onNav }) {
   const usernameCheckIdRef = useRef(0)
 
   const pwdValid = isPwdValid(password)
-  const maxBirthdate = useMemo(() => minBirthdate(), [])
+  // Browser-side bounds: max = "must be at least 15", min = "must be at most 120".
+  const birthdateMax = useMemo(() => maxBirthdate(), [])
+  const birthdateMin = useMemo(() => minBirthdateAllowed(), [])
 
   // Debounce + check on username change.
   useEffect(() => {
@@ -274,6 +282,8 @@ function RegisterForm({ t, lang, onRegister, onGoogleLogin, onSwitch, onNav }) {
     if (!pwdValid) { setPasswordError(t('err_weak_password')); firstInvalid = firstInvalid || 'reg-password' }
     if (confirmPassword !== password) { setConfirmPasswordError(t('err_passwords_dont_match')); firstInvalid = firstInvalid || 'reg-confirm-password' }
     if (!birthdate) { setBirthdateError(t('err_field_required')); firstInvalid = firstInvalid || 'reg-birthdate' }
+    else if (birthdate < birthdateMin) { setBirthdateError(t('err_age_max')); firstInvalid = firstInvalid || 'reg-birthdate' }
+    else if (birthdate > birthdateMax) { setBirthdateError(t('err_age_min')); firstInvalid = firstInvalid || 'reg-birthdate' }
     if (!acceptCgu) { setAcceptCguError(t('err_accept_cgu')); firstInvalid = firstInvalid || 'accept-cgu' }
     if (firstInvalid) {
       const el = document.getElementById(firstInvalid)
@@ -287,6 +297,8 @@ function RegisterForm({ t, lang, onRegister, onGoogleLogin, onSwitch, onNav }) {
     } catch (err) {
       const msg = (err?.detail || '').toLowerCase()
       if (err?.status === 429) setGeneralError(t('err_rate_limit'))
+      else if (msg.includes('120')) setBirthdateError(t('err_age_max'))
+      else if (msg.includes('future')) setBirthdateError(t('err_age_future'))
       else if (msg.includes('15') || msg.includes('age')) setBirthdateError(t('err_age_min'))
       else if (msg.includes('email already taken')) setEmailError(t('err_email_taken'))
       else if (msg.includes('username already taken') || err?.status === 409) setUsernameError(t('err_username_taken'))
@@ -354,7 +366,7 @@ function RegisterForm({ t, lang, onRegister, onGoogleLogin, onSwitch, onNav }) {
       <FormField label={t('birthdate')} htmlFor="reg-birthdate" required error={birthdateError} hint={t('age_notice')}>
         <input id="reg-birthdate" className="input" type="date" required
           value={birthdate} onChange={e => { setBirthdate(e.target.value); if (birthdateError) setBirthdateError('') }}
-          max={maxBirthdate}
+          max={birthdateMax} min={birthdateMin}
           aria-invalid={birthdateError ? 'true' : 'false'}
           style={{ borderColor: birthdateError ? 'var(--rouge)' : undefined, boxShadow: birthdateError ? '0 0 0 2px rgba(168,48,42,0.18)' : undefined }} />
       </FormField>

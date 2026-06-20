@@ -66,11 +66,35 @@ async def test_register_email_collision_blames_email(client, make_user):
 
 
 async def test_register_underage_rejected(client, make_user):
-    """Birthdate that puts the user under 15 returns 422."""
-    data = make_user()
-    data["birthdate"] = "2015-01-01"
+    """G97: birthdate that puts the user under 15 returns 422."""
+    data = make_user("under15")
+    # Sliding window: 14 years ago always fails the >= 15 check.
+    from datetime import date
+
+    data["birthdate"] = date.today().replace(year=date.today().year - 14).isoformat()
     r = await client.post("/auth/register", json=data)
     assert r.status_code == 422
+    assert "15 years" in str(r.json()).lower() or "15 ans" in str(r.json())
+
+
+async def test_register_overage_rejected(client, make_user):
+    """G97: birthdate over 120 years ago returns 422 (catches 1889-style typos)."""
+    data = make_user("over120")
+    data["birthdate"] = "1889-01-01"
+    r = await client.post("/auth/register", json=data)
+    assert r.status_code == 422
+    assert "120" in str(r.json())
+
+
+async def test_register_future_birthdate_rejected(client, make_user):
+    """G97: a future birthdate is nonsense — reject with 422."""
+    data = make_user("future")
+    from datetime import date, timedelta
+
+    data["birthdate"] = (date.today() + timedelta(days=30)).isoformat()
+    r = await client.post("/auth/register", json=data)
+    assert r.status_code == 422
+    assert "future" in str(r.json()).lower()
 
 
 async def test_login_success(client, make_user):
