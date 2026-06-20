@@ -1335,6 +1335,64 @@ Promote tickets from "random slugs in email" to a real `ContactTicket(id, ref, f
 
 **Effort:** ~3 days (1 day audit + 2 days fixes). **Launch-blocker.**
 
+### G96. Username + profile-content moderation
+**Why:** Discovered during G90 manual smoke testing: a user registered with username `BigBite420` and the signup endpoint accepted it. Same gap exists anywhere else free-form user content surfaces (display names, future profile bios, future chat). The avatar upload path is already gated by [[G46]]'s AI moderation — text inputs need parallel coverage. Without this, day-one public traffic could pollute the leaderboard with offensive handles that are then visible everywhere a user is mentioned.
+
+**Two-layer defense (industry standard for username gates):**
+
+#### Layer 1 — Allowlist regex (cheap, catches noise)
+
+In `app/schemas/auth.py:username_valid`, replace the length-only check with:
+- Pattern: `^[a-zA-Z0-9_.-]{3,20}$` (letters, digits, underscore, dot, hyphen; 3-20 chars)
+- No spaces, no special chars, no unicode confusables
+- No leading/trailing dot or hyphen
+- No consecutive special chars (`__`, `..`, `--`)
+
+This alone eliminates `BigBite 420`, `B!gBite420`, emoji-spam, etc. without touching the blocklist.
+
+#### Layer 2 — Profanity blocklist (substring + l33t variants)
+
+- New module `app/services/content_moderation.py` exposing `is_clean_username(s: str) -> tuple[bool, str | None]` → returns `(False, reason)` for rejected handles.
+- Curated bilingual blocklist (FR + EN core terms, ~200 entries) stored in `app/data/username_blocklist.txt`. Loaded once at module import.
+- Before matching, normalize: lowercase, strip dots/hyphens/underscores, apply l33t → letter substitutions (`0→o, 1→i/l, 3→e, 4→a, 5→s, 7→t, 8→b, @→a, $→s`).
+- Substring match against the normalized form. Reject if any blocklist term appears.
+- Examples that should reject: `BigBite420`, `B1gB1te420`, `b.i.g.b.i.t.e`, `c0nnard`, `f4ck_y0u`, `m3rde`, every common slur in either language.
+- Edge: don't false-positive innocuous handles. `Assassin` should pass even though `ass` is a substring — the blocklist is for *complete words* and known compound bad-words, not raw substring sniffing on common letter sequences. Use a dedicated `BAD_SUBSTRINGS` list (matched anywhere) vs. `BAD_WORDS` list (matched only as whole token after normalization).
+
+#### Layer 3 — Optional AI moderation (defer)
+
+For edge cases ([[G46]] pattern), pass borderline usernames through Claude with a simple "is this username inappropriate, yes/no + reason" prompt. ~$0.0001 per check. Only triggered on usernames that pass layer 1 + 2 but look suspicious (heavy l33t, mixed scripts, very long). **Not in v1** — layers 1 + 2 catch 95% of cases.
+
+#### Where to enforce
+
+- **`POST /auth/register`** — fail with 422 `{detail: "Username contains inappropriate content"}` (don't reveal which term matched — prevents bypass-iteration).
+- **`POST /auth/complete-profile`** (Google SSO path) — same validation.
+- **`PATCH /auth/me`** (username rename, if/when added) — same.
+- **Admin override** — admin can set any username via `PATCH /api/admin/users/{id}/username` (new endpoint) to e.g. force-rename a violator. Bypasses the gate; audit logged as `username_forced_change`.
+
+#### Other free-form user content
+
+Same module gates:
+- Display names if/when separated from username
+- Profile bio (when [[G28]] lands or before)
+- Chat messages (delegated to [[G34]] AI moderation, but `is_clean_username` is the fast pre-filter)
+- Room names if/when custom-named rooms ship
+
+**Tests:**
+- Positive cases: `Sierra`, `marcel_dupont`, `user.42`, `bot-3` all pass
+- Layer 1 rejections: `Big Bite`, `b!t`, `..bad`, `verylongusernameindeedmuchlongerthan20`
+- Layer 2 rejections: `BigBite420`, `b1gb1te`, `c0nnard`, `m3rde`, every entry from a 20-name sample of the blocklist
+- Admin override: admin can rename a violator; audit row written
+
+**Acceptance:**
+- Registering with `BigBite420` returns 422
+- Registering with `Sierra` succeeds
+- Renaming an existing offensive account from admin works end-to-end
+
+**Effort:** ~1 day (regex + blocklist module + endpoint wiring + tests). **Launch-blocker.** Public-facing site cannot ship with this gap.
+
+**Dependencies:** None — pure backend + schema work. Could be its own small PR after G92.
+
 ### G93. Bot-takeover hard timeout — evict AFK player after N minutes
 **Why:** Today when a player goes AFK, the bot ([[G9]]) takes over and plays in their stead — indefinitely. Result: an AFK human keeps their seat forever, blocking new joiners and forcing a bot-vs-human dynamic for everyone else. The fix: after a configurable timeout (default 10 min, env-driven), the human is fully removed from the game so the seat frees up. If the slot has joinable replacements (the room is set to allow late-joins), the seat opens for spectators ([[G87]]) or for the lobby. If not, the bot continues but the row stays — closer to the existing flow.
 

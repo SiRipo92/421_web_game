@@ -192,7 +192,9 @@ export function AdminUsers({ user, token }) {
                   {u.role}
                 </div>
                 <StatusBadge status={u.status} t={t} />
-                <div className="mono" style={{ fontWeight: 600, fontSize: '0.85rem' }}>{u.elo}</div>
+                <div className="mono" style={{ fontWeight: 600, fontSize: '0.85rem', color: u.parties_played === 0 ? 'var(--ink-mute)' : 'var(--ink)' }}>
+                  {u.parties_played === 0 ? '—' : u.elo}
+                </div>
                 <div className="mono" style={{ fontSize: '0.75rem', color: 'var(--ink-mute)' }}>
                   {formatRelative(u.last_seen_at, t)}
                 </div>
