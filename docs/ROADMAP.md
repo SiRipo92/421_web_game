@@ -199,7 +199,17 @@ Each item has: *Why* (motivation), *Scope* (what changes), *Acceptance* (how we 
 - New table `Notification(user_id, kind, payload jsonb, read_at, created_at)`.
 - Endpoints: `GET /api/notifications`, `POST /api/notifications/{id}/read`, WS push channel on the user's auth WS (or SSE).
 - Profile page: notifications bell with unread count + a panel that lists recent.
-- First populators: G28 (friends) and G29 (invites).
+- **Populators** (each event type maps to one Notification row + bell counter increment):
+    * Friend request received / accepted ([[G28]])
+    * Game invite received ([[G29]])
+    * Rank promotion (your ELO crossed into a new badge tier — [[G82]])
+    * Moderation action against you: ban, chat-ban, account deletion ([[G90]] emits these via GdprAuditLog — mirror to Notification on write)
+    * **Admin room broadcast** received ([[G95]] — currently a WS-only banner that disappears on dismiss; should also create a persistent Notification so the user has a record after dismissing)
+    * **Admin kick** from a room ([[G95]])
+    * **AFK eviction** ([[G93]] — currently a one-shot overlay + email; persistent Notification gives the user a way to look back at what room they were evicted from + when)
+    * Account deletion warning (T-30d / T-7d / T+0 inactive cron — [[G70]] + [[G83]])
+- **Email gating:** the Notification is created regardless of `email_opt_in`. The corresponding *email* still respects opt-in for non-transactional events (e.g. rank promotion). Transactional events (moderation, eviction, deletion) get both the Notification AND the email regardless of opt-in.
+- **Schema decision:** the audit-log → notification mirror happens at write time (not via a reader joining the two tables) so the Notification table can be queried without the heavier GdprAuditLog joins.
 
 ### G28. Follow system + presence indicators
 **Why:** Asymmetric follow (Sierra follows June; June doesn't auto-follow back). Like Twitter/Instagram, not Facebook friends. Combined with a presence layer ([[G88]]), this lets users see who's online, who's currently in a game, and when offline followers were last seen — the foundation for "join my friend's game" without needing an invite-accept dance.
