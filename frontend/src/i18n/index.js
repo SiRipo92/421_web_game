@@ -1032,7 +1032,7 @@ const I18N = {
     unranked: "Unranked",
     rank_tooltip_title: "Ranking system",
     rank_tooltip_subtitle: "Your rounds survived and lost define your Elo. Surviving pushes you up; losing pulls you down.",
-    rank_tooltip_unranked_hint: "Play your first partie to enter the ranking.",
+    rank_tooltip_unranked_hint: "Play your first round to enter the ranking.",
     rank_show_ladder: "Show all ranks",
     regular_since: "regular since",
     parties_played: "Rounds played",
