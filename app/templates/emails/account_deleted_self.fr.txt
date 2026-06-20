@@ -1,0 +1,23 @@
+{% extends "_base.txt" %}
+{% block body %}
+Bonjour {{ username }},
+
+Nous confirmons votre demande de suppression de compte. Nous sommes
+désolés de vous voir partir.
+
+Vos données personnelles seront définitivement effacées dans 24 heures.
+Pendant cette période :
+  - Votre compte est désactivé.
+  - Vos statistiques et votre historique sont en attente d'effacement.
+  - Si vous changez d'avis, vous pouvez restaurer votre compte en vous
+    reconnectant avant l'expiration du délai.
+
+Pour restaurer votre compte :
+{{ app_url }}/login
+
+Passé ce délai, l'effacement est irréversible (RGPD Art. 17 - droit
+à l'oubli).
+
+Merci d'avoir joué au 421 Bistro. Si vous souhaitez nous expliquer ce
+qui vous a fait partir, contactez-nous : {{ app_url }}/contact
+{% endblock %}

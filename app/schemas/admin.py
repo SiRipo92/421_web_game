@@ -96,10 +96,13 @@ class DeleteAccountRequest(BaseModel):
 
     The frontend modal forces the admin to type the exact username before
     enabling the submit button. Server-side we re-verify for safety in case
-    the modal is bypassed (curl, replay, etc.).
+    the modal is bypassed (curl, replay, etc.). Optional reason is included
+    in the account_deleted_admin email + persisted to the audit log so the
+    deletion has documented context.
     """
 
     confirm_username: str
+    reason: Optional[str] = None
 
 
 class AdminAuditListResponse(BaseModel):

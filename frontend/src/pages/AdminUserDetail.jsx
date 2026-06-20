@@ -332,6 +332,7 @@ function RoleModal({ detail, token, onClose, onSuccess, t }) {
 
 function DeleteModal({ detail, token, onClose, onSuccess, t }) {
   const [confirmUsername, setConfirmUsername] = useState('')
+  const [reason, setReason] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [err, setErr] = useState(null)
   const canSubmit = confirmUsername === detail.username
@@ -339,7 +340,7 @@ function DeleteModal({ detail, token, onClose, onSuccess, t }) {
     setSubmitting(true)
     setErr(null)
     try {
-      await adminApi.deleteUser(token, detail.id, confirmUsername)
+      await adminApi.deleteUser(token, detail.id, confirmUsername, reason)
       onSuccess()
     } catch (e) {
       setErr(e?.detail || 'error')
@@ -352,6 +353,11 @@ function DeleteModal({ detail, token, onClose, onSuccess, t }) {
         <p className="serif" style={{ margin: 0, color: 'var(--rouge)', fontWeight: 600 }}>
           ⚠️ {t('admin_modal_delete_warning')}
         </p>
+        <label className="eyebrow" style={{ fontSize: '0.7rem' }}>{t('admin_modal_reason')}</label>
+        <input type="text" value={reason} onChange={(e) => setReason(e.target.value)}
+          placeholder={t('admin_modal_delete_reason_placeholder')}
+          style={{ padding: '0.5rem 0.6rem', fontFamily: 'monospace', fontSize: '0.85rem', border: '1px solid var(--rule)', borderRadius: 3 }}
+        />
         <p className="serif" style={{ margin: 0 }}>
           {t('admin_modal_delete_confirm_prompt', { username: detail.username })}
         </p>

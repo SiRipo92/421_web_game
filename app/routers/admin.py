@@ -625,10 +625,10 @@ async def delete_user(
             detail="confirm_username does not match target username",
         )
 
-    # Fire the account_deleted email before anonymizing — the recipient
+    # Fire the account_deleted_admin email before anonymizing — the recipient
     # needs a valid From + a personalized greeting. Failure is logged
     # inside the helper; deletion proceeds regardless.
-    await _send_account_deleted_safe(target)
+    await _send_account_deleted_admin_safe(target, body.reason)
 
     now = datetime.now(UTC)
     original_username = target.username
@@ -649,6 +649,7 @@ async def delete_user(
             metadata_={
                 "by": str(actor.id),
                 "original_username": original_username,
+                "reason": body.reason,
                 # Email NOT logged — admin deletions of accounts are
                 # RGPD-sensitive; the audit log only needs the WHO did the
                 # action + the username (which is shown to mods anyway).
@@ -659,27 +660,34 @@ async def delete_user(
     return {"user_id": str(target.id), "deleted_at": now.isoformat()}
 
 
-async def _send_account_deleted_safe(user: User) -> None:
-    """Best-effort account_deleted email fired before PII anonymization."""
+async def _send_account_deleted_admin_safe(user: User, reason: Optional[str]) -> None:
+    """Best-effort account_deleted_admin email fired before PII anonymization.
+
+    Uses the dedicated `account_deleted_admin` template (NOT the inactive-
+    account warning template — different use case, different tone). The
+    reason is optional and rendered as a "Motif" / "Reason" row when present.
+    """
     import logging
 
     logger = logging.getLogger(__name__)
+    fr = user.lang_pref == "fr"
     try:
-        # Reuse the account_deletion_warning template for now — the
-        # `account_deleted` (final) template lands with G83.
+        deletion_date_label = datetime.now(UTC).strftime("%d/%m/%Y" if fr else "%b %d, %Y")
+        from app.core.config import settings  # noqa: PLC0415
+
         subject, html, text = render_email(
-            "account_deletion_warning",
+            "account_deleted_admin",
             user.lang_pref,
             username=user.username,
-            inactive_years=0,
-            deletion_date_label=datetime.now(UTC).strftime("%d/%m/%Y"),
-            keep_active_url=f"{render_email.__globals__['settings'].app_url.rstrip('/')}/contact",
+            deletion_date_label=deletion_date_label,
+            reason=reason,
+            app_url=settings.app_url.rstrip("/"),
         )
         _send_via_brevo(
             to_email=user.email, to_name=user.username, subject=subject, html=html, text=text
         )
     except Exception:
-        logger.exception("Failed to send account_deleted email to %s", user.email)
+        logger.exception("Failed to send account_deleted_admin email to %s", user.email)
 
 
 # ---------------- G90 audit feed ----------------

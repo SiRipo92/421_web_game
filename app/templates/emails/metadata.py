@@ -70,6 +70,30 @@ EMAIL_METADATA: dict[str, dict[str, dict[str, str]]] = {
             "eyebrow": "GDPR — data minimisation",
         },
     },
+    "account_deleted_admin": {
+        "fr": {
+            "subject": "Suppression de votre compte 421 Bistro",
+            "title": "Compte supprimé",
+            "eyebrow": "Modération",
+        },
+        "en": {
+            "subject": "Your 421 Bistro account has been deleted",
+            "title": "Account deleted",
+            "eyebrow": "Moderation",
+        },
+    },
+    "account_deleted_self": {
+        "fr": {
+            "subject": "Confirmation de la suppression de votre compte 421 Bistro",
+            "title": "Au revoir",
+            "eyebrow": "RGPD — droit à l'oubli",
+        },
+        "en": {
+            "subject": "Confirming your 421 Bistro account deletion",
+            "title": "Farewell",
+            "eyebrow": "GDPR — right to be forgotten",
+        },
+    },
     "breach_notification": {
         "fr": {
             "subject": "Incident de sécurité — 421 Bistro",

@@ -62,11 +62,11 @@ export const chatUnbanUser = (token, userId) =>
     headers: auth(token),
   })
 
-export const deleteUser = (token, userId, confirmUsername) =>
+export const deleteUser = (token, userId, confirmUsername, reason) =>
   req(`/api/admin/users/${userId}`, {
     method: 'DELETE',
     headers: auth(token),
-    body: JSON.stringify({ confirm_username: confirmUsername }),
+    body: JSON.stringify({ confirm_username: confirmUsername, reason: reason || null }),
   })
 
 export const auditFeed = (token, params = {}) => {

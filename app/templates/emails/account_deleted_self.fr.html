@@ -1,0 +1,16 @@
+{% extends "_base.html" %}
+{% block body %}
+<p style="margin:0 0 16px 0;">Bonjour <strong>{{ username }}</strong>,</p>
+<p style="margin:0 0 16px 0;">Nous confirmons votre demande de suppression de compte. <strong>Nous sommes désolés de vous voir partir.</strong></p>
+<p style="margin:0 0 16px 0;">Vos données personnelles seront <strong>définitivement effacées dans 24 heures</strong>. Pendant cette période :</p>
+<ul style="margin:0 0 16px 0;padding-left:20px;line-height:1.7;">
+  <li>Votre compte est désactivé — vous ne pouvez plus l'utiliser dans son état actuel.</li>
+  <li>Vos statistiques, votre historique de parties et vos messages sont en attente d'effacement.</li>
+  <li>Si vous changez d'avis, vous pouvez restaurer votre compte en vous reconnectant avant l'expiration du délai.</li>
+</ul>
+<p style="margin:24px 0;text-align:center;">
+  <a href="{{ app_url }}/login" style="display:inline-block;background:#A8302A;color:#F4ECD8;padding:14px 28px;text-decoration:none;border-radius:4px;font-family:Georgia,serif;font-size:15px;letter-spacing:0.5px;">Restaurer mon compte</a>
+</p>
+<p style="margin:0 0 16px 0;font-size:14px;color:#3A2F26;">Passé ce délai, l'effacement est <strong>irréversible</strong> — toutes vos données sont supprimées de nos systèmes, conformément à votre droit à l'oubli (RGPD Art. 17).</p>
+<p style="margin:24px 0 0 0;font-size:13px;color:#6B5A4A;border-top:1px solid #ECE0C2;padding-top:16px;">Merci d'avoir joué au 421 Bistro. Si vous souhaitez nous expliquer ce qui vous a fait partir, nous serions ravis de vous lire — <a href="{{ app_url }}/contact" style="color:#A8302A;">via le formulaire de contact</a>.</p>
+{% endblock %}
