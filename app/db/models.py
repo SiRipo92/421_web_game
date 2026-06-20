@@ -74,6 +74,13 @@ class User(Base):
     last_seen_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
     )
+    # G92 security audit: bumped on password reset (and any future "kill
+    # all sessions" action). Embedded in every JWT as `tv`; mismatch on
+    # decode → 401. Without this, a leaked token survives until natural
+    # expiry even after the user resets their password.
+    token_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0", default=0
+    )
 
     stats: Mapped["PlayerStats"] = relationship(
         back_populates="user", uselist=False, cascade="all, delete-orphan"

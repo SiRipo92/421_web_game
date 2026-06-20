@@ -23,6 +23,7 @@ from app.core.limiter import limiter
 from app.db.base import engine
 from app.db.models import Base  # noqa: F401
 from app.game.ws import router as game_router
+from app.middleware.security_headers import SecurityHeadersMiddleware
 from app.routers.admin import router as admin_router
 from app.routers.auth import router as auth_router
 from app.routers.contact import router as contact_router
@@ -68,19 +69,62 @@ def _on_rate_limit(request: Request, exc: RateLimitExceeded) -> JSONResponse:
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _on_rate_limit)
 
+
+# G92 security audit: scrub Authorization headers + auth-route request
+# bodies before sending events to Sentry. Without this, a 500 on
+# /auth/login could ship the user's plaintext password to Sentry.
+def _sentry_before_send(event, hint):
+    """Redact sensitive fields from outbound Sentry events.
+
+    Targets:
+      - request.headers.Authorization / Cookie (any path)
+      - request.data on auth routes (passwords + tokens live there)
+      - extra.password / extra.token (in case code adds them as breadcrumbs)
+    """
+    request = event.get("request") or {}
+    headers = request.get("headers") or {}
+    for key in list(headers.keys()):
+        if key.lower() in {"authorization", "cookie", "x-csrf-token"}:
+            headers[key] = "[redacted]"
+    url = request.get("url", "")
+    if "/auth/" in url or "/password" in url:
+        # Replace the entire body — we'd rather lose debug context than
+        # leak a credential.
+        request["data"] = "[redacted: auth route]"
+    extra = event.get("extra") or {}
+    for sensitive in ("password", "new_password", "token", "access_token", "refresh_token"):
+        if sensitive in extra:
+            extra[sensitive] = "[redacted]"
+    return event
+
+
 if settings.sentry_dsn:
-    sentry_sdk.init(dsn=settings.sentry_dsn, traces_sample_rate=0.2)
+    sentry_sdk.init(
+        dsn=settings.sentry_dsn,
+        traces_sample_rate=0.2,
+        before_send=_sentry_before_send,
+        send_default_pii=False,
+    )
     logger.info("Sentry enabled")
 else:
     logger.info("Sentry disabled (no DSN configured)")
 
-if settings.debug:
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+# G92 security audit: explicit allowlist instead of wildcard. The wildcard
+# was previously only added in debug mode (so prod was technically
+# CORS-locked by absence), but the explicit allowlist makes the contract
+# legible and adds a defense-in-depth check if `debug=True` ever ships.
+_cors_origins = [o.strip() for o in settings.cors_allowed_origins.split(",") if o.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
+)
+
+# G92 security audit: hardening headers on every response. See module
+# docstring for the rationale per header.
+app.add_middleware(SecurityHeadersMiddleware)
 
 
 @app.middleware("http")
