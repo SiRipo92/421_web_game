@@ -1360,7 +1360,107 @@ Promote tickets from "random slugs in email" to a real `ContactTicket(id, ref, f
 - `npm audit fix` applied (0 vulnerabilities remaining).
 - **Deferred (G92b/G92c/G92d):** tighten CSP `'unsafe-inline'` styles; wire `pip-audit` + `npm audit` into CI; rotate prod `SECRET_KEY` before launch (forces global re-login during low-traffic window).
 
-### G96. (DONE) Username + profile-content moderation
+### G99. Pre-launch test bundle — coverage push, Playwright E2E, backend perf
+**Why:** Before public launch we want real confidence that core flows survive both regression and load. Three gaps right now:
+1. **Coverage too close to the gate.** 82.31% squeaks past the 80% threshold — one careless commit and the gate trips. Modules with weakest coverage: `app/services/afk_eviction.py` (43%), `app/game/ws.py` (the entire WebSocket handler is barely tested in isolation), `app/services/game_persistence.py` (82%), `app/schemas/auth.py` (87%).
+2. **No functional / E2E tests.** Every "test in the browser" smoke check is currently manual — captured in `docs/PROD_SMOKE_TESTS.md` but only run by hand. A registration → login → join → play → quit round-trip needs to be automated.
+3. **No load / performance baseline.** We don't know how the WS broadcast loop behaves at 50 concurrent rooms, what the p95 latency on `/auth/login` is under load, or whether the bot-handback timer survives many simultaneous AFK events.
+
+**Scope (single bundled PR):**
+
+#### Coverage push (target 90%+ on `app/`)
+- **`app/game/ws.py`** — currently the lowest-leverage tested code despite being the biggest behaviour surface. Write integration tests that drive a real WS connection through:
+  - Connect → state broadcast → roll → keep → done → manche transition
+  - Two concurrent clients in the same room: turn handoff, state convergence
+  - Disconnect mid-turn → AFK timer fires → bot plays → human reconnects → handback grace window → cancel → handback
+  - Eviction path (test_security covers the API; this covers the WS message flow)
+- **`app/services/afk_eviction.py`** — drive `evict_player` against a real DB; assert audit log row, player removed from `game.players`, `eviction_count_24h` incremented, chat-ban applied on 3rd eviction.
+- **`app/services/game_persistence.py`** — round-trip a finished game: every column populated, every player's stats updated, ELO delta correct on both sides.
+- **`app/schemas/auth.py`** — exercise every regex / boundary in `username_valid`, `password_valid`, `birthdate_valid` (including the future-dated + 140-year-old edge cases).
+- Aim: 90%+ overall, no module under 75%.
+
+#### Playwright E2E (`tests/e2e/`)
+- Add Playwright + `@playwright/test` to `frontend/package.json` as a dev dep, plus a top-level `playwright.config.ts` that boots the FastAPI app + Vite dev server before the test run.
+- **Critical journeys (5-7 tests):**
+  - **Register + login:** new account → welcome flow → land in lobby.
+  - **Reset password kills sessions:** open two browsers, reset on B, verify A's session dies.
+  - **Single-player vs bots:** create a room → start with bots → play a manche → confirm score updates + log entries.
+  - **Multi-player (two browsers):** create room on A → join from B → both play one full partie → finish screen renders for both.
+  - **AFK eviction:** join a room, idle past the timeout, confirm the eviction warning toast + the evicted overlay + back-to-lobby redirect.
+  - **Admin moderation:** admin logs in, lists rooms, dissolves a room → spectators get the room_dissolved overlay.
+  - **RGPD self-service:** authenticated user requests data export → JSON dump downloads; account deletion → username freed.
+- Tests run against a dedicated test DB (`fourtwentyone_e2e`) and start from a clean snapshot per spec.
+- CI integration: add a `playwright` job to GHA that runs after `pytest` passes.
+
+#### Backend performance baseline (`perf/`)
+- Tool: **k6** (Go-based, modern, native WebSocket support — better than locust for our WS-heavy app).
+- **Scenarios:**
+  - `perf/auth_login.js` — 100 concurrent users hitting `/auth/login` for 60s. Pass: p95 < 500ms, p99 < 1s, 0 errors.
+  - `perf/room_lifecycle.js` — 50 concurrent users registering → creating a room → playing 3 manches → leaving. Pass: p95 round-trip < 800ms, no WS disconnects.
+  - `perf/ws_broadcast.js` — 1 room with 10 connected players, 5-minute soak. Pass: every player receives every state broadcast within 100ms, no message loss.
+- Document baseline numbers in `docs/PERFORMANCE_BASELINE.md` so we can detect regressions on future PRs.
+- Doesn't run in CI by default (too slow + too much resource); has a `make perf` target + an optional GHA workflow trigger.
+
+**Acceptance:**
+- Coverage gate raised from 80 → 90 in `pyproject.toml`.
+- Playwright suite green; documented how to run locally + in CI.
+- Performance baseline numbers committed to `docs/PERFORMANCE_BASELINE.md`.
+- Existing 451 backend tests still pass.
+
+**Effort:** ~4-5 days. **Launch-blocker.**
+
+### G100. Pre-launch infra bundle — CI/CD redeploy, code quality sweep, Sphinx + ReadTheDocs, README
+**Why:** Three things that are loosely-coupled but all touch "the project's exterior surface" — what someone sees in the README, what the docs site looks like, and what happens when you push to main. Bundling them keeps the review focused on infrastructure / DX rather than product behaviour.
+
+**Scope (single bundled PR):**
+
+#### CI/CD — push-to-main → build → webhook deploy
+- Currently CI runs tests + lint on PRs. Missing: a deploy step on `main` merges.
+- **Wire `flyctl deploy --remote-only` from a GHA workflow on `push: main`:**
+  - Generate a Fly.io API token, store as `FLY_API_TOKEN` repo secret.
+  - New `.github/workflows/deploy.yml`: on push to main → checkout → install flyctl → `flyctl deploy --remote-only` (Fly builds the container on their builders, deploys on success).
+  - **Webhook redeploy is implicit** — `flyctl deploy` itself triggers the rolling deploy on Fly's side. No separate webhook needed unless we want a Slack / Discord notification, which is a follow-up.
+- **Add the G92 deferred items to CI:**
+  - **G92c:** `pip-audit` + `npm audit` as a non-blocking job on every PR.
+  - **G92d:** rotate prod `SECRET_KEY` as a manual step in the deploy runbook (`docs/SECURITY.md` §3.2). NOT automated — too dangerous to do on every deploy.
+
+#### Code quality + dead code sweep
+- Run `vulture app/ --min-confidence 80` → identify unused functions / classes / variables. Manually triage each (some are intentionally unused, like exception classes we want available).
+- Run `knip` (or `ts-prune`) on `frontend/` → identify unused exports / files. Remove unambiguous dead code.
+- Run `radon cc app/ -s` → flag any function with cyclomatic complexity > 10. Refactor the worst offenders (likely candidates: `app/game/ws.py:_handle_action`, `app/game/logic.py:apply_dice`).
+- **Output:** a short `docs/CODE_QUALITY_2026-06.md` summarizing what was removed + what was refactored + what was deliberately kept. Modeled on the G92 punch list.
+
+#### Sphinx + ReadTheDocs
+- Add `sphinx`, `sphinx-rtd-theme`, `sphinx-autodoc-typehints` to `requirements-dev.txt`.
+- `docs/source/conf.py` — autodoc the `app/` package, point at the GitHub repo, set the theme.
+- `docs/source/index.rst` — table of contents linking to:
+  - Quickstart (port + DB setup, copied from README)
+  - Architecture overview (high-level: FastAPI + WS + Postgres + React)
+  - API reference (autogenerated from FastAPI's OpenAPI schema)
+  - Game rules (the actual 421 rules — currently buried in `app/game/logic.py` comments)
+  - Module reference (autodoc dump of `app/`)
+  - The existing `docs/SECURITY.md` + `docs/SECURITY_AUDIT_2026-06.md`
+- ReadTheDocs setup: create a project at readthedocs.io pointed at this repo, branch `main`, autodetect Python config. Lives at `421bistro.readthedocs.io`.
+- Add a build badge to README + a "Documentation" section linking out.
+
+#### README rewrite
+- Current README is mostly setup instructions. Rewrite to:
+  - One-paragraph "what is 421 Bistro" (the game, the goal, who it's for).
+  - Screenshot / GIF of gameplay.
+  - Badges: CI status, ReadTheDocs build, coverage, license.
+  - Quickstart: docker-compose up + `npm run dev` + first registration.
+  - Architecture overview (1 paragraph + a link to the Sphinx docs).
+  - Contributing notes (branch naming, PR style, where the test suite lives).
+  - License + contact.
+
+**Acceptance:**
+- `git push origin main` triggers a Fly deploy automatically (verified by force-pushing a no-op commit + watching the workflow).
+- `pip-audit` + `npm audit` jobs visible on every PR (non-blocking initially, can be flipped to blocking later).
+- `docs/CODE_QUALITY_2026-06.md` summary committed.
+- `421bistro.readthedocs.io` builds successfully from main; badge in README links to it.
+- README has the rewritten structure with a working screenshot or GIF.
+
+**Effort:** ~3-4 days. **Launch-blocker for the CI/CD portion**; docs + README polish can ship same-PR but aren't blockers.
 **Why:** Discovered during G90 manual smoke testing: a user registered with username `BigBite420` and the signup endpoint accepted it. Same gap exists anywhere else free-form user content surfaces (display names, future profile bios, future chat). The avatar upload path is already gated by [[G46]]'s AI moderation — text inputs need parallel coverage. Without this, day-one public traffic could pollute the leaderboard with offensive handles that are then visible everywhere a user is mentioned.
 
 **Two-layer defense (industry standard for username gates):**
