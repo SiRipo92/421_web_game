@@ -1,8 +1,8 @@
-"""Pydantic schemas for admin dashboard endpoints (G90)."""
+"""Pydantic schemas for admin dashboard endpoints (G90 users + G95 rooms)."""
 
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class AdminUserRow(BaseModel):
@@ -122,3 +122,105 @@ class AdminDashboardSummary(BaseModel):
     pending_inbox_items: int
     appeals_awaiting_review: int
     recent_admin_actions: list[AdminAuditEntry]
+
+
+# ---------------- G95 room moderation ----------------
+
+
+class AdminRoomRow(BaseModel):
+    """One row in the paginated admin room list. Lightweight — full state
+    via GET /api/admin/rooms/{game_id}."""
+
+    game_id: str
+    phase: str
+    is_public: bool
+    host_name: Optional[str]
+    player_count: int
+    max_players: int
+    partie_number: int
+    bank_rule: str
+    round_num: int
+    spectator_count: int
+
+
+class AdminRoomListResponse(BaseModel):
+    rooms: list[AdminRoomRow]
+    total: int
+
+
+class AdminRoomPlayer(BaseModel):
+    """Player slot inside the room detail view."""
+
+    id: str
+    user_id: Optional[str]
+    name: str
+    tokens: int
+    round_points: int
+    connected: bool
+    is_host: bool
+
+
+class AdminRoomLogEntry(BaseModel):
+    """One journal entry from `game.log_events`. Mirrors what players see."""
+
+    kind: str
+    text: str
+
+
+class AdminRoomDetail(BaseModel):
+    """Full state of one active room for the admin spectate view."""
+
+    game_id: str
+    phase: str
+    is_public: bool
+    host_name: Optional[str]
+    host_player_id: str
+    max_players: int
+    bank_rule: str
+    afk_seconds: int
+    round_points_to_lose: int
+    partie_number: int
+    round_num: int
+    pool: int
+    spectator_count: int
+    players: list[AdminRoomPlayer]
+    recent_log: list[AdminRoomLogEntry]
+    bot_decisions_count: int
+
+
+class BroadcastRoomRequest(BaseModel):
+    """POST /api/admin/rooms/{id}/broadcast body.
+
+    `message_fr` + `message_en` so the in-game banner renders in each
+    user's lang. Either can be empty if the admin only writes in one
+    language (frontend falls back to whichever is non-empty).
+    """
+
+    message_fr: str = Field(min_length=1, max_length=500)
+    message_en: str = Field(min_length=1, max_length=500)
+    severity: str = "info"  # 'info' | 'warning' | 'critical'
+
+
+class AdminKickRequest(BaseModel):
+    """POST /api/admin/rooms/{id}/kick body.
+
+    Stronger than host-kick: target is kicked AND chat-banned for 1h
+    (configurable via `chat_ban_hours`). `player_id` is the in-room
+    Player.id (NOT the User.id). admin can kick the host.
+    """
+
+    player_id: str
+    reason: str = "admin_action"
+    chat_ban_hours: int = 1
+
+
+class DissolveRoomRequest(BaseModel):
+    """POST /api/admin/rooms/{id}/dissolve body.
+
+    `confirm_game_id` must match the room's game_id (type-room-code-to
+    confirm pattern). `reason` is shown to all players in the dissolution
+    banner before the room is destroyed.
+    """
+
+    confirm_game_id: str
+    reason: str = Field(min_length=1, max_length=500)

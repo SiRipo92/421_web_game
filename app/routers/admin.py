@@ -27,13 +27,21 @@ from app.schemas.admin import (
     AdminAuditListResponse,
     AdminBanState,
     AdminDashboardSummary,
+    AdminKickRequest,
+    AdminRoomDetail,
+    AdminRoomListResponse,
+    AdminRoomLogEntry,
+    AdminRoomPlayer,
+    AdminRoomRow,
     AdminStatsBlock,
     AdminUserDetail,
     AdminUserListResponse,
     AdminUserRow,
     BanRequest,
+    BroadcastRoomRequest,
     ChatBanRequest,
     DeleteAccountRequest,
+    DissolveRoomRequest,
 )
 from app.services.email import _send_via_brevo, render_email
 
@@ -53,6 +61,10 @@ _MOD_AUDIT_EVENTS = frozenset(
         "chat_unbanned",
         "account_deleted_by_admin",
         "username_auto_sanitized",
+        # G95 room moderation
+        "admin_room_broadcast",
+        "admin_room_kick",
+        "admin_room_dissolve",
     }
 )
 
@@ -815,3 +827,378 @@ async def audit_feed(
         per_page=per_page,
         has_next=(page * per_page) < total,
     )
+
+
+# ---------------- G95 room moderation ----------------
+
+
+def _host_name_of(game) -> Optional[str]:
+    """Resolve a host's display name from the in-memory Game object."""
+    return next((p.name for p in game.players if p.id == game.host_player_id), None)
+
+
+def _room_row(game) -> AdminRoomRow:
+    """Lightweight projection for the room list. Avoids the per-row
+    spectator_count query — manager.spectator_count is O(1) on the in-
+    memory dict."""
+    from app.game.ws import manager
+
+    return AdminRoomRow(
+        game_id=game.id,
+        phase=game.phase.value,
+        is_public=game.is_public,
+        host_name=_host_name_of(game),
+        player_count=len(game.players),
+        max_players=game.max_players,
+        partie_number=game.partie_number,
+        bank_rule=game.bank_rule,
+        round_num=game.round_num,
+        spectator_count=manager.spectator_count(game.id),
+    )
+
+
+@router.get("/rooms", response_model=AdminRoomListResponse)
+async def list_rooms(_: User = Depends(require_moderator)):
+    """G95: live snapshot of every active room (public + private).
+
+    Reads the in-memory `games` dict — no DB hit. Ordered by player_count
+    desc so the busiest rooms surface first, with partie_number desc as
+    a tiebreaker so longer-running rooms appear above fresh empty ones.
+    """
+    from app.game.state import games
+
+    rooms = sorted(
+        games.values(),
+        key=lambda g: (-len(g.players), -g.partie_number),
+    )
+    return AdminRoomListResponse(
+        rooms=[_room_row(g) for g in rooms],
+        total=len(rooms),
+    )
+
+
+@router.get("/rooms/{game_id}", response_model=AdminRoomDetail)
+async def get_room_detail(game_id: str, _: User = Depends(require_moderator)):
+    """G95: full state of one room. Admin-spectate view shows everything,
+    including normally-private per-player state (kept dice, turn options).
+    Logged-in admin's act-as-spectator stays implicit; we don't open a WS
+    here — the SPA polls or refreshes manually."""
+    from app.game.state import games
+    from app.game.ws import manager
+
+    game = games.get(game_id.upper())
+    if game is None:
+        raise HTTPException(status_code=404, detail="Room not found")
+
+    players = [
+        AdminRoomPlayer(
+            id=p.id,
+            user_id=game.user_ids.get(p.id),
+            name=p.name,
+            tokens=p.tokens,
+            round_points=game.round_points.get(p.id, 0),
+            connected=p.connected,
+            is_host=(p.id == game.host_player_id),
+        )
+        for p in game.players
+    ]
+    # Last 30 log entries (in-game journal). game.log_events is a list of
+    # dicts {kind, text, ...}; we only surface the user-readable bits.
+    recent_log = [
+        AdminRoomLogEntry(kind=e.get("kind", ""), text=e.get("text", ""))
+        for e in game.log_events[-30:]
+    ]
+    return AdminRoomDetail(
+        game_id=game.id,
+        phase=game.phase.value,
+        is_public=game.is_public,
+        host_name=_host_name_of(game),
+        host_player_id=game.host_player_id,
+        max_players=game.max_players,
+        bank_rule=game.bank_rule,
+        afk_seconds=game.afk_seconds,
+        round_points_to_lose=game.round_points_to_lose,
+        partie_number=game.partie_number,
+        round_num=game.round_num,
+        pool=game.pool,
+        spectator_count=manager.spectator_count(game.id),
+        players=players,
+        recent_log=recent_log,
+        bot_decisions_count=len(game.bot_decisions),
+    )
+
+
+@router.post("/rooms/{game_id}/broadcast", status_code=200)
+async def broadcast_to_room(
+    game_id: str,
+    body: BroadcastRoomRequest,
+    actor: User = Depends(require_moderator),
+    db: AsyncSession = Depends(get_db),
+):
+    """G95: send a server message banner to all connected sockets in the room.
+
+    Frontend renders as a non-dismissible top-of-game banner colored by
+    severity (info=brass, warning=amber, critical=rouge). Useful for « stop
+    arguing » warnings before reaching for the kick / dissolve hammer.
+    """
+    from app.game.state import games
+    from app.game.ws import manager
+
+    game = games.get(game_id.upper())
+    if game is None:
+        raise HTTPException(status_code=404, detail="Room not found")
+    if body.severity not in ("info", "warning", "critical"):
+        raise HTTPException(status_code=400, detail="Invalid severity")
+
+    await manager.broadcast(
+        game.id,
+        {
+            "type": "admin_broadcast",
+            "message_fr": body.message_fr,
+            "message_en": body.message_en,
+            "severity": body.severity,
+        },
+    )
+    db.add(
+        GdprAuditLog(
+            user_id=actor.id,
+            event_type="admin_room_broadcast",
+            metadata_={
+                "by": str(actor.id),
+                "game_id": game.id,
+                "severity": body.severity,
+                "message_fr": body.message_fr[:200],
+                "message_en": body.message_en[:200],
+            },
+        )
+    )
+    await db.commit()
+    return {"game_id": game.id, "delivered_to": len(manager.connections.get(game.id, []))}
+
+
+@router.post("/rooms/{game_id}/kick", status_code=200)
+async def admin_kick_player(
+    game_id: str,
+    body: AdminKickRequest,
+    actor: User = Depends(require_moderator),
+    db: AsyncSession = Depends(get_db),
+):
+    """G95: admin kick — stronger than host kick.
+
+    Same WS `kicked` message the host-kick uses (so the existing
+    frontend modal renders), but with `reason='admin_action'` so the
+    UI distinguishes. ALSO applies a `chat_banned_until` of N hours
+    (default 1h) on the kicked user if they're registered — prevents
+    immediate rejoin with chat privileges.
+
+    Admin CAN kick the host (host cannot kick admin, but admin is not
+    in the room as a player here — they're acting via REST).
+
+    Mid-partie kick triggers the same `persist_player_session` write
+    as a voluntary leave: the kicked player's parties_lost +=1, manche
+    counters captured.
+    """
+    from app.game.logic import GamePhase
+    from app.game.state import games
+    from app.game.ws import manager
+
+    game = games.get(game_id.upper())
+    if game is None:
+        raise HTTPException(status_code=404, detail="Room not found")
+
+    target = next((p for p in game.players if p.id == body.player_id), None)
+    if target is None:
+        raise HTTPException(status_code=404, detail="Player not in this room")
+
+    # Persist mid-partie stats for the kicked player (same as voluntary leave).
+    if game.phase in (GamePhase.CHARGE, GamePhase.DECHARGE, GamePhase.TIEBREAK):
+        target_user_id = game.user_ids.get(target.id)
+        if target_user_id:
+            from app.services.game_persistence import persist_player_session
+
+            await persist_player_session(
+                target_user_id,
+                game.id,
+                game.round_points.get(target.id, 0),
+                manches_played=game.manches_played.get(target.id, 0),
+                manches_lost=game.manches_lost.get(target.id, 0),
+            )
+
+    # Apply the chat-ban side-effect (registered users only).
+    target_user_uuid_str = game.user_ids.get(target.id)
+    chat_until_iso = None
+    if target_user_uuid_str:
+        try:
+            target_user = await db.get(User, uuid.UUID(target_user_uuid_str))
+            if target_user is not None:
+                hours = max(1, min(168, body.chat_ban_hours))  # clamp 1h-7d
+                chat_until = datetime.now(UTC) + timedelta(hours=hours)
+                target_user.chat_banned_until = chat_until
+                chat_until_iso = chat_until.isoformat()
+        except (ValueError, TypeError):
+            pass
+
+    # Notify the target's sockets BEFORE removing them from the room.
+    target_socks = [
+        (w, pid) for (w, pid) in manager.connections.get(game.id, []) if pid == target.id
+    ]
+    for tws, _pid in target_socks:
+        try:
+            await tws.send_json({"type": "kicked", "reason": body.reason})
+        except Exception:  # noqa: BLE001
+            pass
+
+    # Remove the player from in-memory game state (same shape as the
+    # voluntary-leave cleanup in ws.py).
+    game.players = [p for p in game.players if p.id != target.id]
+    game.user_ids.pop(target.id, None)
+    game.match_losses.pop(target.id, None)
+    game.round_points.pop(target.id, None)
+    game.has_avatars.pop(target.id, None)
+    game.manches_played.pop(target.id, None)
+    game.manches_lost.pop(target.id, None)
+    game.out_of_match.discard(target.id)
+
+    # If the kicked player was the host, migrate host to the longest-tenured
+    # remaining player (same rule as host-leave handling).
+    if target.id == game.host_player_id and game.players:
+        next_host = min(game.players, key=lambda p: p.joined_at)
+        game.host_player_id = next_host.id
+
+    # Audit log.
+    db.add(
+        GdprAuditLog(
+            user_id=actor.id,
+            event_type="admin_room_kick",
+            metadata_={
+                "by": str(actor.id),
+                "game_id": game.id,
+                "target_player_id": target.id,
+                "target_user_id": target_user_uuid_str,
+                "target_name": target.name,
+                "reason": body.reason,
+                "chat_ban_until": chat_until_iso,
+            },
+        )
+    )
+    await db.commit()
+
+    # Broadcast updated state so the remaining clients see the seat free up.
+    from app.game.logic import game_state  # local import to avoid cycle
+
+    await manager.broadcast(game.id, game_state(game))
+
+    return {
+        "game_id": game.id,
+        "kicked_player_id": target.id,
+        "chat_banned_until": chat_until_iso,
+    }
+
+
+@router.post("/rooms/{game_id}/dissolve", status_code=200)
+async def dissolve_room(
+    game_id: str,
+    body: DissolveRoomRequest,
+    actor: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """G95: nuclear option — destroy the room.
+
+    Sequence:
+      1. Type-room-code-to-confirm guard (frontend modal forces this;
+         server re-verifies).
+      2. Broadcast a `room_dissolved` banner so every player sees the
+         reason BEFORE their socket closes.
+      3. For each registered player still in CHARGE/DECHARGE/TIEBREAK:
+         persist mid-partie session stats (parties_lost +=1, manche
+         counters captured) so their effort isn't lost.
+      4. Close all sockets and remove the room from the in-memory registry.
+
+    Admin-only. Audit logged with the full player roster + reason.
+    """
+    from app.game.logic import GamePhase
+    from app.game.state import games
+    from app.game.ws import manager
+
+    game = games.get(game_id.upper())
+    if game is None:
+        raise HTTPException(status_code=404, detail="Room not found")
+    if body.confirm_game_id.upper() != game.id:
+        raise HTTPException(status_code=400, detail="confirm_game_id does not match room game_id")
+
+    # Snapshot the roster for the audit log + the persist loop.
+    snapshot_players = [
+        {
+            "player_id": p.id,
+            "user_id": game.user_ids.get(p.id),
+            "name": p.name,
+            "round_points": game.round_points.get(p.id, 0),
+            "manches_played": game.manches_played.get(p.id, 0),
+            "manches_lost": game.manches_lost.get(p.id, 0),
+        }
+        for p in game.players
+    ]
+
+    # Tell everyone first — banner copy lets users see the reason on screen
+    # before their socket closes.
+    await manager.broadcast(
+        game.id,
+        {
+            "type": "room_dissolved",
+            "reason": body.reason,
+            "by": "admin",
+        },
+    )
+
+    # Persist mid-partie stats for any registered player whose partie
+    # was actively in progress. Same semantics as voluntary leave so the
+    # audit trail + counters stay consistent.
+    if game.phase in (GamePhase.CHARGE, GamePhase.DECHARGE, GamePhase.TIEBREAK):
+        from app.services.game_persistence import persist_player_session
+
+        for snap in snapshot_players:
+            if snap["user_id"]:
+                await persist_player_session(
+                    snap["user_id"],
+                    game.id,
+                    snap["round_points"],
+                    manches_played=snap["manches_played"],
+                    manches_lost=snap["manches_lost"],
+                )
+
+    # Close all sockets (players + spectators) and clear the registry.
+    for ws, _pid in list(manager.connections.get(game.id, [])):
+        try:
+            await ws.close(code=4002)
+        except Exception:  # noqa: BLE001
+            pass
+    for ws in list(manager.spectators.get(game.id, [])):
+        try:
+            await ws.close(code=4002)
+        except Exception:  # noqa: BLE001
+            pass
+    manager.connections.pop(game.id, None)
+    manager.spectators.pop(game.id, None)
+    games.pop(game.id, None)
+
+    # Audit log.
+    db.add(
+        GdprAuditLog(
+            user_id=actor.id,
+            event_type="admin_room_dissolve",
+            metadata_={
+                "by": str(actor.id),
+                "game_id": game.id,
+                "reason": body.reason,
+                "player_count": len(snapshot_players),
+                "players": [{"name": p["name"], "user_id": p["user_id"]} for p in snapshot_players],
+            },
+        )
+    )
+    await db.commit()
+
+    return {
+        "game_id": game.id,
+        "dissolved": True,
+        "player_count": len(snapshot_players),
+    }
