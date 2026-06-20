@@ -1,240 +1,305 @@
-# 421
+# 421 Bistro
 
 [![CI](https://github.com/SiRipo92/421_web_game/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/SiRipo92/421_web_game/actions/workflows/ci.yml)
+[![E2E](https://github.com/SiRipo92/421_web_game/actions/workflows/e2e.yml/badge.svg?branch=main)](https://github.com/SiRipo92/421_web_game/actions/workflows/e2e.yml)
+[![Coverage](https://img.shields.io/badge/coverage-85%25-brightgreen)](#testing)
+[![Docs](https://img.shields.io/badge/docs-readthedocs.io-blue)](https://421bistro.readthedocs.io)
+[![License](https://img.shields.io/badge/license-source--available-blue)](./LICENSE)
 
-Multiplayer dice game playable in the browser. Create an account or join as a guest, create or join a game room, and play 421 in real time with friends.
+A real-time multiplayer implementation of **421**, the French dice
+game traditionally played in bars over an aperitif. Built as a
+solo portfolio project to exercise async Python, WebSocket
+multiplayer, GDPR-compliant data handling, and full CI/CD.
 
-## How to play
+> Note on the source code license: this repository is published for
+> portfolio inspection only. See [LICENSE](./LICENSE) — no copy,
+> derive, run, or ML-training rights are granted.
 
-421 is a French dice game played in nested cycles. The terminology matters because the same word can mean different things in different game variants — these are the ones we use:
+---
 
-- **Throw** — one roll of the three dice on a player's turn.
-- **Match** — a full bank cycle: starts with 11 chips in the central pool, ends when one player ("manché") holds them all. Chips reset for the next match.
-- **Round** — accumulates until any player has lost 2 matches (not necessarily consecutive). That player takes 1 **round point**, the match-loss counter resets for everyone, and a new round begins.
-- **Game** — there is no automatic game end. Round points are persistent stats on your profile (or session-scoped for guests). The room stays open until players leave.
+## Engineering highlights
 
-Each match has two phases:
+Picked for the technical depth they exercise, not just the feature list:
 
-- **Charge** — chips flow from the pool to the players. After each table cycle, the round loser takes chips from the pool equal to the winning combo's value. When the pool is empty, play flips to discharge.
-- **Discharge** — chips pass between players. The round winner hands chips to the loser. A player who drops to 0 chips sits out for the rest of the match (they're back for the next one). The match ends when one player holds all 11 chips — they're manché.
+- **Real-time multiplayer over WebSocket.** Per-room broadcast manager with
+  reconnect handling, an AFK bot that takes over for idle players, and a
+  grace-window "bot handback" pattern so returning humans can rewind the
+  bot's last turn ([`app/game/ws.py`](app/game/ws.py)).
+- **Async Python end-to-end.** FastAPI + SQLAlchemy async + asyncpg, no
+  sync-bridging anywhere in the request path.
+- **GDPR-compliant by design.** Self-service `/auth/export` and
+  `DELETE /auth/me` with soft-delete + 30-day hard-delete cron, every
+  account-affecting event audited in `gdpr_audit_log`.
+- **Pre-launch security hardening (G92).** HSTS, CSP, X-Frame-Options,
+  Sentry redaction filter, rate limits on auth endpoints, JWT
+  token-versioning for password-reset session invalidation,
+  gitleaks secret scanning in CI. See
+  [`docs/SECURITY_AUDIT_2026-06.md`](docs/SECURITY_AUDIT_2026-06.md).
+- **Three layers of automated testing (G99).** ~85% backend coverage
+  (pytest + asyncpg integration tests), Playwright E2E for critical
+  user journeys, k6 perf scenarios with explicit p95/p99 SLOs.
+- **Push-to-main → auto-deploy.** GitHub Actions runs lint + tests +
+  E2E + secret scan; on green, `flyctl deploy --remote-only` builds
+  the image on Fly's builders and does a rolling restart. Runbook at
+  [`docs/DEPLOY_SETUP.md`](docs/DEPLOY_SETUP.md).
 
-**Critical:** every match has exactly **one** loser (the manché). Everyone else is a winner of that match. Ties at the lowest hand (or at the top during discharge, when combos are exactly equal) are broken by re-throwing: tied players roll again starting with the most recent and going backward; the lowest hand by the combo hierarchy takes the loss. The penalty stays the value of the original winning combo, not the tiebreak combo.
+---
 
-**Dice hierarchy (strongest → weakest):** 421 (8f) › 111 (7f) › 11x (xf) › triples (2–6f) › suites 123/234/345/456 (2f) › basic figures (1f).
+## Live demo
 
-**Bank rules** (set by the room creator at create time, not editable mid-game):
-- `free` — the round starter sets the rhythm (1, 2, or 3 throws); others must match in equal or fewer throws.
-- `sec` — one throw per player during charge, auto-marked done.
+> Deployed: `https://421bistro.com` *(coming soon — see [`docs/DEPLOY_SETUP.md`](docs/DEPLOY_SETUP.md))*
 
-## Features
+Screenshots / GIF *(placeholder — to be added before the public flip)*:
 
-- Real-time multiplayer via WebSocket
-- Register/login or play as guest (guests don't appear in rankings)
-- Public room browser — find and join open games without a room code
-- AFK bot takeover — idle players are auto-played after a configurable timeout
-- Spectator mode — watch any public game in real time (read-only)
-- Configurable rooms: max players, bank rule, AFK timeout
-- ELO rankings with badge tiers: 🎲 Débutant · 🥉 Amateur · 🥈 Confirmé · 🥇 Expert · 👑 Maître
-- Full game history per account
-- FR / EN interface toggle, persisted per account
-- Password reset via email (Resend)
-- GDPR-compliant: data export, account deletion with 30-day grace period
+```
+[ TODO: gameplay GIF — register → join room → roll → win a manche ]
+```
+
+---
 
 ## Tech stack
 
 | Layer | Tech |
 |---|---|
-| Backend | Python 3.12, FastAPI, uvicorn |
-| Database | PostgreSQL 16, SQLAlchemy 2 async, Alembic |
-| Auth | JWT (python-jose), bcrypt (passlib), Resend (email) |
-| Frontend | Vite 8, React 19, react-router-dom v7 |
-| Real-time | WebSocket |
-| Container | Docker, docker-compose |
+| Backend | Python 3.12, FastAPI, uvicorn, SQLAlchemy 2 async + asyncpg, Alembic |
+| Frontend | React 19, Vite 8, react-router 7 (no Tailwind / Bootstrap — vanilla CSS by design) |
+| Database | PostgreSQL 16 |
+| Auth | python-jose JWT (HS256), bcrypt, Google SSO |
+| Email | Brevo transactional API (Jinja2 templates) |
+| Observability | Sentry SDK with PII-redaction filter |
+| Testing | pytest + pytest-cov + pytest-asyncio, Playwright, k6 |
+| CI/CD | GitHub Actions → Fly.io (`flyctl deploy --remote-only`) |
+| Container | Docker (multi-stage), docker-compose for local dev |
 
-See [`frontend/README.md`](frontend/README.md) for the frontend-specific setup, translation system, and component structure.
+---
 
-## Local setup
+## Architecture
 
-### Prerequisites
-- Docker and docker-compose
-- (Optional, for running without Docker) Python 3.12, Node 20+, PostgreSQL 16
+```
+                        ┌────────────────────────────┐
+                        │   browser (React SPA)      │
+                        │   served from same origin  │
+                        └──────────────┬─────────────┘
+                                       │
+                        REST (/api/, /auth/)
+                        WebSocket (/ws/<game>/<player>)
+                                       │
+                        ┌──────────────▼─────────────┐
+                        │   FastAPI (uvicorn)        │
+                        │   ┌──────────────────────┐ │
+                        │   │ in-memory game state │ │  ← single-process for now;
+                        │   │   games: dict[...]   │ │     Redis later if needed
+                        │   └──────────────────────┘ │
+                        └──────────────┬─────────────┘
+                                       │
+                          asyncpg (async SQLAlchemy)
+                                       │
+                        ┌──────────────▼─────────────┐
+                        │   PostgreSQL 16            │
+                        │   users · games · stats    │
+                        │   gdpr_audit_log · etc.    │
+                        └────────────────────────────┘
 
-### 1. Clone and configure
+       Sentry (errors)        Brevo (email)        Cloudflare (DNS + edge cache)
+```
+
+**Why in-memory game state:** the active partie data (current dice, turn
+order, AFK timers) lives in a process-local dict, not the DB. Postgres
+only holds persistent records (users, finished parties, stats, audit
+log). This keeps the WS hot path free of database round-trips at the
+cost of single-process limitation — fine for the target traffic. If
+that constraint ever binds, Redis-backed pub/sub is a documented
+follow-up.
+
+---
+
+## Quickstart
+
+### Docker (fastest)
 
 ```bash
 git clone https://github.com/SiRipo92/421_web_game.git
 cd 421_web_game
-cp .env.example .env
-```
-
-Edit `.env` and fill in at minimum:
-
-```
-SECRET_KEY=          # generate with: openssl rand -hex 32
-POSTGRES_PASSWORD=change_me
-DATABASE_URL=postgresql+asyncpg://app:change_me@db:5432/fourtwentyone
-RESEND_API_KEY=      # from resend.com — required for password reset emails
-APP_URL=http://localhost:8421
-```
-
-### 2. Start with Docker
-
-```bash
+cp .env.example .env       # then edit — see docs/SECURITY.md for what each var does
 docker compose up --build
 ```
 
-Open [http://localhost:8421](http://localhost:8421).
+Open <http://localhost:8421>. Migrations run automatically on first start.
 
-> **Note:** `docker compose up` starts both the PostgreSQL database and the app. Migrations run automatically on first start via the entrypoint script.
+### Native (for development)
 
-> **Docker Hub:** `docker pull siripo92/421-game:latest` — published on every merge to `main`.
-
-### 3. Run locally without Docker
+Two terminals.
 
 **Terminal 1 — backend:**
 ```bash
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
-cp .env.example .env  # fill in DATABASE_URL, SECRET_KEY
+cp .env.example .env       # then fill in DATABASE_URL + SECRET_KEY
 make dev-backend
 ```
 
-**Terminal 2 — frontend dev server (with hot-reload):**
+**Terminal 2 — frontend dev server (hot reload):**
 ```bash
 cd frontend && npm install
-make dev-frontend    # proxies /api and /ws to localhost:8421
+make dev-frontend          # Vite proxies /api and /ws to localhost:8421
 ```
 
-Or build the frontend for production serving:
-```bash
-make build-frontend  # outputs to static/dist/
-```
+---
 
-### 4. Run tests locally
+## Testing
 
-The test suite **must not** run against your production database — integration tests create users via `/auth/register` and would otherwise pollute the live `users` table.
+Three suites, run in CI on every PR. See
+[`tests/perf/README.md`](tests/perf/README.md) for the perf details
+and [`docs/PERFORMANCE_BASELINE.md`](docs/PERFORMANCE_BASELINE.md)
+for the SLO matrix.
 
-**One-time setup** (per dev machine):
+| Suite | Tool | Where | Cadence | Threshold |
+|---|---|---|---|---|
+| Unit | pytest | `tests/unit/` | every PR | ≥ 80% coverage gate |
+| Integration | pytest + Postgres | `tests/integration/` | every PR | included in coverage |
+| E2E | Playwright | `frontend/tests/e2e/` | every PR | all specs pass |
+| Perf | k6 | `tests/perf/` | manual / `perf` label | p95 latency SLOs |
 
-1. Connect to your local Postgres in **pgAdmin 4** (or `psql`).
-2. Right-click your server → **Create → Database…** with:
-   - **Database**: `fourtwentyone_test`
-   - **Owner**: `app` (or whichever role owns the production DB)
-3. Add the connection string to your `.env`:
-   ```
-   TEST_DATABASE_URL=postgresql+asyncpg://app:<password>@localhost:5432/fourtwentyone_test
-   ```
-4. Apply the schema to the new database:
-   ```bash
-   make test-db-migrate
-   ```
-
-**Run tests:**
+**Run the full backend suite locally:**
 
 ```bash
-.venv/bin/pytest tests/ -v
-# or
-make test
+make test       # pytest + coverage report, fails under 80%
 ```
 
-`tests/conftest.py` swaps `DATABASE_URL` → `TEST_DATABASE_URL` before any app module loads. Two safety guards refuse to run:
+**Run Playwright locally:**
 
-- if `TEST_DATABASE_URL` isn't set in `.env`
-- if its value doesn't contain the substring `test`
+```bash
+cd frontend && npx playwright test
+```
 
-That way an accidentally-misconfigured `.env` can never wipe your production users.
+The test suite refuses to run without `TEST_DATABASE_URL` containing
+the substring `test`, so it can never wipe a production database
+by misconfiguration ([`tests/conftest.py`](tests/conftest.py)).
 
-## Branching & contributing
+---
+
+## Deploy
+
+Production deploys to [Fly.io](https://fly.io) via GitHub Actions:
+
+1. Push to `main` triggers the `CI` workflow.
+2. On success, the `Deploy to Fly.io` workflow fires
+   (`workflow_run` event), which calls `flyctl deploy --remote-only`.
+3. Fly builds the image on their builders, runs Alembic migrations
+   via the entrypoint, and does a rolling restart.
+
+Full setup (Fly account, app creation, secrets, custom domain):
+**[`docs/DEPLOY_SETUP.md`](docs/DEPLOY_SETUP.md)**.
+
+---
+
+## Security
+
+- Threat model + ongoing runbook: [`docs/SECURITY.md`](docs/SECURITY.md)
+- Pre-launch audit punch list: [`docs/SECURITY_AUDIT_2026-06.md`](docs/SECURITY_AUDIT_2026-06.md)
+- Secret scanning runs on every PR via [gitleaks](.github/workflows/secrets-scan.yml)
+- Dependency advisories surfaced via `pip-audit` + `npm audit` in CI (non-blocking, see [`ci.yml`](.github/workflows/ci.yml))
+
+Disclosure: please email **security@421bistro.com** rather than
+opening a public issue.
+
+---
+
+## Project structure
 
 ```
-main      ← stable releases only. PRs from develop, CI must pass.
+app/                    FastAPI backend
+├── core/               config, security helpers, rate limiter
+├── db/                 SQLAlchemy models + base
+├── game/               in-memory game state + logic + WS handler
+├── middleware/         SecurityHeadersMiddleware
+├── routers/            HTTP endpoint groups (auth, admin, contact, rankings, rooms)
+├── schemas/            Pydantic request/response models
+├── services/           afk_eviction, email, game_persistence, elo, username_moderation
+└── templates/emails/   Jinja2 transactional email templates
+
+frontend/               React + Vite SPA
+├── src/pages/          route-level components
+├── src/components/     reusable building blocks
+├── src/hooks/          useAuth, useGame, etc.
+├── src/api/            fetch wrappers per resource
+└── tests/e2e/          Playwright specs
+
+tests/                  pytest suites
+├── unit/               pure-function tests
+├── integration/        FastAPI test client + Postgres
+└── perf/               k6 perf scenarios
+
+alembic/versions/       DB migrations
+docs/                   ROADMAP, SECURITY, DEPLOY_SETUP, PERFORMANCE_BASELINE
+.github/workflows/      CI, e2e, perf, deploy, secrets-scan
+```
+
+---
+
+## How to play 421
+
+421 is a French dice game played in nested cycles. Terminology in
+this codebase:
+
+- **Throw** — one roll of the three dice on a player's turn.
+- **Manche** — one cycle of the table: every player throws, the
+  weakest hand picks up the round-loss penalty.
+- **Partie** — a sequence of manches that ends when one player has
+  accumulated the threshold number of round-points (default 5).
+  That player has "lost the partie."
+- **Room** — a persistent table that hosts successive parties. The
+  room stays open until the host leaves.
+
+Each manche has two phases:
+
+- **Charge** — chips flow from the central pool (11 chips) to the
+  players. Each cycle, the manche loser takes chips from the pool
+  equal to the winning combo's value. When the pool empties, play
+  flips to discharge.
+- **Discharge** — chips pass between players. The manche winner
+  hands chips to the loser. A player who drops to 0 chips sits out
+  for the rest of the manche. The manche ends when one player
+  holds all 11 chips — they take the round-loss penalty.
+
+**Dice hierarchy (strongest → weakest):**
+421 (8 chips) › 111 (7) › 11x (x) › triples (2-6) › suites 123/234/345/456 (2) › basic figures (1).
+
+**Bank rules** (set at room creation, not editable mid-partie):
+
+- `free` — the round starter sets the rhythm (1, 2, or 3 throws);
+  others must match in equal or fewer throws.
+- `sec` — one throw per player during charge, auto-marked done.
+
+Ties at the bottom (or at the top during discharge) are broken by
+re-throwing among tied players; the penalty stays the value of the
+original winning combo, not the tiebreak combo.
+
+---
+
+## Contributing
+
+This is a solo portfolio project — I'm not accepting external
+contributions. If you spot a real issue, feel free to open a bug
+report; I'll triage on a best-effort basis.
+
+Internal workflow (for posterity):
+
+```
+main      ← stable releases only. Auto-deploys to Fly on push.
 develop   ← integration branch. All feature PRs merge here.
-feature/* ← one branch per feature.
-hotfix/*  ← urgent fixes, backmerged to develop automatically.
+feature/* ← one branch per feature; PR back to develop.
+fix/*     ← bug fixes; PR back to develop.
+chore/*   ← refactors, dep bumps, infra changes.
+docs/*    ← docs-only changes.
 ```
 
-PRs to `develop` and `main` require CI to pass. The pipeline runs four jobs in sequence:
+PRs must pass: lint (ruff + ESLint), pytest with ≥ 80% coverage,
+Playwright E2E suite, gitleaks scan, no secrets in commits.
 
-1. **Lint** — ruff (Python) + ESLint (frontend)
-2. **Unit tests** — fast, no database required
-3. **Integration tests + coverage gate** — real PostgreSQL, Alembic migrations, full test suite, ≥ 80% coverage enforced
-4. **Docker build & push** — multi-stage image pushed to `siripo92/421-game` on DockerHub (push events only, not PRs)
-
-Pushes to `main` tag the image `:latest` + `:<sha7>`. Pushes to `develop` tag `:develop` + `:<sha7>`.
-
-## Environment variables
-
-| Variable | Required | Description |
-|---|---|---|
-| `DATABASE_URL` | yes | PostgreSQL async URL (`postgresql+asyncpg://...`) |
-| `SECRET_KEY` | yes | Random hex string for JWT signing |
-| `RESEND_API_KEY` | yes (prod) | Resend API key for password reset emails |
-| `APP_URL` | yes (prod) | Public base URL, used in reset email links |
-| `DEBUG` | no | `true` enables CORS wildcard + `/docs`; default `false` |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | no | JWT lifetime in minutes; default 30 |
-| `REMEMBER_ME_EXPIRE_DAYS` | no | Extended JWT lifetime when remember_me=true; default 30 |
-| `RESET_TOKEN_EXPIRE_MINUTES` | no | Password reset link TTL; default 60 |
-| `SENTRY_DSN` | no | Sentry DSN for error tracking |
-| `ANTHROPIC_API_KEY` | no | Required only for the retention pipeline |
-| `RETENTION_DRY_RUN` | no | Set `false` in prod to apply deletions; default `true` |
-| `DELETION_GRACE_DAYS` | no | Days before GDPR deletion executes; default 30 |
-| `GOOGLE_CLIENT_ID` | no | Google OAuth client ID for Google Sign-In |
-
-See `.env.example` for a full template.
-
-## API
-
-Interactive docs available at `/docs` when `DEBUG=true`.
-
-### Auth (`app/routers/auth.py`)
-
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| POST | `/auth/register` | — | Create account (birthdate required, min age 15). Returns JWT + `theme_pref`/`lang_pref`. |
-| POST | `/auth/login` | — | Email + password. `remember_me` extends token TTL to 30 days. |
-| POST | `/auth/google` | — | Google SSO callback (ID token). New users may need `/auth/google/complete`. |
-| POST | `/auth/google/complete` | JWT (provisional) | Finish profile after SSO (username + birthdate). |
-| POST | `/auth/forgot-password` | — | Email a one-time reset link. |
-| POST | `/auth/reset-password` | — | Set new password using reset token. |
-| GET | `/auth/me` | JWT | Current user — role, strikes, ban state, `lang_pref`, `theme_pref`. |
-| PATCH | `/auth/me` | JWT | Update username / `lang_pref` / `theme_pref`. |
-| DELETE | `/auth/me` | JWT | Soft-delete account (RGPD; hard-delete `DELETION_GRACE_DAYS` later). |
-| GET | `/auth/export` | JWT | RGPD Art. 15 data export — account, stats, games, audit log. |
-
-### Game rooms (`app/game/ws.py`)
-
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| POST | `/api/create` | optional JWT | Create a room. Body params: `is_public`, `max_players`, `bank_rule`, `afk_seconds`, `afk_bot`, `allow_spectators`, `default_lang`, `default_theme`. |
-| GET | `/api/join/{game_id}` | optional JWT | Join a room as player or join `waiting_players` if past WAITING. |
-| GET | `/api/rooms` | — | List currently open public rooms. |
-| WS | `/ws/{game_id}/{player_id}` | optional JWT (query param) | Real-time player connection. Send `{action, ...}` JSON frames. |
-| WS | `/ws/{game_id}/spectate` | optional JWT (query param) | Read-only spectator stream of game state. |
-
-WebSocket actions (sent by client over the player WS): `start`, `leave`, `kick`, `initial_roll`, `roll`, `keep`, `done`, `tiebreak_roll`, `update_room_rules` (host-only — G45 partie-boundary rule edits).
-
-### Rankings & profile
-
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| GET | `/api/rankings` | — | Top 50 players by Elo. |
-| GET | `/api/profile/{username}` | — | Public profile + recent game history. |
-
-### Admin (`app/routers/admin.py`, gated by `require_moderator` / `require_admin`)
-
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| GET | `/api/admin/dashboard-summary` | moderator | Counts: total users, active bans, chat bans, strikes, inbox stubs. |
-| PATCH | `/api/admin/users/{id}/role` | admin | Promote / demote a user. Audited in `gdpr_audit_log`. |
-| GET | `/api/admin/games/{id}/bot-decisions` | moderator | Per-throw AFK-bot decision trace for offline review (G55). |
-
-### Public utility
-
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| POST | `/api/contact` | — | Contact form (rate-limited 3/hour). Returns `{detail: {code, message}}` on 502 so the frontend can map specific errors. |
-| GET | `/api/policy-config` | — | Env-driven legal/policy timings (inactivity, deletion grace, breach window, audit retention). Rendered into the Privacy + Terms pages. |
-| GET | `/healthz` | — | Liveness probe. |
+---
 
 ## License
 
-MIT
+See [LICENSE](./LICENSE) — viewing-only, all rights reserved. This
+repo exists for portfolio review; the source code is not available
+for use, modification, redistribution, or ML training.
