@@ -189,10 +189,19 @@ async def _write(game: Game, db: AsyncSession) -> None:
     placement_order = sorted(survivors, key=lambda p: p.tokens) + [loser_player]
     for placement, p in enumerate(placement_order, start=1):
         uid_str = game.user_ids.get(p.id)
+        # G99: guard the UUID parse — a malformed entry in game.user_ids must
+        # not crash the whole partie persistence. Mirrors the same defensive
+        # `try/except ValueError` patterns elsewhere in this function.
+        gp_user_id: uuid.UUID | None = None
+        if uid_str:
+            try:
+                gp_user_id = uuid.UUID(uid_str)
+            except ValueError:
+                gp_user_id = None
         db.add(
             GamePlayer(
                 game_id=game_record.id,
-                user_id=uuid.UUID(uid_str) if uid_str else None,
+                user_id=gp_user_id,
                 display_name=p.name,
                 final_tokens=p.tokens,
                 round_points=game.round_points.get(p.id, 0),
@@ -201,8 +210,15 @@ async def _write(game: Game, db: AsyncSession) -> None:
         )
 
     # ELO update via pairwise survivor-vs-loser. Need loser's stats row to
-    # compute K-factor; skip if loser is unregistered.
-    loser_uid = uuid.UUID(game.user_ids[loser_id_str]) if game.user_ids.get(loser_id_str) else None
+    # compute K-factor; skip if loser is unregistered OR has a malformed
+    # user_ids entry (G99: defensive parse — matches the survivor loop below).
+    loser_uid: uuid.UUID | None = None
+    loser_uid_str = game.user_ids.get(loser_id_str)
+    if loser_uid_str:
+        try:
+            loser_uid = uuid.UUID(loser_uid_str)
+        except ValueError:
+            loser_uid = None
     loser_stats = stats_rows.get(loser_uid) if loser_uid else None
 
     survivor_inputs: list[tuple[int, int]] = []
