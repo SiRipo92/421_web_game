@@ -91,19 +91,6 @@ class ChatBanRequest(BaseModel):
     reason: Optional[str] = None
 
 
-class ForceRenameRequest(BaseModel):
-    """PATCH /api/admin/users/{id}/username body.
-
-    G96 admin override: lets an admin force-rename a user whose handle
-    survived the gate or needs changing (e.g. a violator's handle that
-    must change pending review). The new username MUST still pass the
-    G96 format check, but the blocklist is bypassed — admin can set
-    handles like "rule_violator_18742" that the blocklist would block.
-    """
-
-    new_username: str
-
-
 class DeleteAccountRequest(BaseModel):
     """DELETE /api/admin/users/{id} body. Type-username-to-confirm.
 

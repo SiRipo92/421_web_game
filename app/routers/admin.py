@@ -34,7 +34,6 @@ from app.schemas.admin import (
     BanRequest,
     ChatBanRequest,
     DeleteAccountRequest,
-    ForceRenameRequest,
 )
 from app.services.email import _send_via_brevo, render_email
 
@@ -53,7 +52,7 @@ _MOD_AUDIT_EVENTS = frozenset(
         "chat_banned",
         "chat_unbanned",
         "account_deleted_by_admin",
-        "username_forced_change",
+        "username_auto_sanitized",
     }
 )
 
@@ -253,50 +252,54 @@ async def update_user_role(
     return {"user_id": str(target.id), "role": target.role, "previous": previous}
 
 
-@router.patch("/users/{user_id}/username", status_code=200)
-async def force_rename_user(
+@router.post("/users/{user_id}/sanitize-username", status_code=200)
+async def sanitize_username(
     user_id: str,
-    body: ForceRenameRequest,
     actor: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """G96: admin override for usernames.
+    """G96: auto-generate a placeholder handle for a user.
 
-    Lets an admin replace a user's handle. Useful for: pre-launch fixing
-    of grandfathered offensive handles, post-violation rename pending
-    review (better UX than account deletion for borderline cases).
+    Use case: a user's handle slipped past the gate (grandfathered from
+    pre-G96, or future false-negative). Admin clicks « Sanitiser » → the
+    user gets an auto-generated `Player_<6char>` handle + a flag that
+    triggers an in-app banner asking them to pick a new one in settings.
 
-    Format check is enforced (the new handle must still be syntactically
-    valid). The blocklist is NOT enforced — admin can set handles the
-    blocklist would block, e.g. "rule_violator_18742".
+    Better UX than manual rename:
+      - Admin doesn't have to invent a sentinel name
+      - User gets agency back (they pick their own replacement)
+      - Auto-generated name is obviously a placeholder (`Player_AbC123`)
+
+    Uniqueness retry: generation loop with `secrets.token_urlsafe(4)`. In
+    practice the first try is unique; cap at 10 attempts to be safe.
+    Audit-logged as `username_auto_sanitized` with from/to/by metadata.
     """
-    from app.services.username_moderation import validate_format
+    import secrets
 
     target_uuid = _parse_uuid(user_id)
     target = await db.get(User, target_uuid)
     if target is None or target.deleted_at is not None:
         raise HTTPException(status_code=404, detail="User not found")
 
-    new_username = body.new_username.strip()
-    ok, err = validate_format(new_username)
-    if not ok:
-        raise HTTPException(status_code=400, detail=err)
-
-    # Uniqueness check — username column is UNIQUE in the schema, so a
-    # bad write would 500 with a constraint violation. Pre-check for a
-    # nicer 409.
-    existing = await db.execute(
-        select(User).where(User.username == new_username, User.id != target.id)
-    )
-    if existing.scalar_one_or_none():
-        raise HTTPException(status_code=409, detail="Username already taken")
-
     previous = target.username
+    new_username = None
+    for _ in range(10):
+        candidate = f"Player_{secrets.token_urlsafe(4).replace('-', '').replace('_', '')[:6]}"
+        existing = await db.execute(select(User).where(User.username == candidate))
+        if existing.scalar_one_or_none() is None:
+            new_username = candidate
+            break
+    if new_username is None:
+        raise HTTPException(
+            status_code=500, detail="Could not generate a unique placeholder; try again"
+        )
+
     target.username = new_username
+    target.username_pending_change = True
     db.add(
         GdprAuditLog(
             user_id=target.id,
-            event_type="username_forced_change",
+            event_type="username_auto_sanitized",
             metadata_={"from": previous, "to": new_username, "by": str(actor.id)},
         )
     )
@@ -305,6 +308,7 @@ async def force_rename_user(
         "user_id": str(target.id),
         "username": target.username,
         "previous": previous,
+        "pending_change": True,
     }
 
 

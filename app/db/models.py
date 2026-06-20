@@ -44,6 +44,12 @@ class User(Base):
     # in-game presentation popover toggle when the user is logged in.
     theme_pref: Mapped[str] = mapped_column(String(8), nullable=False, server_default="light")
     email_opt_in: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    # G96: True when admin auto-sanitized this user's handle. The user
+    # sees an in-app banner prompting them to choose a new one. Cleared
+    # by PATCH /auth/me on successful rename.
+    username_pending_change: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false", default=False
+    )
     # Moderation foundation (G38). Role is a plain string column rather than a
     # Postgres ENUM so promoting/demoting in tests + migrations stays a single
     # UPDATE instead of an ALTER TYPE dance.
