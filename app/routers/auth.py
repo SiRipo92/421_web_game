@@ -33,6 +33,44 @@ from app.services.email import send_reset_email, send_welcome_email
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
+@router.get("/username-available")
+@limiter.limit("10/minute")
+async def username_available(request: Request, u: str, db: AsyncSession = Depends(get_db)):
+    """G97: pre-submission username check.
+
+    Runs the G96 format check + blocklist + a DB uniqueness lookup so the
+    register form can show inline feedback before the user wastes time
+    filling in the rest of the form. Public + rate-limited 10/min/IP so
+    it can't be used for username enumeration at scale.
+
+    Response shape:
+        {available: bool, error_code: str | None, error_message: str | None}
+
+    error_code values:
+        - "format"  → G96 layer-1 format rule violated
+        - "content" → G96 layer-2 blocklist matched
+        - "taken"   → username exists in DB
+        - None      → handle is clean + free
+    """
+    from app.services.username_moderation import is_clean_username, validate_format
+
+    u_stripped = u.strip()
+    fmt_ok, fmt_err = validate_format(u_stripped)
+    if not fmt_ok:
+        return {"available": False, "error_code": "format", "error_message": fmt_err}
+    block_ok, block_err = is_clean_username(u_stripped)
+    if not block_ok:
+        return {"available": False, "error_code": "content", "error_message": block_err}
+    existing = await db.execute(select(User).where(User.username == u_stripped))
+    if existing.scalar_one_or_none():
+        return {
+            "available": False,
+            "error_code": "taken",
+            "error_message": "Username already taken",
+        }
+    return {"available": True, "error_code": None, "error_message": None}
+
+
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 @limiter.limit("5/minute")
 async def register(request: Request, body: RegisterRequest, db: AsyncSession = Depends(get_db)):
