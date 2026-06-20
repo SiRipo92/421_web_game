@@ -1,0 +1,21 @@
+{
+  "name": "421 Bistro",
+  "short_name": "421 Bistro",
+  "description": "Jouez au 421 en ligne avec vos amis. Dés, stratégie, décharge. Le jeu de bistrot français, version web.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#F4ECD8",
+  "theme_color": "#A8302A",
+  "lang": "fr",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["games"]
+}
