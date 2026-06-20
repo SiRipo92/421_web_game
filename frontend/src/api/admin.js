@@ -21,6 +21,13 @@ export const updateUserRole = (token, userId, newRole) =>
     headers: auth(token),
   })
 
+export const forceRenameUser = (token, userId, newUsername) =>
+  req(`/api/admin/users/${userId}/username`, {
+    method: 'PATCH',
+    headers: auth(token),
+    body: JSON.stringify({ new_username: newUsername }),
+  })
+
 // G90: paginated user list with filters
 export const listUsers = (token, params = {}) => {
   const qs = new URLSearchParams()

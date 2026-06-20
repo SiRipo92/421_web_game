@@ -34,6 +34,7 @@ from app.schemas.admin import (
     BanRequest,
     ChatBanRequest,
     DeleteAccountRequest,
+    ForceRenameRequest,
 )
 from app.services.email import _send_via_brevo, render_email
 
@@ -52,6 +53,7 @@ _MOD_AUDIT_EVENTS = frozenset(
         "chat_banned",
         "chat_unbanned",
         "account_deleted_by_admin",
+        "username_forced_change",
     }
 )
 
@@ -249,6 +251,61 @@ async def update_user_role(
     )
     await db.commit()
     return {"user_id": str(target.id), "role": target.role, "previous": previous}
+
+
+@router.patch("/users/{user_id}/username", status_code=200)
+async def force_rename_user(
+    user_id: str,
+    body: ForceRenameRequest,
+    actor: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """G96: admin override for usernames.
+
+    Lets an admin replace a user's handle. Useful for: pre-launch fixing
+    of grandfathered offensive handles, post-violation rename pending
+    review (better UX than account deletion for borderline cases).
+
+    Format check is enforced (the new handle must still be syntactically
+    valid). The blocklist is NOT enforced — admin can set handles the
+    blocklist would block, e.g. "rule_violator_18742".
+    """
+    from app.services.username_moderation import validate_format
+
+    target_uuid = _parse_uuid(user_id)
+    target = await db.get(User, target_uuid)
+    if target is None or target.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    new_username = body.new_username.strip()
+    ok, err = validate_format(new_username)
+    if not ok:
+        raise HTTPException(status_code=400, detail=err)
+
+    # Uniqueness check — username column is UNIQUE in the schema, so a
+    # bad write would 500 with a constraint violation. Pre-check for a
+    # nicer 409.
+    existing = await db.execute(
+        select(User).where(User.username == new_username, User.id != target.id)
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Username already taken")
+
+    previous = target.username
+    target.username = new_username
+    db.add(
+        GdprAuditLog(
+            user_id=target.id,
+            event_type="username_forced_change",
+            metadata_={"from": previous, "to": new_username, "by": str(actor.id)},
+        )
+    )
+    await db.commit()
+    return {
+        "user_id": str(target.id),
+        "username": target.username,
+        "previous": previous,
+    }
 
 
 @router.get("/games/{game_id}/bot-decisions")

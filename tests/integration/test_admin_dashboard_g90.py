@@ -314,7 +314,7 @@ async def test_ban_admin_protected_unless_actor_is_admin(client, make_user):
     await _promote(mod_uid, "moderator")
 
     # Create an admin victim
-    adm_data = make_user("admin_victim")
+    adm_data = make_user("victim_adm")
     adm_reg = await client.post("/auth/register", json=adm_data)
     adm_uid = (
         await client.get(
@@ -524,6 +524,142 @@ async def test_dashboard_summary_includes_online_count(client, make_user):
     assert body["online_count"] >= 1  # admin just authenticated → counts as online
     assert "recent_admin_actions" in body
     assert isinstance(body["recent_admin_actions"], list)
+
+
+# ---------------- G96 force-rename ----------------
+
+
+async def test_force_rename_requires_admin(client, make_user):
+    """A moderator cannot force-rename a user; admin-only."""
+    mod_data = make_user("rename_mod")
+    mod_reg = await client.post("/auth/register", json=mod_data)
+    mod_token = mod_reg.json()["access_token"]
+    mod_uid = (
+        await client.get("/auth/me", headers={"Authorization": f"Bearer {mod_token}"})
+    ).json()["id"]
+    await _promote(mod_uid, "moderator")
+
+    target_data = make_user("rename_target")
+    target_reg = await client.post("/auth/register", json=target_data)
+    target_uid = (
+        await client.get(
+            "/auth/me", headers={"Authorization": f"Bearer {target_reg.json()['access_token']}"}
+        )
+    ).json()["id"]
+
+    r = await client.patch(
+        f"/api/admin/users/{target_uid}/username",
+        json={"new_username": "newname"},
+        headers={"Authorization": f"Bearer {mod_token}"},
+    )
+    assert r.status_code == 403
+
+
+async def test_force_rename_bypasses_blocklist(client, make_user):
+    """G96 admin override: the blocklist is intentionally NOT enforced
+    on force-rename so admin can set sentinel handles like
+    "rule_violator_18742" that the blocklist would block in normal signup.
+    """
+    _, admin_token, _ = await _make_admin(client, make_user, "rb_adm")
+    target_data = make_user("rb_target")
+    target_reg = await client.post("/auth/register", json=target_data)
+    target_uid = (
+        await client.get(
+            "/auth/me", headers={"Authorization": f"Bearer {target_reg.json()['access_token']}"}
+        )
+    ).json()["id"]
+
+    # `support` is in the blocklist for impersonation; signup would 422.
+    # Force-rename should accept it.
+    r = await client.patch(
+        f"/api/admin/users/{target_uid}/username",
+        json={"new_username": "support"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert r.status_code == 200
+    assert r.json()["username"] == "support"
+    assert r.json()["previous"] == target_data["username"]
+
+
+async def test_force_rename_still_enforces_format(client, make_user):
+    """Even with blocklist disabled, format rules apply."""
+    _, admin_token, _ = await _make_admin(client, make_user, "rf_adm")
+    target_data = make_user("rf_target")
+    target_reg = await client.post("/auth/register", json=target_data)
+    target_uid = (
+        await client.get(
+            "/auth/me", headers={"Authorization": f"Bearer {target_reg.json()['access_token']}"}
+        )
+    ).json()["id"]
+
+    r = await client.patch(
+        f"/api/admin/users/{target_uid}/username",
+        json={"new_username": "bad spaces"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert r.status_code == 400
+
+
+async def test_force_rename_rejects_taken_handle(client, make_user):
+    """Cannot force-rename to a handle owned by another user."""
+    _, admin_token, _ = await _make_admin(client, make_user, "ru_adm")
+    other_data = make_user("ru_other")
+    await client.post("/auth/register", json=other_data)
+    target_data = make_user("ru_target")
+    target_reg = await client.post("/auth/register", json=target_data)
+    target_uid = (
+        await client.get(
+            "/auth/me", headers={"Authorization": f"Bearer {target_reg.json()['access_token']}"}
+        )
+    ).json()["id"]
+
+    r = await client.patch(
+        f"/api/admin/users/{target_uid}/username",
+        json={"new_username": other_data["username"]},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert r.status_code == 409
+
+
+async def test_force_rename_writes_audit_log(client, make_user):
+    """Force-rename produces a GdprAuditLog row with from/to/by metadata."""
+    _, admin_token, _ = await _make_admin(client, make_user, "ra_adm")
+    target_data = make_user("ra_target")
+    target_reg = await client.post("/auth/register", json=target_data)
+    target_uid = (
+        await client.get(
+            "/auth/me", headers={"Authorization": f"Bearer {target_reg.json()['access_token']}"}
+        )
+    ).json()["id"]
+
+    await client.patch(
+        f"/api/admin/users/{target_uid}/username",
+        json={"new_username": "renamed_one"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(GdprAuditLog).where(
+                GdprAuditLog.user_id == uuid.UUID(target_uid),
+                GdprAuditLog.event_type == "username_forced_change",
+            )
+        )
+        rows = result.scalars().all()
+        assert len(rows) >= 1
+        meta = rows[-1].metadata_ or {}
+        assert meta.get("to") == "renamed_one"
+        assert meta.get("from") == target_data["username"]
+
+
+async def test_signup_rejects_blocked_username(client, make_user):
+    """G96 acceptance: BigBite420 (the reported case) cannot register."""
+    bad = make_user("ignored_prefix")
+    bad["username"] = "BigBite420"
+    r = await client.post("/auth/register", json=bad)
+    assert r.status_code == 422
+    body_str = str(r.json()).lower()
+    assert "inappropriate" in body_str
 
 
 # ---------------- audit log integrity ----------------

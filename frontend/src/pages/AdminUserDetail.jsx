@@ -73,6 +73,9 @@ export function AdminUserDetail({ user, token }) {
               >{t('admin_action_chat_ban')}</button>
               {isAdmin && (
                 <>
+                  <button type="button" className="btn-ghost" onClick={() => setModal('rename')}
+                    disabled={!!detail.deleted_at}
+                  >{t('admin_action_rename')}</button>
                   <button type="button" className="btn-ghost" onClick={() => setModal('role')}
                     disabled={!!detail.deleted_at}
                   >{t('admin_action_change_role')}</button>
@@ -160,6 +163,7 @@ export function AdminUserDetail({ user, token }) {
 
           {modal === 'ban' && <BanModal detail={detail} token={token} onClose={() => setModal(null)} onSuccess={() => { setModal(null); reload() }} t={t} />}
           {modal === 'chat-ban' && <ChatBanModal detail={detail} token={token} onClose={() => setModal(null)} onSuccess={() => { setModal(null); reload() }} t={t} />}
+          {modal === 'rename' && <RenameModal detail={detail} token={token} onClose={() => setModal(null)} onSuccess={() => { setModal(null); reload() }} t={t} />}
           {modal === 'role' && <RoleModal detail={detail} token={token} onClose={() => setModal(null)} onSuccess={() => { setModal(null); reload() }} t={t} />}
           {modal === 'delete' && <DeleteModal detail={detail} token={token} onClose={() => setModal(null)} onSuccess={() => navigate('/admin/users')} t={t} />}
         </>
@@ -287,6 +291,44 @@ function ChatBanModal({ detail, token, onClose, onSuccess, t }) {
           <button type="button" className="btn-ghost" onClick={onClose}>{t('cancel')}</button>
           <button type="button" className="btn-primary" onClick={submit} disabled={submitting}>
             {submitting ? '…' : t('admin_modal_confirm_chat_ban')}
+          </button>
+        </div>
+      </div>
+    </ModalShell>
+  )
+}
+
+function RenameModal({ detail, token, onClose, onSuccess, t }) {
+  const [newUsername, setNewUsername] = useState(detail.username)
+  const [submitting, setSubmitting] = useState(false)
+  const [err, setErr] = useState(null)
+  const canSubmit = newUsername.trim() !== '' && newUsername !== detail.username
+  const submit = async () => {
+    setSubmitting(true)
+    setErr(null)
+    try {
+      await adminApi.forceRenameUser(token, detail.id, newUsername.trim())
+      onSuccess()
+    } catch (e) {
+      setErr(e?.detail || 'error')
+      setSubmitting(false)
+    }
+  }
+  return (
+    <ModalShell onClose={onClose} title={t('admin_modal_rename_title', { username: detail.username })}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <p className="serif" style={{ margin: 0, color: 'var(--ink-soft)' }}>
+          {t('admin_modal_rename_blurb')}
+        </p>
+        <input type="text" value={newUsername} onChange={(e) => setNewUsername(e.target.value)}
+          maxLength={20}
+          style={{ padding: '0.5rem 0.6rem', fontFamily: 'monospace', fontSize: '0.85rem', border: '1px solid var(--rule)', borderRadius: 3 }}
+        />
+        {err && <p style={{ color: 'var(--rouge)', fontSize: '0.85rem', margin: 0 }}>{String(err)}</p>}
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button type="button" className="btn-ghost" onClick={onClose}>{t('cancel')}</button>
+          <button type="button" className="btn-primary" onClick={submit} disabled={!canSubmit || submitting}>
+            {submitting ? '…' : t('admin_modal_confirm_rename')}
           </button>
         </div>
       </div>
