@@ -3,6 +3,7 @@
 [![CI](https://github.com/SiRipo92/421_web_game/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/SiRipo92/421_web_game/actions/workflows/ci.yml)
 [![E2E](https://github.com/SiRipo92/421_web_game/actions/workflows/e2e.yml/badge.svg?branch=main)](https://github.com/SiRipo92/421_web_game/actions/workflows/e2e.yml)
 [![Coverage](https://img.shields.io/badge/coverage-85%25-brightgreen)](#testing)
+[![Docs](https://img.shields.io/badge/docs-readthedocs.io-blue)](https://421bistro.readthedocs.io)
 [![License](https://img.shields.io/badge/license-source--available-blue)](./LICENSE)
 
 A real-time multiplayer implementation of **421**, the French dice

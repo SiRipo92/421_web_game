@@ -1479,7 +1479,31 @@ With these helpers in place, each new test becomes 20-40 lines, not 80-100.
 
 **Deferred to G100b:** code quality sweep + Sphinx/ReadTheDocs.
 
-### G100b. Pre-launch polish — code quality sweep + Sphinx/ReadTheDocs
+### G100b. (DONE — pending PR merge) Pre-launch polish — code quality sweep + Sphinx/ReadTheDocs
+
+**Shipped (2026-06-20):**
+- Sphinx scaffolding at `docs/source/` — `conf.py`, `index.rst`,
+  `architecture.rst`, per-package autodoc files at `docs/source/api/`.
+  MyST parser enabled so existing `docs/*.md` (SECURITY, DEPLOY_SETUP,
+  PROD_SMOKE_TESTS, etc.) link in without conversion.
+- `.readthedocs.yaml` — Ubuntu 22.04 + Python 3.12, builds HTML + PDF.
+- `requirements-dev.txt` — added sphinx, sphinx-rtd-theme,
+  sphinx-autodoc-typehints, myst-parser, vulture, radon.
+- `Makefile` targets: `make docs` (builds locally to
+  `docs/build/html/`), `make docs-clean`, `make quality` (vulture +
+  radon).
+- Code quality sweep results captured at
+  [`docs/CODE_QUALITY_2026-06.md`](./CODE_QUALITY_2026-06.md). TL;DR:
+  zero items removed this pass — every vulture/knip finding was
+  either a false positive (FastAPI route handlers, Pydantic `cls`
+  params, SQLAlchemy ORM relationships) or a deliberately-kept
+  "planned-use" item. The 7 high-complexity functions in
+  `app/game/ws.py` + `app/game/logic.py` are documented as known
+  hotspots gated on G99b's coverage push before refactor.
+
+**Original scope:**
+
+
 **Why:** Originally bundled with G100a; split out to keep the launch-blocker PR small. These are polish items that don't block launch but improve the portfolio readability of the repo.
 
 **Scope (single bundled PR):**
