@@ -108,6 +108,7 @@ class MeResponse(BaseModel):
     lang_pref: str
     theme_pref: str = "light"
     email_opt_in: bool
+    username_pending_change: bool = False  # G96: in-app banner trigger
     profile_complete: bool = True
     has_avatar: bool = False
     role: str = "player"

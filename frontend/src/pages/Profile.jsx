@@ -40,6 +40,31 @@ export function Profile({ user, token, onRefreshUser, onLogout }) {
 
   return (
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: '2.5rem 1.5rem' }}>
+      {/* G96: admin-auto-sanitized handle prompt */}
+      {user.username_pending_change && (
+        <div
+          role="status"
+          style={{
+            background: 'rgba(168,48,42,0.10)',
+            border: '1px solid var(--rouge)',
+            borderRadius: 4,
+            padding: '0.9rem 1.2rem',
+            marginBottom: '1.5rem',
+            display: 'flex',
+            gap: 12,
+            alignItems: 'center',
+            flexWrap: 'wrap',
+          }}
+        >
+          <span aria-hidden="true" style={{ color: 'var(--rouge)', fontSize: '1.2rem' }}>!</span>
+          <p className="serif" style={{ margin: 0, flex: 1, minWidth: 260, color: 'var(--ink)' }}>
+            {t('pending_username_banner')}
+          </p>
+          <a href="#edit-username" className="btn btn-primary" style={{ padding: '0.45rem 1rem', fontSize: '0.9rem' }}>
+            {t('pending_username_cta')}
+          </a>
+        </div>
+      )}
       {/* Header */}
       <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', gap: 24, alignItems: 'center', marginBottom: '2.5rem' }}
         className="prof-hd">

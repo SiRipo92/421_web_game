@@ -159,6 +159,7 @@ def _me_response(user: User) -> MeResponse:
         lang_pref=user.lang_pref,
         theme_pref=user.theme_pref,
         email_opt_in=user.email_opt_in,
+        username_pending_change=user.username_pending_change,
         profile_complete=user.birthdate is not None,
         has_avatar=user.avatar_data is not None,
         role=user.role,
@@ -330,6 +331,8 @@ async def update_me(
         if existing.scalar_one_or_none():
             raise HTTPException(status_code=409, detail="Username already taken")
         current_user.username = body.username
+        # G96: a successful rename clears the auto-sanitize banner trigger.
+        current_user.username_pending_change = False
     if body.lang_pref is not None:
         current_user.lang_pref = body.lang_pref
     if body.theme_pref is not None:

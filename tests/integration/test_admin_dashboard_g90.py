@@ -526,12 +526,12 @@ async def test_dashboard_summary_includes_online_count(client, make_user):
     assert isinstance(body["recent_admin_actions"], list)
 
 
-# ---------------- G96 force-rename ----------------
+# ---------------- G96 sanitize-username ----------------
 
 
-async def test_force_rename_requires_admin(client, make_user):
-    """A moderator cannot force-rename a user; admin-only."""
-    mod_data = make_user("rename_mod")
+async def test_sanitize_username_requires_admin(client, make_user):
+    """A moderator cannot sanitize a user's handle; admin-only."""
+    mod_data = make_user("san_mod")
     mod_reg = await client.post("/auth/register", json=mod_data)
     mod_token = mod_reg.json()["access_token"]
     mod_uid = (
@@ -539,7 +539,7 @@ async def test_force_rename_requires_admin(client, make_user):
     ).json()["id"]
     await _promote(mod_uid, "moderator")
 
-    target_data = make_user("rename_target")
+    target_data = make_user("san_target")
     target_reg = await client.post("/auth/register", json=target_data)
     target_uid = (
         await client.get(
@@ -547,44 +547,47 @@ async def test_force_rename_requires_admin(client, make_user):
         )
     ).json()["id"]
 
-    r = await client.patch(
-        f"/api/admin/users/{target_uid}/username",
-        json={"new_username": "newname"},
+    r = await client.post(
+        f"/api/admin/users/{target_uid}/sanitize-username",
         headers={"Authorization": f"Bearer {mod_token}"},
     )
     assert r.status_code == 403
 
 
-async def test_force_rename_bypasses_blocklist(client, make_user):
-    """G96 admin override: the blocklist is intentionally NOT enforced
-    on force-rename so admin can set sentinel handles like
-    "rule_violator_18742" that the blocklist would block in normal signup.
-    """
-    _, admin_token, _ = await _make_admin(client, make_user, "rb_adm")
-    target_data = make_user("rb_target")
+async def test_sanitize_username_generates_placeholder(client, make_user):
+    """Sanitize replaces the handle with `Player_<6chars>` and sets the
+    pending-change flag."""
+    _, admin_token, _ = await _make_admin(client, make_user, "sg_adm")
+    target_data = make_user("sg_target")
     target_reg = await client.post("/auth/register", json=target_data)
     target_uid = (
         await client.get(
             "/auth/me", headers={"Authorization": f"Bearer {target_reg.json()['access_token']}"}
         )
     ).json()["id"]
+    original_username = target_data["username"]
 
-    # `support` is in the blocklist for impersonation; signup would 422.
-    # Force-rename should accept it.
-    r = await client.patch(
-        f"/api/admin/users/{target_uid}/username",
-        json={"new_username": "support"},
+    r = await client.post(
+        f"/api/admin/users/{target_uid}/sanitize-username",
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert r.status_code == 200
-    assert r.json()["username"] == "support"
-    assert r.json()["previous"] == target_data["username"]
+    body = r.json()
+    assert body["previous"] == original_username
+    assert body["username"].startswith("Player_")
+    assert body["pending_change"] is True
+
+    # Verify the DB flag landed
+    async with AsyncSessionLocal() as db:
+        u = await db.get(User, uuid.UUID(target_uid))
+        assert u.username_pending_change is True
+        assert u.username != original_username
 
 
-async def test_force_rename_still_enforces_format(client, make_user):
-    """Even with blocklist disabled, format rules apply."""
-    _, admin_token, _ = await _make_admin(client, make_user, "rf_adm")
-    target_data = make_user("rf_target")
+async def test_sanitize_username_writes_audit_log(client, make_user):
+    """Sanitize produces a GdprAuditLog row with from/to/by metadata."""
+    _, admin_token, _ = await _make_admin(client, make_user, "sa_adm")
+    target_data = make_user("sa_target")
     target_reg = await client.post("/auth/register", json=target_data)
     target_uid = (
         await client.get(
@@ -592,64 +595,55 @@ async def test_force_rename_still_enforces_format(client, make_user):
         )
     ).json()["id"]
 
-    r = await client.patch(
-        f"/api/admin/users/{target_uid}/username",
-        json={"new_username": "bad spaces"},
+    r = await client.post(
+        f"/api/admin/users/{target_uid}/sanitize-username",
         headers={"Authorization": f"Bearer {admin_token}"},
     )
-    assert r.status_code == 400
-
-
-async def test_force_rename_rejects_taken_handle(client, make_user):
-    """Cannot force-rename to a handle owned by another user."""
-    _, admin_token, _ = await _make_admin(client, make_user, "ru_adm")
-    other_data = make_user("ru_other")
-    await client.post("/auth/register", json=other_data)
-    target_data = make_user("ru_target")
-    target_reg = await client.post("/auth/register", json=target_data)
-    target_uid = (
-        await client.get(
-            "/auth/me", headers={"Authorization": f"Bearer {target_reg.json()['access_token']}"}
-        )
-    ).json()["id"]
-
-    r = await client.patch(
-        f"/api/admin/users/{target_uid}/username",
-        json={"new_username": other_data["username"]},
-        headers={"Authorization": f"Bearer {admin_token}"},
-    )
-    assert r.status_code == 409
-
-
-async def test_force_rename_writes_audit_log(client, make_user):
-    """Force-rename produces a GdprAuditLog row with from/to/by metadata."""
-    _, admin_token, _ = await _make_admin(client, make_user, "ra_adm")
-    target_data = make_user("ra_target")
-    target_reg = await client.post("/auth/register", json=target_data)
-    target_uid = (
-        await client.get(
-            "/auth/me", headers={"Authorization": f"Bearer {target_reg.json()['access_token']}"}
-        )
-    ).json()["id"]
-
-    await client.patch(
-        f"/api/admin/users/{target_uid}/username",
-        json={"new_username": "renamed_one"},
-        headers={"Authorization": f"Bearer {admin_token}"},
-    )
+    new_username = r.json()["username"]
 
     async with AsyncSessionLocal() as db:
         result = await db.execute(
             select(GdprAuditLog).where(
                 GdprAuditLog.user_id == uuid.UUID(target_uid),
-                GdprAuditLog.event_type == "username_forced_change",
+                GdprAuditLog.event_type == "username_auto_sanitized",
             )
         )
         rows = result.scalars().all()
         assert len(rows) >= 1
         meta = rows[-1].metadata_ or {}
-        assert meta.get("to") == "renamed_one"
         assert meta.get("from") == target_data["username"]
+        assert meta.get("to") == new_username
+
+
+async def test_self_rename_clears_pending_flag(client, make_user):
+    """G96: when a sanitized user picks a new handle via PATCH /auth/me,
+    the username_pending_change flag is cleared. Closes the feedback loop."""
+    _, admin_token, _ = await _make_admin(client, make_user, "sc_adm")
+    target_data = make_user("sc_target")
+    target_reg = await client.post("/auth/register", json=target_data)
+    target_token = target_reg.json()["access_token"]
+    target_uid = (
+        await client.get("/auth/me", headers={"Authorization": f"Bearer {target_token}"})
+    ).json()["id"]
+
+    # Admin sanitizes the user
+    await client.post(
+        f"/api/admin/users/{target_uid}/sanitize-username",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    me = await client.get("/auth/me", headers={"Authorization": f"Bearer {target_token}"})
+    assert me.json()["username_pending_change"] is True
+
+    # User picks a new (valid) handle
+    new_handle = "Marcel_42"
+    r = await client.patch(
+        "/auth/me",
+        json={"username": new_handle},
+        headers={"Authorization": f"Bearer {target_token}"},
+    )
+    assert r.status_code == 200
+    assert r.json()["username"] == new_handle
+    assert r.json()["username_pending_change"] is False
 
 
 async def test_signup_rejects_blocked_username(client, make_user):
