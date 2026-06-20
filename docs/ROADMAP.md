@@ -1419,6 +1419,54 @@ Promote tickets from "random slugs in email" to a real `ContactTicket(id, ref, f
 
 **Effort:** ~4-5 days. **Launch-blocker.**
 
+### G99b. ws.py coverage push — eviction-timer, tiebreak, manche-advance
+**Why:** G99 raised total coverage 82% → 85%, but `app/game/ws.py` is the outlier — still at **69%** (242 untested lines) despite being the single largest behaviour surface in the app. The CI gate is currently relaxed to 80% (`f84fa12`) to keep headroom for incremental development; tightening it back to 90% needs ws.py coverage to come up first.
+
+Crucially, **Playwright E2E coverage doesn't count toward `pytest-cov`** — the FastAPI process runs in a subprocess during Playwright runs, outside pytest's instrumentation. The only way to move the pytest number is more pytest-level tests against the real WS handler.
+
+**Why this is hard (documented in G99 review):**
+1. `_afk_timer` calls `asyncio.sleep(45)` in real time — every test that exercises the eviction path needs `asyncio.sleep` monkeypatched, AND the same patch applied to `_finalize_bot_turn`'s grace-window sleep. One missed patch and the test hangs.
+2. Starlette's `TestClient.websocket_connect` is sync-only, but our DB session is async-bound to its own event loop. Crossing the boundary errors with "attached to a different loop." Existing `test_ws.py` works around this by poking `games[]` directly + skipping the HTTP join endpoint — fine for state assertions, awkward for multi-step turn flows.
+3. Multi-player tests (the only way to exercise tiebreak + manche-advance) need ~80-100 lines per spec: two WS clients, driven through `initial_roll → roll → keep → done → tiebreak_roll`, assertions at each step.
+4. Bot logic uses real `random.randint(1, 6)` — tests need a value-queue monkeypatched per spec.
+
+**Scope (single bundled PR):**
+
+#### Untested paths to cover (in priority order)
+
+Lines reference the ws.py state at G99 merge (commit `8b151a1`).
+
+1. **`_afk_timer` end-to-end (lines 511-625, ~115 lines).** Eviction path: AFK clock expires → `evict_player` → state broadcast → no more bot turns for that player. Warning path: T-2min toast fires once per AFK episode. Reconnect-during-grace path: bot plays, snapshot stored, human reconnects, snapshot restored, finalize-task cancelled.
+2. **`_finalize_bot_turn` (lines 628-708).** The deferred advance + resolve + AFK-reschedule chain that fires after the grace window. Cancel-during-grace, normal-fire, error-during-fire (sentry capture path).
+3. **Tiebreak resolution branch in `_handle_action` (lines 1222-1258).** Two players with tied ranks → both prompted for tiebreak roll → `_resolve_tiebreak` picks winner → manche awards loser → next manche starts.
+4. **Round / manche advance (lines 1136-1161).** Last `done` action of a manche triggers `_resolve_round`, awards round_points to loser, checks for partie end, broadcasts winner banner.
+5. **Reconnect mid-turn (lines 802-822).** Player disconnects mid-`roll`, reconnects, state broadcast catches them up to their current `PlayerTurn.dice` snapshot.
+6. **Leave + host migration during specific phases (lines 1431-1478).** Host leaves during CHARGE → longest-tenured non-AFK takes over. Host leaves during TIEBREAK → resolved differently because tiebreak roll is pending.
+
+#### Test patterns (so the work is mechanical, not exploratory)
+
+Establish 2-3 helper fixtures in a new `tests/integration/conftest_ws.py`:
+- `_fast_clock()` — context manager that monkeypatches `asyncio.sleep` to be effectively instant (`await asyncio.sleep(0)`).
+- `_seed_random(values: list[int])` — context manager that monkeypatches `app.game.ws.random.randint` with a value queue.
+- `_make_two_player_game(client, make_user)` — async helper that registers 2 users, creates a room, joins both, returns the WS clients + game_id.
+
+With these helpers in place, each new test becomes 20-40 lines, not 80-100.
+
+#### Bumps + housekeeping
+- Once `ws.py` ≥ 85% and total ≥ 90%, bump the CI gate in `.github/workflows/ci.yml` 80 → 90 and the PR template line in lockstep.
+- Drop the "target 90%+, gate is the floor" qualifier from the PR template since the gate IS 90% then.
+
+**Acceptance:**
+- `app/game/ws.py` coverage ≥ 85% (currently 69%).
+- Total `app/` coverage ≥ 90% (currently 85.30%).
+- CI gate raised 80 → 90 in the same PR.
+- All 6 priority paths above have at least one explicit test.
+- The 3 helper fixtures committed under `tests/integration/conftest_ws.py` so future ws.py tests stay short.
+
+**Effort:** ~2-3 days. The first 5-7 tests (covering eviction-timer + tiebreak) take ~1 day and would push total coverage to ~88-89%. The remaining tests to clear 90% are another ~1 day. The third day is the unexpected friction one always hits with WS + asyncio test infra.
+
+**Not a launch-blocker** by itself — the gate at 80 is fine for launch. But it's the natural next move after G99 + before any major game-logic changes ship.
+
 ### G100. Pre-launch infra bundle — CI/CD redeploy, code quality sweep, Sphinx + ReadTheDocs, README
 **Why:** Three things that are loosely-coupled but all touch "the project's exterior surface" — what someone sees in the README, what the docs site looks like, and what happens when you push to main. Bundling them keeps the review focused on infrastructure / DX rather than product behaviour.
 
