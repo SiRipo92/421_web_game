@@ -41,12 +41,74 @@ async def test_register_duplicate_rejected(client, make_user):
     assert r.status_code == 409
 
 
+async def test_register_username_collision_blames_username(client, make_user):
+    """G97: when only the username collides, error says 'Username already taken'."""
+    first = make_user("dup_u")
+    await client.post("/auth/register", json=first)
+    second = make_user("dup_u_v2")  # fresh email + suffix
+    second["username"] = first["username"]
+    r = await client.post("/auth/register", json=second)
+    assert r.status_code == 409
+    assert "username" in r.json()["detail"].lower()
+    assert "email" not in r.json()["detail"].lower()
+
+
+async def test_register_can_reuse_handle_after_self_delete(client, make_user):
+    """G97: deleting your account anonymizes username + email so the
+    handle is immediately reusable by a new registration."""
+    data = make_user("recyc")
+    reg = await client.post("/auth/register", json=data)
+    token = reg.json()["access_token"]
+    # Self-delete
+    r = await client.request("DELETE", "/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 204
+    # Re-register with same username + email — should succeed
+    r2 = await client.post("/auth/register", json=data)
+    assert r2.status_code == 201
+
+
+async def test_register_email_collision_blames_email(client, make_user):
+    """G97: when only the email collides, error says 'Email already taken'."""
+    first = make_user("dup_e")
+    await client.post("/auth/register", json=first)
+    second = make_user("dup_e_v2")  # fresh username
+    second["email"] = first["email"]
+    r = await client.post("/auth/register", json=second)
+    assert r.status_code == 409
+    assert "email" in r.json()["detail"].lower()
+    assert "username" not in r.json()["detail"].lower()
+
+
 async def test_register_underage_rejected(client, make_user):
-    """Birthdate that puts the user under 15 returns 422."""
-    data = make_user()
-    data["birthdate"] = "2015-01-01"
+    """G97: birthdate that puts the user under 15 returns 422."""
+    data = make_user("under15")
+    # Sliding window: 14 years ago always fails the >= 15 check.
+    from datetime import date
+
+    data["birthdate"] = date.today().replace(year=date.today().year - 14).isoformat()
     r = await client.post("/auth/register", json=data)
     assert r.status_code == 422
+    assert "15 years" in str(r.json()).lower() or "15 ans" in str(r.json())
+
+
+async def test_register_overage_rejected(client, make_user):
+    """G97: birthdate over 120 years ago returns 422 (catches 1889-style typos)."""
+    data = make_user("over120")
+    data["birthdate"] = "1889-01-01"
+    r = await client.post("/auth/register", json=data)
+    assert r.status_code == 422
+    assert "120" in str(r.json())
+
+
+async def test_register_future_birthdate_rejected(client, make_user):
+    """G97: a future birthdate is nonsense — reject with 422."""
+    data = make_user("future")
+    from datetime import date, timedelta
+
+    data["birthdate"] = (date.today() + timedelta(days=30)).isoformat()
+    r = await client.post("/auth/register", json=data)
+    assert r.status_code == 422
+    assert "future" in str(r.json()).lower()
 
 
 async def test_login_success(client, make_user):

@@ -1364,9 +1364,22 @@ This alone eliminates `BigBite 420`, `B!gBite420`, emoji-spam, etc. without touc
 - Examples that should reject: `BigBite420`, `B1gB1te420`, `b.i.g.b.i.t.e`, `c0nnard`, `f4ck_y0u`, `m3rde`, every common slur in either language.
 - Edge: don't false-positive innocuous handles. `Assassin` should pass even though `ass` is a substring — the blocklist is for *complete words* and known compound bad-words, not raw substring sniffing on common letter sequences. Use a dedicated `BAD_SUBSTRINGS` list (matched anywhere) vs. `BAD_WORDS` list (matched only as whole token after normalization).
 
-#### Layer 3 — Optional AI moderation (defer)
+#### Layer 3 — Optional AI moderation (DEFERRED — confirmed during G97)
 
-For edge cases ([[G46]] pattern), pass borderline usernames through Claude with a simple "is this username inappropriate, yes/no + reason" prompt. ~$0.0001 per check. Only triggered on usernames that pass layer 1 + 2 but look suspicious (heavy l33t, mixed scripts, very long). **Not in v1** — layers 1 + 2 catch 95% of cases.
+For edge cases ([[G46]] pattern), pass borderline usernames through Claude with a simple "is this username inappropriate, yes/no + reason" prompt. ~$0.0001 per check.
+
+**When to actually build this:** ONLY after a real false-positive complaint surfaces in production. The static blocklist is conservative enough that we have zero documented false positives so far (`Assassin`, `compassion`, `robotanist` all pass). Adding the AI call before any actual complaint is premature optimization — adds latency, cost, and a new failure mode for marginal coverage gain.
+
+**Trigger to open:** Sentry shows ≥ 3 legitimate handles rejected by Layer 2 OR contact-form receives ≥ 2 "your gate rejected my actual name" tickets.
+
+**Implementation sketch when triggered:**
+- Only invoke on handles that pass layers 1 + 2 (free) OR on handles that fail layer 2 + the rejected user contacts support
+- Use the existing Anthropic API client + key from [[G46]]
+- Strict 2-second timeout; on timeout/failure fall through to the static-blocklist verdict (fail closed — never block based on AI alone, never let AI override a static reject)
+- Prompt: « Username: "{handle}". In French OR English, is this handle inappropriate (profanity, slur, impersonation, sexual content)? Answer yes or no. »
+- Cache verdicts in Redis 90 days keyed by normalized handle (most checks are duplicates)
+- ~$0.0001 per check × ~50 borderline calls/day at meaningful traffic = ~$0.15/month
+- Fail-open semantics: AI says "no" → accept (combined with strict static layer); AI says "yes" → reject. AI unavailable → fall back to static layer's verdict.
 
 #### Where to enforce
 
