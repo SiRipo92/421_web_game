@@ -13,7 +13,7 @@ import { useState } from 'react'
  * password matches the primary password), and default otherwise.
  */
 function EyeOpenIcon({ size = 18 }) {
-  // Filled eye — "password is currently shown", click to hide.
+  // Open eye — "password is currently hidden, click to reveal it".
   return (
     <svg
       width={size}
@@ -30,7 +30,7 @@ function EyeOpenIcon({ size = 18 }) {
 }
 
 function EyeClosedIcon({ size = 18 }) {
-  // Stroke-style crossed-out eye — "password is hidden", click to show.
+  // Crossed-out eye — "password is currently visible, click to hide it".
   return (
     <svg
       width={size}
@@ -92,7 +92,7 @@ export function PasswordInput({ id, value, onChange, onBlur, autoComplete = 'cur
           lineHeight: 0,
         }}
       >
-        {revealed ? <EyeOpenIcon /> : <EyeClosedIcon />}
+        {revealed ? <EyeClosedIcon /> : <EyeOpenIcon />}
       </button>
     </div>
   )
