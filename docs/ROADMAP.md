@@ -1604,6 +1604,50 @@ Also: the current `Journal` + `Live ticker` drawers show different views of the 
 
 **Overall G101 priority:** 101a + 101b + 101c are launch-quality bugs — they break the "ongoing room with persistent stats" promise we sold. Tackle in that order. 101d + 101e + 101f are polish / v2 redesign items that can ship in subsequent PRs.
 
+#### 101g. Production observability gaps — Neon connection pool dying + invisible 4xx errors
+
+**Two issues surfaced together** during the first prod day (2026-06-21), both about "I can see a bug happened but I can't trace it from Sentry":
+
+**G101g.i — `connection is closed` during AFK eviction audit log INSERT.**
+
+Real Sentry trace captured at 22:47:43 UTC:
+- Game `D1A5CC9A`, player `f936d098` (Sierra, user `c22397c8-…`)
+- Path: `_afk_timer` → `evict_player` → `db.commit()` on the `gdpr_audit_log` INSERT
+- Exception: `InterfaceError: connection is closed` from asyncpg
+
+**Root cause: Neon auto-suspends inactive databases.** After ~5 min of no traffic the compute pauses; on wake-up it accepts new connections fine, but SQLAlchemy's connection pool still holds stale connections from before the suspend. The first query on a stale connection fails — exactly what happened during AFK eviction (which fires after 10 min of inactivity, so the database is almost guaranteed to have suspended in between).
+
+**Fix (1-line, low-risk):** add `pool_pre_ping=True` to `create_async_engine` in `app/db/base.py`. SQLAlchemy then tests each pooled connection with a cheap `SELECT 1` before handing it out; stale connections get transparently replaced. Cost: a few μs per checkout. Also add `pool_recycle=300` so connections older than 5 min get forcibly refreshed even if pre-ping somehow misses one.
+
+**Acceptance:**
+- `app/db/base.py` engine config includes `pool_pre_ping=True` + `pool_recycle=300`
+- Manual test: idle the prod app for 10+ min, then trigger any DB call → succeeds without `InterfaceError`
+- This fix unblocks G101b (stats not persisting) — that bug may actually be the same root cause, with the partie-end commit dying because the connection went stale during a long manche
+
+**G101g.ii — Mobile signup hit "An error occurred" with zero Sentry trace.**
+
+User registered cleanly (username + email validated, password match, age > 15, T&C accepted, opt-in checked) but got the frontend's catch-all error message. No corresponding Sentry event for the signup timestamp.
+
+**Two root causes (both contributing):**
+
+1. **Sentry by default doesn't capture HTTP 4xx responses** — only unhandled exceptions / 5xx errors. If the signup hit a 422 (validation), 429 (rate limit), or 409 (username/email taken), the backend returns gracefully and Sentry never sees it. This is "working as designed" but **wrong for our portfolio launch context** — we need to know what users actually hit.
+
+2. **Frontend `setGeneralError(t('err_generic'))` is a black hole** — when the backend returns an error format the form doesn't recognize, it falls through to a generic "An error occurred" with no telemetry sent anywhere.
+
+**Fix (split into two pieces):**
+
+- **Backend (`app/main.py`):** add a small middleware that captures 4xx responses on POST routes containing `/auth/` and sends a Sentry breadcrumb (not a full event, just a breadcrumb so we can search for `path=/auth/register status=4xx` in Sentry's UI). PII-scrubbed via the existing `_sentry_before_send` filter.
+- **Frontend (`Login.jsx`):** when the `err_generic` branch fires, log the raw response body + status to console AND send a Sentry frontend event. Even if the backend was silent, the user-visible error becomes visible to us.
+
+**Acceptance:**
+- Trigger a deliberate signup failure on prod (e.g. duplicate email) → Sentry shows either an event or a breadcrumb on the request
+- Frontend errors that fall through to `err_generic` get logged with full context for diagnosis
+- Add a Sentry browser SDK to the frontend if not already present (cheap addition; `@sentry/react` ~20KB gzipped)
+
+**Effort:** ~1-2 hours for the pool ping + recycle. ~3-4 hours for the Sentry breadcrumbs + frontend error logging. Total ~half a day.
+
+**Priority:** g.i (the asyncpg pool) is **launch-quality urgent** because it potentially causes G101b (stats not saving — could be the same root cause: connection dies on partie-end commit). g.ii is high-priority but not urgent — it's a "we can't diagnose what we can't see" gap.
+
 ### G100. (legacy — superseded by G100a + G100b) Pre-launch infra bundle — CI/CD redeploy, code quality sweep, Sphinx + ReadTheDocs, README
 **Why:** Three things that are loosely-coupled but all touch "the project's exterior surface" — what someone sees in the README, what the docs site looks like, and what happens when you push to main. Bundling them keeps the review focused on infrastructure / DX rather than product behaviour.
 
