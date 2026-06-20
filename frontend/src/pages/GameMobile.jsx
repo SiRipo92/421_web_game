@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Die } from '../components/shared/Die.jsx'
 import { Avatar } from '../components/shared/Avatar.jsx'
 import { ChipStack } from '../components/shared/ChipStack.jsx'
@@ -51,6 +51,7 @@ export function GameMobile({
   const [showRoomSettings, setShowRoomSettings] = useState(false)
   const [showPresentation, setShowPresentation] = useState(false)
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false)
+  const opponentToast = useOpponentPlayToast(state.current_round_plays, playerId)
 
   const currentName = state.players?.find(p => p.id === state.current_player_id)?.name || ''
 
@@ -259,6 +260,15 @@ export function GameMobile({
             ⏱ {t('afk_takeover')}
           </div>
         )}
+
+        {/* G64 follow-up: opponent-play toast. Sits below the bottom seat,
+            above the dock. Auto-dismisses after 4.2s. Tap opens the
+            journal drawer for the full play-by-play. */}
+        <MobileOpponentPlayToast
+          event={opponentToast}
+          t={t}
+          onOpenJournal={() => setOpenDrawer('journal')}
+        />
       </main>
 
       {/* ─── Bottom dock — 2 rows ────────────────────────────────────────── */}
@@ -514,4 +524,87 @@ function mobileDockBtn() {
     background: 'var(--paper)', border: '1px solid var(--rule)',
     color: 'var(--ink-soft)', fontSize: '1.1rem', cursor: 'pointer',
   }
+}
+
+/* ─── Mobile opponent-play toast ─────────────────────────────────────────
+   Surfaces "Name · combo (Xf) in N throws" as a brief banner whenever
+   another player commits a turn. Without this, the only signal of an
+   opponent's play on mobile was opening the journal drawer — by then
+   the moment had passed.
+
+   Watches `current_round_plays` (the array of completed turns this
+   manche). On detecting a new `player_id` other than ours, mounts a
+   toast for 4s. Same player_id submitting again (e.g. a tiebreak
+   throw) re-triggers via the `_id` timestamp so React re-mounts. */
+function useOpponentPlayToast(plays, myPlayerId) {
+  const [active, setActive] = useState(null)
+  const prevIdsRef = useRef(new Set())
+
+  useEffect(() => {
+    if (!plays) return
+    if (plays.length === 0) {
+      prevIdsRef.current = new Set()
+      return
+    }
+    const currentIds = new Set(plays.map((p) => p.player_id))
+    const prev = prevIdsRef.current
+    const fresh = plays.filter(
+      (p) => p.player_id !== myPlayerId && !prev.has(p.player_id),
+    )
+    prevIdsRef.current = currentIds
+    if (fresh.length === 0) return
+    const latest = fresh[fresh.length - 1]
+    setActive({ ...latest, _id: Date.now() })
+    const tid = setTimeout(() => setActive(null), 4200)
+    return () => clearTimeout(tid)
+  }, [plays, myPlayerId])
+
+  return active
+}
+
+function MobileOpponentPlayToast({ event, t, onOpenJournal }) {
+  if (!event) return null
+  const throws = event.rolls_used || 1
+  return (
+    <button
+      type="button"
+      role="status"
+      aria-live="polite"
+      onClick={onOpenJournal}
+      className="gameroom-mobile-opponent-toast"
+      style={{
+        position: 'absolute',
+        bottom: '0.8rem',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        background: 'var(--paper-soft)',
+        border: '1px solid var(--brass)',
+        color: 'var(--ink)',
+        padding: '0.55rem 0.95rem',
+        borderRadius: 6,
+        fontSize: 'clamp(0.78rem, 3vw, 0.88rem)',
+        fontFamily: 'inherit',
+        maxWidth: 'min(92%, 380px)',
+        textAlign: 'center',
+        boxShadow: '0 8px 22px rgba(0,0,0,0.25)',
+        animation: 'mobile-opp-toast-in 240ms ease-out',
+        zIndex: 12,
+        cursor: 'pointer',
+      }}
+      aria-label={t('score_to_beat_aria', {
+        name: event.name, combo: event.combo, fiches: event.fiches,
+      })}
+    >
+      <strong style={{ color: 'var(--rouge)', fontWeight: 700 }}>{event.name}</strong>
+      {' · '}
+      <span style={{ fontWeight: 600 }}>{event.combo}</span>
+      {' '}
+      <span className="mono" style={{ fontSize: '0.85em' }}>({event.fiches}f)</span>
+      {throws > 1 && (
+        <span style={{ color: 'var(--ink-mute)' }}>
+          {' · '}{t('score_to_beat_in_throws', { n: throws })}
+        </span>
+      )}
+    </button>
+  )
 }
