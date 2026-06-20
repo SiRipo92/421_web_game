@@ -60,9 +60,7 @@ async def test_register_can_reuse_handle_after_self_delete(client, make_user):
     reg = await client.post("/auth/register", json=data)
     token = reg.json()["access_token"]
     # Self-delete
-    r = await client.request(
-        "DELETE", "/auth/me", headers={"Authorization": f"Bearer {token}"}
-    )
+    r = await client.request("DELETE", "/auth/me", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 204
     # Re-register with same username + email — should succeed
     r2 = await client.post("/auth/register", json=data)
