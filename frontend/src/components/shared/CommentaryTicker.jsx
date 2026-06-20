@@ -238,44 +238,58 @@ export function ScoreToBeatBanner({ plays, t }) {
   const throws = (best.rolls_used ?? 0) + (best.is_starter ? 0 : 0) || 1
   return (
     <div
+      className="piste-score-to-beat"
       style={{
         position: 'absolute',
-        top: '17%',
+        top: '15%',
         left: '50%',
         transform: 'translateX(-50%)',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
         gap: 2,
-        padding: '0.5rem 1.1rem',
-        background: 'rgba(0,0,0,0.55)',
-        border: '1px solid rgba(212,171,103,0.45)',
+        // G64 follow-up: bumped background to .72 alpha + slightly wider
+        // padding/border so the banner stays legible against the brass
+        // piste rim and reads cleanly on both light and dark themes.
+        padding: '0.45rem 0.95rem',
+        background: 'rgba(15, 11, 8, 0.72)',
+        border: '1px solid rgba(212, 171, 103, 0.55)',
         borderRadius: 4,
         color: 'var(--paper)',
-        boxShadow: '0 4px 12px rgba(0,0,0,0.35)',
-        maxWidth: '78%',
-        whiteSpace: 'nowrap',
+        boxShadow: '0 4px 14px rgba(0, 0, 0, 0.42)',
+        // G64 follow-up: was max 78% + nowrap, which forced overflow on
+        // small viewports. Allow wrap + use clamp() on inner spans so the
+        // banner shrinks to fit. clamp values keep text readable at
+        // 320 px and don't go larger than the desktop reference.
+        maxWidth: 'min(90%, 320px)',
+        textAlign: 'center',
+        lineHeight: 1.25,
       }}
       role="status"
       aria-label={t('score_to_beat_aria', { name: best.name, combo: best.combo, fiches: best.fiches })}
     >
       <span
         className="eyebrow"
-        style={{ fontSize: '0.58rem', color: 'var(--brass-soft)', letterSpacing: '0.16em' }}
+        style={{
+          fontSize: 'clamp(0.5rem, 1.8vw, 0.58rem)',
+          color: 'var(--brass-soft)',
+          letterSpacing: '0.16em',
+        }}
       >
         {t('score_to_beat_label')}
       </span>
       <span
         className="display"
         style={{
-          fontSize: '1.05rem',
+          fontSize: 'clamp(0.8rem, 3vw, 1.05rem)',
           color: best.combo === '421' ? 'var(--brass-soft)' : 'var(--paper)',
           letterSpacing: '0.02em',
         }}
       >
         <em style={{ fontStyle: 'italic', color: 'var(--brass-soft)' }}>{best.name}</em>
         {' · '}
-        {best.combo} <span className="mono" style={{ fontSize: '0.85rem' }}>({best.fiches}f)</span>
+        {best.combo}{' '}
+        <span className="mono" style={{ fontSize: '0.85em' }}>({best.fiches}f)</span>
         {throws > 1 ? ` · ${t('score_to_beat_in_throws', { n: throws })}` : ''}
       </span>
     </div>

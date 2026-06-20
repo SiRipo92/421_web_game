@@ -134,6 +134,7 @@ const I18N = {
     // Game
     pool: "Banque",
     bank: "Banque",
+    chips_in_play: "En jeu",
     round: "Tour",
     charge: "Charge",
     decharge: "Décharge",
@@ -977,6 +978,7 @@ const I18N = {
     // Game
     pool: "Pot",
     bank: "Bank",
+    chips_in_play: "In play",
     round: "Round",
     charge: "Charge",
     decharge: "Discharge",
