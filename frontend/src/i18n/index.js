@@ -186,6 +186,11 @@ const I18N = {
     // Profile (G91: partie / manche semantics)
     player_card: "Carte du joueur",
     current_elo: "Elo actuel",
+    unranked: "Non classé(e)",
+    rank_tooltip_title: "Système de classement",
+    rank_tooltip_subtitle: "Vos parties survécues et perdues définissent votre Elo. Survivre vous fait gagner, perdre vous fait chuter.",
+    rank_tooltip_unranked_hint: "Jouez votre première partie pour intégrer le classement.",
+    rank_show_ladder: "Voir tous les rangs",
     regular_since: "habitué depuis",
     parties_played: "Parties jouées",
     parties_survived: "Parties survécues",
@@ -958,6 +963,11 @@ const I18N = {
     // Profile (G91: partie / manche semantics)
     player_card: "Player card",
     current_elo: "Current Elo",
+    unranked: "Unranked",
+    rank_tooltip_title: "Ranking system",
+    rank_tooltip_subtitle: "Your parties survived and lost define your Elo. Surviving pushes you up; losing pulls you down.",
+    rank_tooltip_unranked_hint: "Play your first partie to enter the ranking.",
+    rank_show_ladder: "Show all ranks",
     regular_since: "regular since",
     parties_played: "Parties played",
     parties_survived: "Parties survived",

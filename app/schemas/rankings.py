@@ -5,11 +5,18 @@ G91: partie/manche semantics — `wins` and `losses` were retired in favor of
 derived server-side so the frontend renders consistent numbers.
 """
 
+from typing import Optional
+
 from pydantic import BaseModel
 
 
 class PlayerRank(BaseModel):
-    """One row in the leaderboard: ELO, stats, and badge."""
+    """One row in the leaderboard: ELO, stats, and badge.
+
+    G98: `badge` / `badge_icon` are nullable for the unranked case
+    (parties_played == 0), though the /api/rankings endpoint filters
+    those out so listed rows always have a badge in practice.
+    """
 
     username: str
     elo: int
@@ -17,8 +24,8 @@ class PlayerRank(BaseModel):
     parties_survived: int
     parties_lost: int
     survival_rate: float  # parties_survived / max(games_played, 1)
-    badge: str
-    badge_icon: str
+    badge: Optional[str]
+    badge_icon: Optional[str]
 
 
 class RankingsResponse(BaseModel):
@@ -41,12 +48,16 @@ class GameHistoryEntry(BaseModel):
 
 
 class ProfileResponse(BaseModel):
-    """Full player profile: stats, badge, and recent parties."""
+    """Full player profile: stats, badge, and recent parties.
+
+    G98: `badge` / `badge_icon` are None when the user is unranked
+    (parties_played == 0). Frontend renders « — · Non classé(e) ».
+    """
 
     username: str
     elo: int
-    badge: str
-    badge_icon: str
+    badge: Optional[str]
+    badge_icon: Optional[str]
     games_played: int
     parties_survived: int
     parties_lost: int
