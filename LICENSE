@@ -1,0 +1,41 @@
+Copyright (c) 2026 Sierra Ripoche. All rights reserved.
+
+This source code and its associated assets (collectively, the "Work")
+are published for the SOLE purpose of allowing prospective employers,
+collaborators, academic reviewers, and the general public to inspect
+the author's coding style, architectural decisions, and professional
+work product.
+
+VIEWING is permitted. NO OTHER RIGHTS ARE GRANTED.
+
+In particular, and without limiting the foregoing, the following are
+EXPLICITLY NOT permitted without prior written consent from the
+copyright holder:
+
+  1. Copying the Work, in whole or in part, beyond the transient
+     copying performed by a web browser or code-viewing tool to
+     display the source on screen.
+  2. Compiling, executing, deploying, or otherwise running the Work
+     on any system the viewer does not personally own and operate
+     for private review.
+  3. Modifying, adapting, translating, refactoring, or creating
+     derivative works of the Work.
+  4. Redistributing, sublicensing, publishing, mirroring, or
+     otherwise making the Work available to third parties.
+  5. Using the Work, in whole or in part, in any product, service,
+     research project, model training corpus, or commercial venture,
+     whether or not for profit.
+  6. Using the Work as training data, fine-tuning data, evaluation
+     data, or retrieval-augmented generation source material for any
+     machine-learning model.
+  7. Removing or altering this notice, copyright notices, or
+     attribution from any portion of the Work.
+
+Contact: ripochesierra@gmail.com for licensing inquiries.
+
+THE WORK IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND
+NON-INFRINGEMENT. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE
+FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM, OUT OF, OR
+IN CONNECTION WITH THE WORK OR THE USE OR INSPECTION OF THE WORK.
