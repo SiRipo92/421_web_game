@@ -94,7 +94,11 @@ jobs:
           cache-dependency-path: "**/requirements*.txt"
       - run: pip install pip-audit
       - name: pip-audit
-        run: pip-audit -r requirements.txt --disable-pip --strict
+        # --strict treats unfixable advisories as failures (still gated by
+        # continue-on-error so we surface without blocking).
+        # --disable-pip would require hashed requirements; we let pip-audit
+        # resolve deps itself.
+        run: pip-audit -r requirements.txt --strict
 
       - uses: actions/setup-node@v4
         with:
