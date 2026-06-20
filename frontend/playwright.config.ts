@@ -93,7 +93,11 @@ export default defineConfig({
     {
       // Backend — DATABASE_URL is injected via env, never templated into the
       // command string (which would leak into Playwright's stdout logs).
-      command: 'cd .. && PYTHONPATH=. .venv/bin/uvicorn app.main:app --port 8421 --host 127.0.0.1',
+      // `python -m uvicorn` works in both local (activated venv) and CI
+      // (setup-python + pip install to runner's system Python) — using
+      // `.venv/bin/uvicorn` hardcoded would only work locally.
+      command:
+        'cd .. && PYTHONPATH=. python -m uvicorn app.main:app --port 8421 --host 127.0.0.1',
       env: {
         DATABASE_URL: dbUrl,
         SECRET_KEY: secretKey,
