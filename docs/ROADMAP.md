@@ -1360,7 +1360,17 @@ Promote tickets from "random slugs in email" to a real `ContactTicket(id, ref, f
 - `npm audit fix` applied (0 vulnerabilities remaining).
 - **Deferred (G92b/G92c/G92d):** tighten CSP `'unsafe-inline'` styles; wire `pip-audit` + `npm audit` into CI; rotate prod `SECRET_KEY` before launch (forces global re-login during low-traffic window).
 
-### G99. Pre-launch test bundle — coverage push, Playwright E2E, backend perf
+### G99. (DONE — pending PR merge) Pre-launch test bundle — coverage push, Playwright E2E, backend perf
+
+**Shipped (2026-06-20):**
+- Coverage: 82.31% → 85.30%. `afk_eviction.py` 43% → 94%; `game_persistence.py` 82% → 89%; `schemas/auth.py` 87% → 99%. Coverage gate raised 80 → 85 in CI. Fixed 2 real bugs in `game_persistence._write` (unguarded `uuid.UUID()` calls that crashed on malformed user_ids entries).
+- Playwright scaffold: `frontend/playwright.config.ts` boots both backend + frontend webServers, `frontend/tests/e2e/auth.spec.ts` covers register + login + reset + wrong-password flows. Added `data-testid` attrs to login form buttons to avoid i18n collisions. Workflow at `.github/workflows/e2e.yml` runs the suite on every PR.
+- k6 perf scenarios: `perf/auth_login.js` (100 VUs, p95 < 500ms), `perf/room_lifecycle.js` (50 VUs register + create + list), `perf/ws_broadcast.js` (5-min WS soak with 10 connected players). Workflow at `.github/workflows/perf.yml` runs on `workflow_dispatch` or `perf`-labelled PRs.
+- Baselines doc at `docs/PERFORMANCE_BASELINE.md`; numbers are TBD until first dispatch run captures them.
+- **Deferred (G99 follow-ups):** the remaining Playwright journeys — multi-player two-browsers, single-player vs bots, AFK eviction overlay, admin moderation, RGPD export/delete. Scaffolding is in place; each needs ~30 min to write once the user identifies the priority flows.
+
+**Original scope:**
+
 **Why:** Before public launch we want real confidence that core flows survive both regression and load. Three gaps right now:
 1. **Coverage too close to the gate.** 82.31% squeaks past the 80% threshold — one careless commit and the gate trips. Modules with weakest coverage: `app/services/afk_eviction.py` (43%), `app/game/ws.py` (the entire WebSocket handler is barely tested in isolation), `app/services/game_persistence.py` (82%), `app/schemas/auth.py` (87%).
 2. **No functional / E2E tests.** Every "test in the browser" smoke check is currently manual — captured in `docs/PROD_SMOKE_TESTS.md` but only run by hand. A registration → login → join → play → quit round-trip needs to be automated.
@@ -1412,7 +1422,12 @@ Promote tickets from "random slugs in email" to a real `ContactTicket(id, ref, f
 ### G100. Pre-launch infra bundle — CI/CD redeploy, code quality sweep, Sphinx + ReadTheDocs, README
 **Why:** Three things that are loosely-coupled but all touch "the project's exterior surface" — what someone sees in the README, what the docs site looks like, and what happens when you push to main. Bundling them keeps the review focused on infrastructure / DX rather than product behaviour.
 
-**Scope (single bundled PR):**
+**Already landed (folded into the G99 PR as a security follow-up to a committed-secret incident):**
+- `LICENSE` at repo root — all-rights-reserved, viewing-only. The repo will go public for portfolio review; this license makes the no-use intent explicit (no copy, no run, no derive, no redistribute, no ML training).
+- `.github/PULL_REQUEST_TEMPLATE.md` — checklist enforcing coverage gate + secret-free guarantee + roadmap link.
+- `.github/workflows/secrets-scan.yml` — gitleaks runs on every PR + push. Catches accidental commit of passwords, API keys, JWTs, DB URLs with embedded credentials.
+
+**Still to do in G100:**
 
 #### CI/CD — push-to-main → build → webhook deploy
 - Currently CI runs tests + lint on PRs. Missing: a deploy step on `main` merges.
