@@ -3,12 +3,6 @@
 .env.*
 !.env.example
 
-# Local dev overrides
-docker-compose.override.yml
-
-# Deployer instructions (contains secrets setup info)
-INSTRUCTIONS.md
-
 # Python
 __pycache__/
 *.py[cod]
@@ -22,10 +16,12 @@ build/
 .venv/
 venv/
 env/
+.python-version
 
 # Testing & coverage
 .pytest_cache/
 .coverage
+.coverage.*
 coverage.xml
 htmlcov/
 .ruff_cache/
@@ -33,8 +29,15 @@ htmlcov/
 # Local tools
 .claude/
 
-# Local rules notes (cahier des charges scratch)
-cdc.txt
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Local overrides
+*.local
 
 # macOS
 .DS_Store
@@ -48,7 +51,6 @@ cdc.txt
 # Frontend
 frontend/node_modules/
 static/dist/
-prototype/
 
 # Playwright (G99)
 frontend/test-results/
