@@ -1648,6 +1648,60 @@ User registered cleanly (username + email validated, password match, age > 15, T
 
 **Priority:** g.i (the asyncpg pool) is **launch-quality urgent** because it potentially causes G101b (stats not saving — could be the same root cause: connection dies on partie-end commit). g.ii is high-priority but not urgent — it's a "we can't diagnose what we can't see" gap.
 
+#### 101j. RESOLVED-BY-G101g.i — Sentry `Failed to persist player session` was Neon auto-suspend, not a guest issue
+
+**Original report (2026-06-21):** while playing on prod, a player got stuck and had to manually leave. Sentry showed a recurring event ([issue 129246142](https://openclassrooms-56.sentry.io/issues/129246142/)) on the `websocket.server` span. User hypothesis: guest-stats persistence was throwing because there's no user_id to write to.
+
+**Actual root cause (after pulling the event JSON):**
+
+```
+Type:      InterfaceError
+Value:     <class 'asyncpg.exceptions._base.InterfaceError'>: connection is closed
+Logger:    app.services.game_persistence
+Mechanism: logging   handled: yes
+Frame:     persist_player_session  app/services/game_persistence.py:100
+SQL:       SELECT player_stats.... FROM player_stats WHERE player_stats.user_id = $1::UUID
+Param:     UUID('b3b565f6-f9b4-438a-89d7-417a8ae85895')   ← a REAL user, not a guest
+Game:      B6E0918D     manches_played=14, manches_lost=10, round_points=1
+```
+
+The affected player was **registered**, not a guest. Two corrections to the original hypothesis:
+
+1. The error has nothing to do with guests. The persistence path doesn't even reach DB-touching code for guests (no user_id → early return). All guest guards in `game_persistence.py:159-272`, `afk_eviction.py:200-209`, and `_persist_partie_and_reset` were already correctly in place.
+2. The error IS the Neon-auto-suspend connection-pool bug already captured as **G101g.i**. SQLAlchemy borrowed a pooled asyncpg connection that Neon had silently closed during idle; asyncpg's `_check_open()` at `asyncpg/connection.py:1605` raised `InterfaceError('connection is closed')` on the next query.
+
+**Resolution:** `fix/neon-pool-stability` branch (commit `98cb69a`) adds `pool_pre_ping=True` + `pool_recycle=300` to `create_async_engine` in `app/db/base.py`. Once merged + deployed, the pool tests each connection with a cheap `SELECT 1` before handing it out — stale connections get transparently replaced.
+
+**Verification after deploy:**
+- Idle the prod app for 10+ minutes (Neon auto-suspends after ~5 min)
+- Drive a partie to its end → `persist_player_session` should succeed
+- Sentry issue 129246142 should stop receiving new events
+- If it doesn't stop, investigate whether `pool_pre_ping` is misbehaving on Neon specifically (some older Neon issues with `SELECT 1`-style probes are documented)
+
+**Status:** diagnosis complete, fix already in flight on `fix/neon-pool-stability`. Closing this entry once that PR merges + the Sentry event-stream goes quiet for 24h.
+
+#### 101k. Mid-partie disconnect silently loses stats for registered players
+
+**Real gap surfaced while triaging G101j.** The WS disconnect handler at `app/game/ws.py:1474-1483` runs in the `finally` block when a socket closes (browser tab closed, network drop, mobile backgrounded long enough to kill the WS). It broadcasts the updated `game_state()` so other players see the seat go inactive, but **it does not call `persist_player_session`** — even though the explicit `leave` action (lines 1020-1041) does (`if leaver_user_id: await persist_player_session(...)`).
+
+**Consequence:** a registered player who quits mid-partie by closing the tab (the *normal* way users leave web apps on mobile) loses their in-progress stats (manches played, manches lost, current_streak update, etc.). Only players who tap the formal Quit button get persisted. AFK eviction also persists correctly (`afk_eviction.py:200-209`). The disconnect path is the lone gap.
+
+**Why this connects to G101j:** if the user thought "guest stats failed", what may have *actually* happened is a registered player disconnected mid-partie and saw no stats update later — same observable symptom (stats missing) from a different code path. Worth investigating in parallel.
+
+**Fix:**
+- In `app/game/ws.py`'s disconnect `finally` block, mirror the `leave` action's logic: look up `game.user_ids.get(player_id)`; if non-empty call `persist_player_session(uid_str, game, closure_reason="disconnect")`.
+- Distinguish from `leave` via the audit-log `closure_reason` string so the runbook can tell intentional-quit from network-drop later.
+- Skip the call entirely for guests (no user_id, nothing to save — explicit `if uid_str:` guard).
+
+**Acceptance:**
+- Integration test: 2 registered players in a partie, one's WS connection is force-closed mid-manche → DB shows their `game_sessions` row with `closure_reason='disconnect'` and the partial manche-count incremented.
+- Same test with a guest player → no DB write attempt, no error logged.
+- Manual test on prod: tab-close mid-partie → check the player's profile → mid-partie stats are present.
+
+**Effort:** ~1 hour code + 1 hour integration test. Self-contained.
+
+**Priority:** higher than G101j once g.i (pool stability) lands, because this is the most likely real explanation for the "stats disappeared" reports.
+
 ### G100. (legacy — superseded by G100a + G100b) Pre-launch infra bundle — CI/CD redeploy, code quality sweep, Sphinx + ReadTheDocs, README
 **Why:** Three things that are loosely-coupled but all touch "the project's exterior surface" — what someone sees in the README, what the docs site looks like, and what happens when you push to main. Bundling them keeps the review focused on infrastructure / DX rather than product behaviour.
 
