@@ -47,9 +47,15 @@ Picked for the technical depth they exercise, not just the feature list:
 
 ## Live demo
 
-> Deployed: `https://421bistro.com` *(coming soon — see [`docs/DEPLOY_SETUP.md`](docs/DEPLOY_SETUP.md))*
+🟢 **Live at [`https://421bistro.com`](https://421bistro.com)**
 
-Screenshots / GIF *(placeholder — to be added before the public flip)*:
+You can register, create or join a public room, and play a partie
+against AFK bots or other live players. No download needed; works on
+desktop and mobile. For setup/redeploy details see
+[`docs/DEPLOY_SETUP.md`](docs/DEPLOY_SETUP.md).
+
+Screenshots / gameplay GIF *(coming soon — adding before the public
+portfolio flip)*:
 
 ```
 [ TODO: gameplay GIF — register → join room → roll → win a manche ]
