@@ -1648,6 +1648,137 @@ User registered cleanly (username + email validated, password match, age > 15, T
 
 **Priority:** g.i (the asyncpg pool) is **launch-quality urgent** because it potentially causes G101b (stats not saving — could be the same root cause: connection dies on partie-end commit). g.ii is high-priority but not urgent — it's a "we can't diagnose what we can't see" gap.
 
+#### 101h. Survivor sees nothing useful when their opponent is AFK-evicted
+
+**Bug (reported 2026-06-21 from mobile playtest):** in a 2-player room, when player A is evicted for AFK, player A correctly gets the "GAME INTERRUPTED — You were removed" overlay. Player B (the survivor) gets **no UI feedback at all** — they're left staring at the piste with no opponent and no explanation. The only signal is a raw `log_afk_eviction` entry in the journal drawer, which is developer-jargon and useless to a non-technical player.
+
+**Desired UX:** the survivor sees a modal saying « Your opponent {name} has left the partie. Waiting for more players to join… » with a small loading indicator and an explicit Leave button. The game effectively pauses — they can wait for a new joiner, or bail.
+
+**Implementation:**
+- New shared component `frontend/src/components/shared/OpponentLeftWaitingOverlay.jsx`.
+- Render condition: `state.playerEvicted && state.playerEvicted.playerId !== playerId && (state.players || []).length <= 1`.
+- Wired into both `Game.jsx` and `GameMobile.jsx` so desktop + mobile both surface it.
+- i18n keys: `opponent_left_eyebrow`, `opponent_left_title` (with `{name}`), `opponent_left_body`, `opponent_left_waiting`, `opponent_left_leave`. FR + EN.
+- Auto-clears when the roster grows again (a new player joining flips the condition off).
+
+**Acceptance:**
+- 2-player game, evict one player → the survivor immediately sees the modal with the evictee's name + a "waiting for more players" status.
+- A third player joins the same room → the modal auto-clears, the game can resume.
+- 3+ player game, evict one → the modal does NOT show (the other survivors can keep playing).
+
+**Effort:** ~1 hour. Pure frontend; backend already broadcasts everything we need.
+
+#### 101i. Mobile piste — add bank/pot indicator in the empty space above the top opponent
+
+**Gap:** on the mobile piste layout, there's empty space above the top opponent's seat (since 101 follow-ups removed the ChipStack and journal button — see G101a/g context). The desktop layout (`Game.jsx`) shows a "Pot · N" counter in the header (line 341), but mobile dropped this affordance. Players currently can't tell how many chips remain in the bank without doing arithmetic from the seat token counts.
+
+**Desired UX:** small dark pill banner pinned to the top of the piste area, centered, showing « Banque · N » / « Bank · N ». Only renders when `state.pool > 0` — disappears once the bank is empty (which is itself a meaningful in-game signal).
+
+**Implementation:**
+- Inline in `GameMobile.jsx` inside the `.gameroom-main` (piste-area) container, absolutely positioned `top: 6, left: 50%, translateX(-50%)`.
+- Style mirrors the existing AFK banner (low contrast, brass border, mono numeric).
+- Reuses existing i18n key `pool` ("Banque" / "Pot"). No new keys.
+- Does NOT touch desktop — `Game.jsx` already has the header-mounted counter.
+
+**Acceptance:**
+- 2-player mobile game with bank > 0 → small banner visible at top of piste, above top opponent seat.
+- Bank drops to 0 → banner disappears.
+- No regression on Score-to-Beat banner positioning (also `top` of piste; they should not collide because Score-to-Beat is at `top: 15%` of the piste-stage, bank is at `top: 6px` of the piste-area parent).
+
+**Effort:** ~15 min. Pure layout add.
+
+#### 101j. RESOLVED-BY-G101g.i — Sentry `Failed to persist player session` was Neon auto-suspend, not a guest issue
+
+**Original report (2026-06-21):** while playing on prod, a player got stuck and had to manually leave. Sentry showed a recurring event ([issue 129246142](https://openclassrooms-56.sentry.io/issues/129246142/)) on the `websocket.server` span. User hypothesis: guest-stats persistence was throwing because there's no user_id to write to.
+
+**Actual root cause (after pulling the event JSON):**
+
+```
+Type:      InterfaceError
+Value:     <class 'asyncpg.exceptions._base.InterfaceError'>: connection is closed
+Logger:    app.services.game_persistence
+Mechanism: logging   handled: yes
+Frame:     persist_player_session  app/services/game_persistence.py:100
+SQL:       SELECT player_stats.... FROM player_stats WHERE player_stats.user_id = $1::UUID
+Param:     UUID('b3b565f6-f9b4-438a-89d7-417a8ae85895')   ← a REAL user, not a guest
+Game:      B6E0918D     manches_played=14, manches_lost=10, round_points=1
+```
+
+The affected player was **registered**, not a guest. Two corrections to the original hypothesis:
+
+1. The error has nothing to do with guests. The persistence path doesn't even reach DB-touching code for guests (no user_id → early return). All guest guards in `game_persistence.py:159-272`, `afk_eviction.py:200-209`, and `_persist_partie_and_reset` were already correctly in place.
+2. The error IS the Neon-auto-suspend connection-pool bug already captured as **G101g.i**. SQLAlchemy borrowed a pooled asyncpg connection that Neon had silently closed during idle; asyncpg's `_check_open()` at `asyncpg/connection.py:1605` raised `InterfaceError('connection is closed')` on the next query.
+
+**Resolution:** `fix/neon-pool-stability` branch (commit `98cb69a`) adds `pool_pre_ping=True` + `pool_recycle=300` to `create_async_engine` in `app/db/base.py`. Once merged + deployed, the pool tests each connection with a cheap `SELECT 1` before handing it out — stale connections get transparently replaced.
+
+**Verification after deploy:**
+- Idle the prod app for 10+ minutes (Neon auto-suspends after ~5 min)
+- Drive a partie to its end → `persist_player_session` should succeed
+- Sentry issue 129246142 should stop receiving new events
+- If it doesn't stop, investigate whether `pool_pre_ping` is misbehaving on Neon specifically (some older Neon issues with `SELECT 1`-style probes are documented)
+
+**Status:** diagnosis complete, fix already in flight on `fix/neon-pool-stability`. Closing this entry once that PR merges + the Sentry event-stream goes quiet for 24h.
+
+#### 101k. Mid-partie disconnect silently loses stats for registered players
+
+**Real gap surfaced while triaging G101j.** The WS disconnect handler at `app/game/ws.py:1474-1483` runs in the `finally` block when a socket closes (browser tab closed, network drop, mobile backgrounded long enough to kill the WS). It broadcasts the updated `game_state()` so other players see the seat go inactive, but **it does not call `persist_player_session`** — even though the explicit `leave` action (lines 1020-1041) does (`if leaver_user_id: await persist_player_session(...)`).
+
+**Consequence:** a registered player who quits mid-partie by closing the tab (the *normal* way users leave web apps on mobile) loses their in-progress stats (manches played, manches lost, current_streak update, etc.). Only players who tap the formal Quit button get persisted. AFK eviction also persists correctly (`afk_eviction.py:200-209`). The disconnect path is the lone gap.
+
+**Why this connects to G101j:** if the user thought "guest stats failed", what may have *actually* happened is a registered player disconnected mid-partie and saw no stats update later — same observable symptom (stats missing) from a different code path. Worth investigating in parallel.
+
+**Fix:**
+- In `app/game/ws.py`'s disconnect `finally` block, mirror the `leave` action's logic: look up `game.user_ids.get(player_id)`; if non-empty call `persist_player_session(uid_str, game, closure_reason="disconnect")`.
+- Distinguish from `leave` via the audit-log `closure_reason` string so the runbook can tell intentional-quit from network-drop later.
+- Skip the call entirely for guests (no user_id, nothing to save — explicit `if uid_str:` guard).
+
+**Acceptance:**
+- Integration test: 2 registered players in a partie, one's WS connection is force-closed mid-manche → DB shows their `game_sessions` row with `closure_reason='disconnect'` and the partial manche-count incremented.
+- Same test with a guest player → no DB write attempt, no error logged.
+- Manual test on prod: tab-close mid-partie → check the player's profile → mid-partie stats are present.
+
+**Effort:** ~1 hour code + 1 hour integration test. Self-contained.
+
+**Priority:** higher than G101j once g.i (pool stability) lands, because this is the most likely real explanation for the "stats disappeared" reports.
+
+#### 101l. Admin audit-history JSON overflows its container (raw, unstyled)
+
+**Symptom:** On the profile-details / Audit History surface in the admin panel, the audit entries render their raw JSON payload as an unformatted string that overflows its own container on both mobile and desktop — it blows past the card width instead of wrapping/scrolling, and reads as a developer dump rather than a presentable record.
+
+**Likely cause:** the audit value is being rendered directly (e.g. `JSON.stringify` without indentation, or the raw object string) into a block with no `overflow`/`white-space`/`max-width` containment and no monospace/pretty-print treatment.
+
+**Scope:**
+- Add a small shared JSON-presentation component (e.g. `JsonBlock.jsx`) that pretty-prints (`JSON.stringify(value, null, 2)`), renders in a contained, scrollable, themed `<pre>` (monospace, `overflow:auto`, `max-width:100%`, wraps long strings), and is theme-aware (light/dark).
+- **Apply it everywhere JSON currently surfaces in the UI** — audit history first, then any other admin/debug surface that prints raw payloads. Treat "any JSON shown to a human must be elegant + contained" as the standing rule.
+- Optional: collapse/expand toggle for large payloads.
+
+**Acceptance:**
+- Audit History on a 360px viewport and on desktop: JSON stays inside its card, is indented/readable, scrolls rather than overflows, and matches the active theme.
+- No raw single-line JSON dumps remain in any user-visible admin surface.
+
+**Effort:** ~2–3 hours (component + sweep of call sites).
+
+#### 101m. Opening "who-goes-first" roll hangs on a tie — no re-roll prompt, no toast, requires refresh
+
+**Symptom:** During the `INITIAL_ROLL` phase (the per-player single-die roll that sets play order), when two clients roll the **same** value the screen gets stuck. Observed cross-device: the mobile client had rolled and registered a value, but the desktop client never updated to reflect that a re-roll was now required — it sat there until the page was manually refreshed, after which the roll button became available again. Nothing told the player a tie had happened.
+
+**Backend is actually correct:** `_finalize_order` (`app/game/logic.py:318`) detects the lowest-value tie, resets the tied players' `initial_rolls` back to `None`, logs `log_tie` ("Égalité ! … doivent relancer."), and the `initial_roll` handler rebroadcasts `game_state` (`app/game/ws.py:1091-1102`). So the tie → re-roll transition *is* sent to all clients.
+
+**Likely cause (frontend):**
+- The desktop client doesn't react to `state.initial_rolls[me]` flipping from a number back to `null` — the roll affordance stays latched in its "you already rolled" state instead of re-enabling, so the player can't re-roll without a remount (refresh). Audit the INITIAL_ROLL render path in `Game.jsx`/`GameMobile.jsx` + `useGame.js` for stale local state shadowing the server `initial_rolls`.
+- The `log_tie` event only lands in the journal drawer; there is no foreground announcement, so even when the state does update the player gets no explanation.
+
+**Scope:**
+- Frontend: drive the roll button's enabled/disabled state purely from `state.initial_rolls[playerId] === null` (server-authoritative), so a tie-reset re-enables it live with no refresh.
+- Surface a toast/announcement on `log_tie` (and ideally on order-set): e.g. "Tie — rolling again to decide who starts." Wire through the same announcement layer tracked in G101e.
+- Add a frontend reproduction in the e2e suite: two clients forced to identical opening rolls → both see the re-roll prompt + toast without reload.
+
+**Acceptance:**
+- Two clients roll equal opening values → both immediately see a "tie, re-roll" toast and a live-enabled roll button; neither needs to refresh.
+- The journal still records `log_tie`; the foreground toast auto-dismisses after the standard interval.
+
+**Effort:** ~half a day (frontend state fix + toast wiring + e2e repro). Depends loosely on G101e's announcement layer for the toast surface.
+
 ### G100. (legacy — superseded by G100a + G100b) Pre-launch infra bundle — CI/CD redeploy, code quality sweep, Sphinx + ReadTheDocs, README
 **Why:** Three things that are loosely-coupled but all touch "the project's exterior surface" — what someone sees in the README, what the docs site looks like, and what happens when you push to main. Bundling them keeps the review focused on infrastructure / DX rather than product behaviour.
 
