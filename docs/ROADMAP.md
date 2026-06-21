@@ -1648,6 +1648,47 @@ User registered cleanly (username + email validated, password match, age > 15, T
 
 **Priority:** g.i (the asyncpg pool) is **launch-quality urgent** because it potentially causes G101b (stats not saving — could be the same root cause: connection dies on partie-end commit). g.ii is high-priority but not urgent — it's a "we can't diagnose what we can't see" gap.
 
+#### 101j. Diagnose the recurring `websocket.server` Sentry signal on guest/anonymous sessions
+
+**Symptom (reported 2026-06-21 from mobile + Sentry):** while playing on prod without a registered account (anonymous session), the player had to manually leave the game and Sentry showed a recurring `websocket.server` span (`Origin: auto.http.starlette`, `Status: unknown`). User hypothesis: guest-stats persistence is throwing because there's no user_id to write to. Linked issue: `https://openclassrooms-56.sentry.io/issues/129246142/`.
+
+**Diagnostic gap:** the signal pasted is a Starlette-instrumented **trace span**, not an exception event. `Status: unknown` is the default WS span status and doesn't itself indicate failure. We need the actual issue event (exception type + stack frames) — agent tools can't authenticate to Sentry, so this has to be pulled manually via:
+- Sentry UI → Issues tab → event → "JSON" / "Stack trace" view
+- OR `sentry-cli issues events --issue 129246142` if the CLI is wired
+
+**What the code review already ruled out:** persistence paths look guarded. `app/services/game_persistence.py:159-272` uses `.get()` + `if not uid_str: continue` everywhere it touches `user_ids`. `app/services/afk_eviction.py:200-209` checks `user_id_str` truthy before calling `persist_player_session`. The path that persists at partie-end (`app/game/logic.py:588-600 → _persist_partie_and_reset`) routes through those guarded helpers. **The "guest can't persist" hypothesis is plausible but the code doesn't currently match it** — meaning either: (a) there's an unguarded path the audit missed, (b) the error is in a different layer (WS lifecycle, Sentry SDK itself), or (c) it's actually a benign span being misread as an error.
+
+**Acceptance:**
+- Real exception type + top-3 frames captured from the linked Sentry issue
+- If the bug is real: targeted regression test that drives a guest player through partie-end + asserts no error + no DB write attempt
+- If the bug is benign noise: tune Sentry's `before_send` filter to drop the noisy `websocket.server` spans with `Status: unknown` so it stops surfacing as a real signal
+
+**Effort:** 30 min to triage once the actual event is in hand. Fix scope depends on what it reveals.
+
+**Blocked on:** human access to Sentry UI to copy the event details — WebFetch hits the login wall, no auth'd MCP surface configured.
+
+#### 101k. Mid-partie disconnect silently loses stats for registered players
+
+**Real gap surfaced while triaging G101j.** The WS disconnect handler at `app/game/ws.py:1474-1483` runs in the `finally` block when a socket closes (browser tab closed, network drop, mobile backgrounded long enough to kill the WS). It broadcasts the updated `game_state()` so other players see the seat go inactive, but **it does not call `persist_player_session`** — even though the explicit `leave` action (lines 1020-1041) does (`if leaver_user_id: await persist_player_session(...)`).
+
+**Consequence:** a registered player who quits mid-partie by closing the tab (the *normal* way users leave web apps on mobile) loses their in-progress stats (manches played, manches lost, current_streak update, etc.). Only players who tap the formal Quit button get persisted. AFK eviction also persists correctly (`afk_eviction.py:200-209`). The disconnect path is the lone gap.
+
+**Why this connects to G101j:** if the user thought "guest stats failed", what may have *actually* happened is a registered player disconnected mid-partie and saw no stats update later — same observable symptom (stats missing) from a different code path. Worth investigating in parallel.
+
+**Fix:**
+- In `app/game/ws.py`'s disconnect `finally` block, mirror the `leave` action's logic: look up `game.user_ids.get(player_id)`; if non-empty call `persist_player_session(uid_str, game, closure_reason="disconnect")`.
+- Distinguish from `leave` via the audit-log `closure_reason` string so the runbook can tell intentional-quit from network-drop later.
+- Skip the call entirely for guests (no user_id, nothing to save — explicit `if uid_str:` guard).
+
+**Acceptance:**
+- Integration test: 2 registered players in a partie, one's WS connection is force-closed mid-manche → DB shows their `game_sessions` row with `closure_reason='disconnect'` and the partial manche-count incremented.
+- Same test with a guest player → no DB write attempt, no error logged.
+- Manual test on prod: tab-close mid-partie → check the player's profile → mid-partie stats are present.
+
+**Effort:** ~1 hour code + 1 hour integration test. Self-contained.
+
+**Priority:** higher than G101j once g.i (pool stability) lands, because this is the most likely real explanation for the "stats disappeared" reports.
+
 ### G100. (legacy — superseded by G100a + G100b) Pre-launch infra bundle — CI/CD redeploy, code quality sweep, Sphinx + ReadTheDocs, README
 **Why:** Three things that are loosely-coupled but all touch "the project's exterior surface" — what someone sees in the README, what the docs site looks like, and what happens when you push to main. Bundling them keeps the review focused on infrastructure / DX rather than product behaviour.
 
