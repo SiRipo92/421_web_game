@@ -1648,6 +1648,45 @@ User registered cleanly (username + email validated, password match, age > 15, T
 
 **Priority:** g.i (the asyncpg pool) is **launch-quality urgent** because it potentially causes G101b (stats not saving — could be the same root cause: connection dies on partie-end commit). g.ii is high-priority but not urgent — it's a "we can't diagnose what we can't see" gap.
 
+#### 101h. Survivor sees nothing useful when their opponent is AFK-evicted
+
+**Bug (reported 2026-06-21 from mobile playtest):** in a 2-player room, when player A is evicted for AFK, player A correctly gets the "GAME INTERRUPTED — You were removed" overlay. Player B (the survivor) gets **no UI feedback at all** — they're left staring at the piste with no opponent and no explanation. The only signal is a raw `log_afk_eviction` entry in the journal drawer, which is developer-jargon and useless to a non-technical player.
+
+**Desired UX:** the survivor sees a modal saying « Your opponent {name} has left the partie. Waiting for more players to join… » with a small loading indicator and an explicit Leave button. The game effectively pauses — they can wait for a new joiner, or bail.
+
+**Implementation:**
+- New shared component `frontend/src/components/shared/OpponentLeftWaitingOverlay.jsx`.
+- Render condition: `state.playerEvicted && state.playerEvicted.playerId !== playerId && (state.players || []).length <= 1`.
+- Wired into both `Game.jsx` and `GameMobile.jsx` so desktop + mobile both surface it.
+- i18n keys: `opponent_left_eyebrow`, `opponent_left_title` (with `{name}`), `opponent_left_body`, `opponent_left_waiting`, `opponent_left_leave`. FR + EN.
+- Auto-clears when the roster grows again (a new player joining flips the condition off).
+
+**Acceptance:**
+- 2-player game, evict one player → the survivor immediately sees the modal with the evictee's name + a "waiting for more players" status.
+- A third player joins the same room → the modal auto-clears, the game can resume.
+- 3+ player game, evict one → the modal does NOT show (the other survivors can keep playing).
+
+**Effort:** ~1 hour. Pure frontend; backend already broadcasts everything we need.
+
+#### 101i. Mobile piste — add bank/pot indicator in the empty space above the top opponent
+
+**Gap:** on the mobile piste layout, there's empty space above the top opponent's seat (since 101 follow-ups removed the ChipStack and journal button — see G101a/g context). The desktop layout (`Game.jsx`) shows a "Pot · N" counter in the header (line 341), but mobile dropped this affordance. Players currently can't tell how many chips remain in the bank without doing arithmetic from the seat token counts.
+
+**Desired UX:** small dark pill banner pinned to the top of the piste area, centered, showing « Banque · N » / « Bank · N ». Only renders when `state.pool > 0` — disappears once the bank is empty (which is itself a meaningful in-game signal).
+
+**Implementation:**
+- Inline in `GameMobile.jsx` inside the `.gameroom-main` (piste-area) container, absolutely positioned `top: 6, left: 50%, translateX(-50%)`.
+- Style mirrors the existing AFK banner (low contrast, brass border, mono numeric).
+- Reuses existing i18n key `pool` ("Banque" / "Pot"). No new keys.
+- Does NOT touch desktop — `Game.jsx` already has the header-mounted counter.
+
+**Acceptance:**
+- 2-player mobile game with bank > 0 → small banner visible at top of piste, above top opponent seat.
+- Bank drops to 0 → banner disappears.
+- No regression on Score-to-Beat banner positioning (also `top` of piste; they should not collide because Score-to-Beat is at `top: 15%` of the piste-stage, bank is at `top: 6px` of the piste-area parent).
+
+**Effort:** ~15 min. Pure layout add.
+
 ### G100. (legacy — superseded by G100a + G100b) Pre-launch infra bundle — CI/CD redeploy, code quality sweep, Sphinx + ReadTheDocs, README
 **Why:** Three things that are loosely-coupled but all touch "the project's exterior surface" — what someone sees in the README, what the docs site looks like, and what happens when you push to main. Bundling them keeps the review focused on infrastructure / DX rather than product behaviour.
 

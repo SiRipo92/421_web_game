@@ -8,6 +8,7 @@ import { PresentationPopover } from '../components/shared/PresentationPopover.js
 import { ConfirmModal } from '../components/shared/ConfirmModal.jsx'
 import { HierarchyModal } from '../components/shared/HierarchyModal.jsx'
 import { CommentaryTicker, ScoreToBeatBanner } from '../components/shared/CommentaryTicker.jsx'
+import { OpponentLeftWaitingOverlay } from '../components/shared/OpponentLeftWaitingOverlay.jsx'
 import { useGame } from '../hooks/useGame.js'
 import { useMediaQuery } from '../hooks/useMediaQuery.js'
 import { useLang } from '../context/useLang.js'
@@ -891,6 +892,20 @@ export function Game({ token }) {
           t={t}
           elapsedMinutes={state.playerEvicted.elapsedMinutes}
           onClose={() => navigate('/')}
+        />
+      )}
+      {/* G101h: counterpart for the *survivor* — opponent got evicted and
+          the room is now down to one human. The journal-only
+          `log_afk_eviction` was opaque jargon; this overlay tells them
+          what happened in plain language and offers Leave. Auto-clears
+          when the roster grows again. */}
+      {state.playerEvicted
+        && state.playerEvicted.playerId !== playerId
+        && (state.players || []).length <= 1 && (
+        <OpponentLeftWaitingOverlay
+          t={t}
+          opponentName={state.playerEvicted.playerName}
+          onLeave={() => { leave(); navigate('/') }}
         />
       )}
     </div>

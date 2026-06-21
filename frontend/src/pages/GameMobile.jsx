@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Die } from '../components/shared/Die.jsx'
 import { Avatar } from '../components/shared/Avatar.jsx'
 import { CommentaryTicker, ScoreToBeatBanner } from '../components/shared/CommentaryTicker.jsx'
+import { OpponentLeftWaitingOverlay } from '../components/shared/OpponentLeftWaitingOverlay.jsx'
 import { BottomSheet } from '../components/shared/BottomSheet.jsx'
 import { HierarchyModal } from '../components/shared/HierarchyModal.jsx'
 import { RoomSettingsPanel } from '../components/shared/RoomSettingsPanel.jsx'
@@ -257,11 +258,39 @@ export function GameMobile({
             )
           })}
         </div>
+        {/* G101i: bank/pot indicator pinned to the top of the piste area,
+            above the top opponent seat. Mobile-only — desktop has the
+            same number in the Game.jsx header. Hidden once the bank is
+            empty (that's itself a meaningful in-game signal). */}
+        {(state.pool ?? 0) > 0 && (
+          <div
+            className="gameroom-bank-banner"
+            style={{
+              position: 'absolute', top: 6, left: '50%', transform: 'translateX(-50%)',
+              background: 'rgba(15, 11, 8, 0.6)',
+              color: '#F4ECD8',
+              padding: '0.25rem 0.7rem', borderRadius: 4,
+              border: '1px solid rgba(212, 171, 103, 0.4)',
+              fontSize: '0.72rem',
+              display: 'inline-flex', alignItems: 'baseline', gap: 6,
+              zIndex: 5,
+            }}
+            aria-live="polite"
+            aria-label={`${t('pool')} ${state.pool}`}
+          >
+            <span className="eyebrow" style={{ fontSize: '0.58rem', color: '#E0BA78', letterSpacing: '0.12em' }}>
+              {t('pool')}
+            </span>
+            <span className="mono" style={{ fontWeight: 700 }}>{state.pool}</span>
+          </div>
+        )}
         {showAfkBar && (
           <div
             className="gameroom-afk-banner"
             style={{
-              position: 'absolute', top: 6, left: '50%', transform: 'translateX(-50%)',
+              // Sits below the bank banner (top: 36 vs bank's top: 6) so
+              // the two coexist without overlap when both are visible.
+              position: 'absolute', top: (state.pool ?? 0) > 0 ? 36 : 6, left: '50%', transform: 'translateX(-50%)',
               background: 'rgba(0,0,0,0.45)', color: 'var(--paper)',
               padding: '0.2rem 0.6rem', borderRadius: 4, fontSize: '0.72rem',
               fontFamily: 'var(--mono)',
@@ -441,6 +470,18 @@ export function GameMobile({
           danger
           onConfirm={() => { leave(); navigate('/') }}
           onCancel={() => setShowLeaveConfirm(false)}
+        />
+      )}
+      {/* G101h: lone-survivor modal — see Game.jsx for the same wiring.
+          Renders only when (1) someone got AFK-evicted, (2) it wasn't us,
+          (3) we're now alone in the room. Auto-clears on next joiner. */}
+      {state.playerEvicted
+        && state.playerEvicted.playerId !== playerId
+        && (state.players || []).length <= 1 && (
+        <OpponentLeftWaitingOverlay
+          t={t}
+          opponentName={state.playerEvicted.playerName}
+          onLeave={() => { leave(); navigate('/') }}
         />
       )}
     </div>
