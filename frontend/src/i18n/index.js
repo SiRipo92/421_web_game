@@ -425,6 +425,13 @@ const I18N = {
     evicted_intro: "Vous êtes resté(e) inactif(ve) pendant {mins} minute(s). Le bot a joué pour vous, puis votre place a été libérée pour permettre à d'autres joueurs de continuer.",
     evicted_stats_note: "Cette partie a été comptabilisée comme perdue. Une perte d'Elo limitée a été appliquée.",
     evicted_back_home: "Retour à l'accueil",
+    // G101h: survivor's modal when the only opponent gets AFK-evicted
+    opponent_left_eyebrow: "PARTIE EN PAUSE",
+    opponent_left_title: "{name} a quitté la table",
+    opponent_left_default_name: "Votre adversaire",
+    opponent_left_body: "Votre adversaire a été retiré(e) pour inactivité. La partie reprend dès qu'un(e) nouveau/nouvelle joueur·euse rejoint la salle.",
+    opponent_left_waiting: "En attente de joueurs…",
+    opponent_left_leave: "Quitter la salle",
     // G90 admin dashboard rebuild
     admin_summary_online: "Joueurs en ligne",
     admin_panel_users_body_g90: "Recherche, filtres, sanctions, suppressions — tout ce qu'il faut pour gérer la communauté.",
@@ -1269,6 +1276,13 @@ const I18N = {
     evicted_intro: "You were inactive for {mins} minute(s). The bot played for you, then your seat was freed up for other players.",
     evicted_stats_note: "This partie was counted as lost. A modest Elo loss was applied.",
     evicted_back_home: "Back to home",
+    // G101h: survivor's modal when the only opponent gets AFK-evicted
+    opponent_left_eyebrow: "PARTIE PAUSED",
+    opponent_left_title: "{name} left the table",
+    opponent_left_default_name: "Your opponent",
+    opponent_left_body: "Your opponent was removed for inactivity. The partie will resume as soon as another player joins the room.",
+    opponent_left_waiting: "Waiting for more players…",
+    opponent_left_leave: "Leave the room",
     // G90 admin dashboard rebuild
     admin_summary_online: "Players online",
     admin_panel_users_body_g90: "Search, filter, sanction, delete — everything needed to manage the community.",
