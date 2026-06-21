@@ -1741,6 +1741,44 @@ The affected player was **registered**, not a guest. Two corrections to the orig
 
 **Priority:** higher than G101j once g.i (pool stability) lands, because this is the most likely real explanation for the "stats disappeared" reports.
 
+#### 101l. Admin audit-history JSON overflows its container (raw, unstyled)
+
+**Symptom:** On the profile-details / Audit History surface in the admin panel, the audit entries render their raw JSON payload as an unformatted string that overflows its own container on both mobile and desktop — it blows past the card width instead of wrapping/scrolling, and reads as a developer dump rather than a presentable record.
+
+**Likely cause:** the audit value is being rendered directly (e.g. `JSON.stringify` without indentation, or the raw object string) into a block with no `overflow`/`white-space`/`max-width` containment and no monospace/pretty-print treatment.
+
+**Scope:**
+- Add a small shared JSON-presentation component (e.g. `JsonBlock.jsx`) that pretty-prints (`JSON.stringify(value, null, 2)`), renders in a contained, scrollable, themed `<pre>` (monospace, `overflow:auto`, `max-width:100%`, wraps long strings), and is theme-aware (light/dark).
+- **Apply it everywhere JSON currently surfaces in the UI** — audit history first, then any other admin/debug surface that prints raw payloads. Treat "any JSON shown to a human must be elegant + contained" as the standing rule.
+- Optional: collapse/expand toggle for large payloads.
+
+**Acceptance:**
+- Audit History on a 360px viewport and on desktop: JSON stays inside its card, is indented/readable, scrolls rather than overflows, and matches the active theme.
+- No raw single-line JSON dumps remain in any user-visible admin surface.
+
+**Effort:** ~2–3 hours (component + sweep of call sites).
+
+#### 101m. Opening "who-goes-first" roll hangs on a tie — no re-roll prompt, no toast, requires refresh
+
+**Symptom:** During the `INITIAL_ROLL` phase (the per-player single-die roll that sets play order), when two clients roll the **same** value the screen gets stuck. Observed cross-device: the mobile client had rolled and registered a value, but the desktop client never updated to reflect that a re-roll was now required — it sat there until the page was manually refreshed, after which the roll button became available again. Nothing told the player a tie had happened.
+
+**Backend is actually correct:** `_finalize_order` (`app/game/logic.py:318`) detects the lowest-value tie, resets the tied players' `initial_rolls` back to `None`, logs `log_tie` ("Égalité ! … doivent relancer."), and the `initial_roll` handler rebroadcasts `game_state` (`app/game/ws.py:1091-1102`). So the tie → re-roll transition *is* sent to all clients.
+
+**Likely cause (frontend):**
+- The desktop client doesn't react to `state.initial_rolls[me]` flipping from a number back to `null` — the roll affordance stays latched in its "you already rolled" state instead of re-enabling, so the player can't re-roll without a remount (refresh). Audit the INITIAL_ROLL render path in `Game.jsx`/`GameMobile.jsx` + `useGame.js` for stale local state shadowing the server `initial_rolls`.
+- The `log_tie` event only lands in the journal drawer; there is no foreground announcement, so even when the state does update the player gets no explanation.
+
+**Scope:**
+- Frontend: drive the roll button's enabled/disabled state purely from `state.initial_rolls[playerId] === null` (server-authoritative), so a tie-reset re-enables it live with no refresh.
+- Surface a toast/announcement on `log_tie` (and ideally on order-set): e.g. "Tie — rolling again to decide who starts." Wire through the same announcement layer tracked in G101e.
+- Add a frontend reproduction in the e2e suite: two clients forced to identical opening rolls → both see the re-roll prompt + toast without reload.
+
+**Acceptance:**
+- Two clients roll equal opening values → both immediately see a "tie, re-roll" toast and a live-enabled roll button; neither needs to refresh.
+- The journal still records `log_tie`; the foreground toast auto-dismisses after the standard interval.
+
+**Effort:** ~half a day (frontend state fix + toast wiring + e2e repro). Depends loosely on G101e's announcement layer for the toast surface.
+
 ### G100. (legacy — superseded by G100a + G100b) Pre-launch infra bundle — CI/CD redeploy, code quality sweep, Sphinx + ReadTheDocs, README
 **Why:** Three things that are loosely-coupled but all touch "the project's exterior surface" — what someone sees in the README, what the docs site looks like, and what happens when you push to main. Bundling them keeps the review focused on infrastructure / DX rather than product behaviour.
 
