@@ -218,9 +218,9 @@ async def test_admin_kick_removes_player_and_chat_bans_user(client, make_user):
     # in-memory player slot via game.user_ids.
     target_data = make_user("kicked")
     target_reg = await client.post("/auth/register", json=target_data)
-    assert (
-        target_reg.status_code == 201
-    ), f"register failed: {target_reg.status_code} {target_reg.text}"
+    assert target_reg.status_code == 201, (
+        f"register failed: {target_reg.status_code} {target_reg.text}"
+    )
     target_uid = (
         await client.get(
             "/auth/me", headers={"Authorization": f"Bearer {target_reg.json()['access_token']}"}
