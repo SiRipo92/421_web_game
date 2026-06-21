@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Die } from '../components/shared/Die.jsx'
 import { Avatar } from '../components/shared/Avatar.jsx'
-import { ChipStack } from '../components/shared/ChipStack.jsx'
 import { CommentaryTicker, ScoreToBeatBanner } from '../components/shared/CommentaryTicker.jsx'
 import { BottomSheet } from '../components/shared/BottomSheet.jsx'
 import { HierarchyModal } from '../components/shared/HierarchyModal.jsx'
@@ -181,15 +180,17 @@ export function GameMobile({
             >
               {(() => {
                 const inPlay = (state.players || []).reduce((s, p) => s + (p.tokens || 0), 0)
+                // User feedback (2026-06-21 mobile playtest): the ChipStack
+                // visual covers Score-to-Beat banner + dice cluster at narrow
+                // viewports. Drop the visual on mobile and keep just the
+                // text label — desktop keeps the visual via Game.jsx.
                 return (
-                  <>
-                    {inPlay > 0 && <ChipStack count={inPlay} size="large" />}
-                    <span className="gameroom-pool-label eyebrow" style={{
-                      fontSize: '0.78rem', color: 'var(--paper-deep)', letterSpacing: '0.12em',
-                    }}>
-                      {t('chips_in_play')} · <span className="mono" style={{ fontSize: '0.95rem', fontWeight: 700 }}>{inPlay}</span>
-                    </span>
-                  </>
+                  <span className="gameroom-pool-label eyebrow" style={{
+                    fontSize: '0.78rem', color: 'var(--paper-deep)', letterSpacing: '0.12em',
+                    background: 'rgba(15, 11, 8, 0.6)', padding: '0.3rem 0.7rem', borderRadius: 4,
+                  }}>
+                    {t('chips_in_play')} · <span className="mono" style={{ fontSize: '0.95rem', fontWeight: 700 }}>{inPlay}</span>
+                  </span>
                 )
               })()}
             </div>
@@ -323,13 +324,12 @@ export function GameMobile({
             replacing the previous bottom-right Quit which moved to the
             header. */}
         <div className="gameroom-dock-secondary" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-          <button
-            type="button"
-            onClick={() => setOpenDrawer('journal')}
-            style={mobileDockBtn()}
-            aria-label={t('log_subtitle')}
-            className="gameroom-journal-btn"
-          >📰</button>
+          {/* User feedback (2026-06-21): the L'Ardoise journal drawer is
+              desktop-only friendly. On mobile the opponent-play toast +
+              live ticker cover the same surface with less drawer-tap
+              friction. Journal button removed from the mobile dock. The
+              MobileOpponentPlayToast still opens the journal drawer on
+              tap for users who want the full history. */}
           <button
             type="button"
             onClick={() => setOpenDrawer('live')}

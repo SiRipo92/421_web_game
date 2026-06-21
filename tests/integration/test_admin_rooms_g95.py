@@ -38,6 +38,7 @@ async def _promote(user_id: str, role: str) -> None:
 async def _make_admin(client, make_user, prefix: str = "adm") -> tuple[dict, str, str]:
     data = make_user(prefix)
     reg = await client.post("/auth/register", json=data)
+    assert reg.status_code == 201, f"register failed: {reg.status_code} {reg.text}"
     token = reg.json()["access_token"]
     me = await client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
     uid = me.json()["id"]
@@ -84,6 +85,7 @@ async def test_list_rooms_requires_moderator(client, make_user):
     """Plain player gets 403."""
     data = make_user("plain")
     reg = await client.post("/auth/register", json=data)
+    assert reg.status_code == 201, f"register failed: {reg.status_code} {reg.text}"
     token = reg.json()["access_token"]
     r = await client.get("/api/admin/rooms", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 403
@@ -93,6 +95,9 @@ async def test_dissolve_requires_admin(client, make_user):
     """Moderators can list/broadcast/kick but NOT dissolve."""
     mod_data = make_user("mod_dis")
     mod_reg = await client.post("/auth/register", json=mod_data)
+    # G101g.ii: defensive — turn a silent register failure into a loud
+    # assertion with the response body, instead of a KeyError downstream.
+    assert mod_reg.status_code == 201, f"register failed: {mod_reg.status_code} {mod_reg.text}"
     mod_token = mod_reg.json()["access_token"]
     mod_uid = (
         await client.get("/auth/me", headers={"Authorization": f"Bearer {mod_token}"})
@@ -213,6 +218,9 @@ async def test_admin_kick_removes_player_and_chat_bans_user(client, make_user):
     # in-memory player slot via game.user_ids.
     target_data = make_user("kicked")
     target_reg = await client.post("/auth/register", json=target_data)
+    assert target_reg.status_code == 201, (
+        f"register failed: {target_reg.status_code} {target_reg.text}"
+    )
     target_uid = (
         await client.get(
             "/auth/me", headers={"Authorization": f"Bearer {target_reg.json()['access_token']}"}
