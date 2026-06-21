@@ -1648,24 +1648,37 @@ User registered cleanly (username + email validated, password match, age > 15, T
 
 **Priority:** g.i (the asyncpg pool) is **launch-quality urgent** because it potentially causes G101b (stats not saving — could be the same root cause: connection dies on partie-end commit). g.ii is high-priority but not urgent — it's a "we can't diagnose what we can't see" gap.
 
-#### 101j. Diagnose the recurring `websocket.server` Sentry signal on guest/anonymous sessions
+#### 101j. RESOLVED-BY-G101g.i — Sentry `Failed to persist player session` was Neon auto-suspend, not a guest issue
 
-**Symptom (reported 2026-06-21 from mobile + Sentry):** while playing on prod without a registered account (anonymous session), the player had to manually leave the game and Sentry showed a recurring `websocket.server` span (`Origin: auto.http.starlette`, `Status: unknown`). User hypothesis: guest-stats persistence is throwing because there's no user_id to write to. Linked issue: `https://openclassrooms-56.sentry.io/issues/129246142/`.
+**Original report (2026-06-21):** while playing on prod, a player got stuck and had to manually leave. Sentry showed a recurring event ([issue 129246142](https://openclassrooms-56.sentry.io/issues/129246142/)) on the `websocket.server` span. User hypothesis: guest-stats persistence was throwing because there's no user_id to write to.
 
-**Diagnostic gap:** the signal pasted is a Starlette-instrumented **trace span**, not an exception event. `Status: unknown` is the default WS span status and doesn't itself indicate failure. We need the actual issue event (exception type + stack frames) — agent tools can't authenticate to Sentry, so this has to be pulled manually via:
-- Sentry UI → Issues tab → event → "JSON" / "Stack trace" view
-- OR `sentry-cli issues events --issue 129246142` if the CLI is wired
+**Actual root cause (after pulling the event JSON):**
 
-**What the code review already ruled out:** persistence paths look guarded. `app/services/game_persistence.py:159-272` uses `.get()` + `if not uid_str: continue` everywhere it touches `user_ids`. `app/services/afk_eviction.py:200-209` checks `user_id_str` truthy before calling `persist_player_session`. The path that persists at partie-end (`app/game/logic.py:588-600 → _persist_partie_and_reset`) routes through those guarded helpers. **The "guest can't persist" hypothesis is plausible but the code doesn't currently match it** — meaning either: (a) there's an unguarded path the audit missed, (b) the error is in a different layer (WS lifecycle, Sentry SDK itself), or (c) it's actually a benign span being misread as an error.
+```
+Type:      InterfaceError
+Value:     <class 'asyncpg.exceptions._base.InterfaceError'>: connection is closed
+Logger:    app.services.game_persistence
+Mechanism: logging   handled: yes
+Frame:     persist_player_session  app/services/game_persistence.py:100
+SQL:       SELECT player_stats.... FROM player_stats WHERE player_stats.user_id = $1::UUID
+Param:     UUID('b3b565f6-f9b4-438a-89d7-417a8ae85895')   ← a REAL user, not a guest
+Game:      B6E0918D     manches_played=14, manches_lost=10, round_points=1
+```
 
-**Acceptance:**
-- Real exception type + top-3 frames captured from the linked Sentry issue
-- If the bug is real: targeted regression test that drives a guest player through partie-end + asserts no error + no DB write attempt
-- If the bug is benign noise: tune Sentry's `before_send` filter to drop the noisy `websocket.server` spans with `Status: unknown` so it stops surfacing as a real signal
+The affected player was **registered**, not a guest. Two corrections to the original hypothesis:
 
-**Effort:** 30 min to triage once the actual event is in hand. Fix scope depends on what it reveals.
+1. The error has nothing to do with guests. The persistence path doesn't even reach DB-touching code for guests (no user_id → early return). All guest guards in `game_persistence.py:159-272`, `afk_eviction.py:200-209`, and `_persist_partie_and_reset` were already correctly in place.
+2. The error IS the Neon-auto-suspend connection-pool bug already captured as **G101g.i**. SQLAlchemy borrowed a pooled asyncpg connection that Neon had silently closed during idle; asyncpg's `_check_open()` at `asyncpg/connection.py:1605` raised `InterfaceError('connection is closed')` on the next query.
 
-**Blocked on:** human access to Sentry UI to copy the event details — WebFetch hits the login wall, no auth'd MCP surface configured.
+**Resolution:** `fix/neon-pool-stability` branch (commit `98cb69a`) adds `pool_pre_ping=True` + `pool_recycle=300` to `create_async_engine` in `app/db/base.py`. Once merged + deployed, the pool tests each connection with a cheap `SELECT 1` before handing it out — stale connections get transparently replaced.
+
+**Verification after deploy:**
+- Idle the prod app for 10+ minutes (Neon auto-suspends after ~5 min)
+- Drive a partie to its end → `persist_player_session` should succeed
+- Sentry issue 129246142 should stop receiving new events
+- If it doesn't stop, investigate whether `pool_pre_ping` is misbehaving on Neon specifically (some older Neon issues with `SELECT 1`-style probes are documented)
+
+**Status:** diagnosis complete, fix already in flight on `fix/neon-pool-stability`. Closing this entry once that PR merges + the Sentry event-stream goes quiet for 24h.
 
 #### 101k. Mid-partie disconnect silently loses stats for registered players
 
