@@ -26,7 +26,29 @@ def _strip_sslmode(url: str) -> str:
     return urlunparse(parsed._replace(query=cleaned_query))
 
 
-engine = create_async_engine(_strip_sslmode(settings.database_url), echo=settings.debug)
+engine = create_async_engine(
+    _strip_sslmode(settings.database_url),
+    echo=settings.debug,
+    # G101g.i: serverless Postgres providers (Neon, Supabase, Fly Postgres
+    # with auto-stop) suspend the compute node after a few minutes of
+    # inactivity. The pool's existing connections become stale; the next
+    # query fails with `asyncpg.InterfaceError: connection is closed` —
+    # which is what crashed an AFK eviction's audit-log INSERT on prod
+    # (Sentry 805d5c9c…, 2026-06-21). Two complementary defences:
+    #
+    # `pool_pre_ping=True` runs a cheap `SELECT 1` before every checkout
+    #   and silently discards dead connections, refreshing them. Cost:
+    #   ~1 ms per checkout in the healthy case. Standard pattern for
+    #   any managed Postgres deployment.
+    #
+    # `pool_recycle=300` force-recycles any connection older than 5 min
+    #   even if pre-ping would have said it's healthy. Belt-and-suspenders
+    #   against edge cases where the server hangs up without closing the
+    #   socket — the next pre-ping might still see "open" until TCP
+    #   timeout.
+    pool_pre_ping=True,
+    pool_recycle=300,
+)
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 
