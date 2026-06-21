@@ -1,2 +1,13 @@
+# Public site: allow indexing of everything user-facing.
+# Block API + internal routes — search engines have no business crawling
+# them and indexed admin URLs would be an information leak.
 User-agent: *
 Allow: /
+Disallow: /api/
+Disallow: /auth/
+Disallow: /ws/
+Disallow: /admin/
+Disallow: /healthz
+Disallow: /docs
+
+Sitemap: https://421bistro.com/sitemap.xml

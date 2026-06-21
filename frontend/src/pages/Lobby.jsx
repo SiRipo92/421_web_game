@@ -80,26 +80,14 @@ export function Lobby({ token }) {
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }} className="card" role="list">
-          <div style={{
-            display: 'grid', gridTemplateColumns: '1fr auto auto auto auto', gap: 16,
-            padding: '0.8rem 1.4rem', background: 'var(--paper-deep)', borderBottom: '1px solid var(--rule)',
-            alignItems: 'center',
-          }}>
+          <div className="lobby-rooms-header">
             <div className="eyebrow">{t('host_col')}</div>
             <div className="eyebrow">{t('players_label')}</div>
             <div className="eyebrow">Banque</div>
             <div className="eyebrow" />
           </div>
-          {rooms.map((room, i) => (
-            <div
-              key={room.game_id}
-              role="listitem"
-              style={{
-                display: 'grid', gridTemplateColumns: '1fr auto auto auto', gap: 16,
-                padding: '1rem 1.4rem', alignItems: 'center',
-                borderBottom: i < rooms.length - 1 ? '1px dashed var(--rule)' : 'none',
-              }}
-            >
+          {rooms.map((room) => (
+            <div key={room.game_id} role="listitem" className="lobby-rooms-row">
               <div>
                 <div className="serif" style={{ fontWeight: 600, fontSize: '1.1rem' }}>
                   {room.host_name || '?'}
@@ -108,12 +96,14 @@ export function Lobby({ token }) {
                   #{room.game_id}
                 </div>
               </div>
-              <div className="mono" style={{ fontSize: '0.9rem', whiteSpace: 'nowrap' }}>
-                {room.player_count}/{room.max_players} {t('players_label')}
+              <div className="lobby-rooms-row-meta">
+                <div className="mono" style={{ fontSize: '0.9rem', whiteSpace: 'nowrap' }}>
+                  {room.player_count}/{room.max_players} {t('players_label')}
+                </div>
+                <span className={`tag ${room.bank_rule === 'sec' ? 'tag-rouge' : 'tag-felt'}`}>
+                  {room.bank_rule === 'sec' ? 'Sec' : t('free_play').split(' ')[0]}
+                </span>
               </div>
-              <span className={`tag ${room.bank_rule === 'sec' ? 'tag-rouge' : 'tag-felt'}`}>
-                {room.bank_rule === 'sec' ? 'Sec' : t('free_play').split(' ')[0]}
-              </span>
               <button
                 type="button"
                 className="btn btn-primary"

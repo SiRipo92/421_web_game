@@ -781,6 +781,54 @@ input, textarea, select { font-family: inherit; }
   }
 }
 
+/* Lobby public-rooms list: 4-column desktop grid that stacks vertically
+   on mobile. At narrow widths the original "1fr auto auto auto" layout
+   pushed the Join button off-screen (reported: only "Dealer's" + cut-off
+   join visible on a 360 px viewport).
+
+   Mobile pattern: host info on top (with room code), then a small
+   metadata row (player count + bank tag), then a full-width Join
+   button. Tap target stays ≥ 44 px. The header row is hidden on mobile
+   because its columns wouldn't align with the stacked cards anyway. */
+.lobby-rooms-header,
+.lobby-rooms-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  gap: 16px;
+  padding: 1rem 1.4rem;
+  align-items: center;
+}
+.lobby-rooms-header {
+  padding: 0.8rem 1.4rem;
+  background: var(--paper-deep);
+  border-bottom: 1px solid var(--rule);
+}
+.lobby-rooms-row + .lobby-rooms-row {
+  border-top: 1px dashed var(--rule);
+}
+.lobby-rooms-row-meta {
+  display: contents;
+}
+
+@media (max-width: 640px) {
+  .lobby-rooms-header { display: none; }
+  .lobby-rooms-row {
+    grid-template-columns: 1fr;
+    gap: 12px;
+    padding: 1rem 1.1rem;
+  }
+  .lobby-rooms-row-meta {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .lobby-rooms-row .btn {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
 /* G64 follow-up: under ~400 px the mobile dock's turn-hint string was the
    widest non-button element. Even with minWidth: 0 + ellipsis it claimed
    layout space that pushed the dock buttons toward the edges. Hide the
